@@ -128,6 +128,10 @@ dependencies {
     implementation(libs.androidx.material3.adaptive)
     implementation(libs.androidx.material3.adaptive.layout)
 
+    // LiteRT-LM 本地大模型推理
+    implementation(libs.litertlm.android)
+    implementation(libs.gson)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))

@@ -106,4 +106,35 @@
 
     <!-- 通用 -->
     <string name="back">返回</string>
+
+    <!-- 模型管理 -->
+    <string name="model_select_model">选择模型</string>
+    <string name="model_loading">模型加载中…</string>
+    <string name="model_no_model">未加载模型</string>
+    <string name="model_load_local">加载本地模型</string>
+    <string name="model_no_models_found">未找到 .litertlm 模型文件</string>
+    <string name="model_ready">模型就绪</string>
+    <string name="model_error">模型加载失败</string>
+    <string name="model_refresh">刷新</string>
+    <string name="model_unload">卸载模型</string>
+    <string name="model_browse_file">浏览本地文件…</string>
+    <string name="model_recommended_section">▼ 推荐下载模型（下载到系统下载目录）</string>
+    <string name="model_params_title">模型参数</string>
+    <string name="model_params_topk">Top-K</string>
+    <string name="model_params_topp">Top-P</string>
+    <string name="model_params_temperature">Temperature</string>
+    <string name="model_params_seed">Seed</string>
+    <string name="model_params_apply">应用参数</string>
+    <string name="model_download_progress">下载中…</string>
+    <string name="model_download_complete">下载完成 ✓</string>
+    <string name="model_download_error">下载失败</string>
+    <string name="model_download_retry">重试</string>
+    <string name="model_download_scan">扫描已下载模型</string>
+    <string name="model_download_to_dir">下载到系统下载目录</string>
+    <string name="model_scan_device">扫描设备</string>
+    <string name="model_browse_file_btn">浏览文件</string>
+    <string name="chat_cancel">取消</string>
+    <string name="chat_clear">清空对话</string>
+    <string name="chat_streaming">生成中…</string>
+
 </resources>

@@ -48,6 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.template.jh.R
+import com.template.jh.core.ai.ChatViewModel
 
 // 中间主内容区
 @Composable
@@ -56,7 +57,9 @@ fun MainContentArea(
     onCloseSettings: () -> Unit = {},
     onOpenFolder: () -> Unit = {},
     onNewProject: () -> Unit = {},
-    onCloneGit: () -> Unit = {}
+    onCloneGit: () -> Unit = {},
+    chatViewModel: ChatViewModel? = null,
+    onBrowseModelFile: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -76,7 +79,11 @@ fun MainContentArea(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
             )
             // 设置内容
-            SettingsPane(modifier = Modifier.weight(1f))
+            SettingsPane(
+                modifier = Modifier.weight(1f),
+                chatViewModel = chatViewModel,
+                onBrowseModelFile = onBrowseModelFile,
+            )
         } else {
             // 欢迎页
             Box(

@@ -105,4 +105,34 @@
 
     <!-- Common -->
     <string name="back">Back</string>
+
+    <!-- Model Management -->
+    <string name="model_select_model">Select Model</string>
+    <string name="model_loading">Loading model…</string>
+    <string name="model_no_model">No model loaded</string>
+    <string name="model_load_local">Load Local Model</string>
+    <string name="model_no_models_found">No .litertlm model files found</string>
+    <string name="model_ready">Model ready</string>
+    <string name="model_error">Model load failed</string>
+    <string name="model_refresh">Refresh</string>
+    <string name="model_unload">Unload Model</string>
+    <string name="model_browse_file">Browse local file…</string>
+    <string name="model_recommended_section">▼ Recommended Downloads (download to system Downloads dir)</string>
+    <string name="model_params_title">Model Parameters</string>
+    <string name="model_params_topk">Top-K</string>
+    <string name="model_params_topp">Top-P</string>
+    <string name="model_params_temperature">Temperature</string>
+    <string name="model_params_seed">Seed</string>
+    <string name="model_params_apply">Apply Parameters</string>
+    <string name="model_download_progress">Downloading…</string>
+    <string name="model_download_complete">Download complete ✓</string>
+    <string name="model_download_error">Download failed</string>
+    <string name="model_download_retry">Retry</string>
+    <string name="model_download_scan">Scan downloaded model</string>
+    <string name="model_download_to_dir">Download to system Downloads</string>
+    <string name="model_scan_device">Scan device</string>
+    <string name="model_browse_file_btn">Browse files</string>
+    <string name="chat_cancel">Cancel</string>
+    <string name="chat_clear">Clear Chat</string>
+    <string name="chat_streaming">Generating…</string>
 </resources>

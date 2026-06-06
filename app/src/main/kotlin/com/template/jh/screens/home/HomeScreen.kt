@@ -1,5 +1,8 @@
 package com.template.jh.screens.home
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +18,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.window.core.layout.WindowSizeClass
 import com.template.jh.R
 import com.template.jh.ui.adaptive.rememberWindowSizeClass
+import com.template.jh.core.ai.ChatViewModel
 import com.template.jh.screens.home.components.ThreeColumnLayout
 import com.template.jh.screens.home.components.Sidebar
 import com.template.jh.screens.home.components.SidebarTab
@@ -29,10 +33,18 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = koinViewModel(),
+    chatViewModel: ChatViewModel = koinViewModel(),
 ) {
     val windowSizeClass = rememberWindowSizeClass()
     var selectedTab by remember { mutableStateOf<SidebarTab?>(null) }
     var isSettingsOpen by remember { mutableStateOf(false) }
+
+    // SAF 文件选择器（必须放在可直接访问 Activity 的 Composable 层级）
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { chatViewModel.loadModelFromUri(it) }
+    }
 
     Scaffold(
         topBar = {
@@ -63,12 +75,17 @@ fun HomeScreen(
                     onCloseSettings = { isSettingsOpen = false },
                     onOpenFolder = {},
                     onNewProject = {},
-                    onCloneGit = {}
+                    onCloneGit = {},
+                    chatViewModel = chatViewModel,
+                    onBrowseModelFile = {
+                        filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                    },
                 )
             },
             rightPanel = {
                 AIChatPanel(
-                    onSettingsClick = { isSettingsOpen = true }
+                    onSettingsClick = { isSettingsOpen = true },
+                    viewModel = chatViewModel,
                 )
             },
             modifier = Modifier

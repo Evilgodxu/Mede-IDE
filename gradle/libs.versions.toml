@@ -20,6 +20,8 @@ koin = "4.2.1"
 datastore = "1.2.1"
 adaptive = "1.2.0"
 coroutinesTest = "1.11.0"
+litertlm-android = "0.13.0"
+gson = "2.11.0"
 
 [libraries]
 
@@ -58,3 +60,6 @@ androidx-compose-material-icons-extended = { group = "androidx.compose.material"
 
 # Coroutines Test
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutinesTest" }
+
+litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version.ref = "litertlm-android" }
+gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }

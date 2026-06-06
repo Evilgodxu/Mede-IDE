@@ -47,3 +47,49 @@
 -keepclassmembers class * {
     @androidx.navigation.NavType <fields>;
 }
+
+# ============================================================
+# LiteRT-LM (JNI 反射 + native 异常查找)
+# native 代码通过 FindClass 按字符串名查找类，必须保留原名
+# ============================================================
+-keep class com.google.ai.edge.litertlm.LiteRtLmJniException { *; }
+-keep class com.google.ai.edge.litertlm.LiteRtLmJni { *; }
+-keep class com.google.ai.edge.litertlm.LiteRtLmJni$* { *; }
+-keep class com.google.ai.edge.litertlm.NativeLibraryLoader { *; }
+-keep class com.google.ai.edge.litertlm.Engine { *; }
+-keep class com.google.ai.edge.litertlm.Conversation { *; }
+-keep class com.google.ai.edge.litertlm.EngineConfig { *; }
+-keep class com.google.ai.edge.litertlm.ConversationConfig { *; }
+-keep class com.google.ai.edge.litertlm.Config* { *; }
+-keep class com.google.ai.edge.litertlm.Message { *; }
+-keep class com.google.ai.edge.litertlm.Message$* { *; }
+-keep class com.google.ai.edge.litertlm.Contents { *; }
+-keep class com.google.ai.edge.litertlm.Contents$* { *; }
+-keep class com.google.ai.edge.litertlm.Content { *; }
+-keep class com.google.ai.edge.litertlm.Content$* { *; }
+-keep class com.google.ai.edge.litertlm.Role { *; }
+-keep class com.google.ai.edge.litertlm.Backend { *; }
+-keep class com.google.ai.edge.litertlm.Backend$* { *; }
+-keep class com.google.ai.edge.litertlm.SamplerConfig { *; }
+-keep class com.google.ai.edge.litertlm.LogSeverity { *; }
+-keep class com.google.ai.edge.litertlm.ExperimentalFlags { *; }
+-keep class com.google.ai.edge.litertlm.JsonConvertersKt { *; }
+-keep class com.google.ai.edge.litertlm.ToolManager { *; }
+-keep class com.google.ai.edge.litertlm.ToolProvider { *; }
+-keep class com.google.ai.edge.litertlm.ToolSet { *; }
+-keep class com.google.ai.edge.litertlm.OpenApiTool { *; }
+-keep class com.google.ai.edge.litertlm.ToolCall { *; }
+-keep class com.google.ai.edge.litertlm.Channel { *; }
+-keep class com.google.ai.edge.litertlm.LoraConfig { *; }
+-keep class com.google.ai.edge.litertlm.Session { *; }
+-keep class com.google.ai.edge.litertlm.SessionConfig { *; }
+-keep class com.google.ai.edge.litertlm.MessageCallback { *; }
+-keep class com.google.ai.edge.litertlm.MessageCallback$* { *; }
+-keep class com.google.ai.edge.litertlm.BenchmarkInfo { *; }
+-keep class com.google.ai.edge.litertlm.Capabilities { *; }
+
+# Gson (LiteRT-LM 依赖)
+-keep class com.google.gson.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
+-dontwarn com.google.gson.**
