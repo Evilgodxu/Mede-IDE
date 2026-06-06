@@ -26,7 +26,6 @@ import org.koin.androidx.compose.koinViewModel
 // 主屏幕，三列布局：侧边栏+可展开面板、中间主内容、右侧AI协作
 @Composable
 fun HomeScreen(
-    onNavigateToSettings: () -> Unit,
     viewModel: HomeViewModel = koinViewModel(),
 ) {
     val windowSizeClass = rememberWindowSizeClass()
@@ -37,7 +36,6 @@ fun HomeScreen(
         topBar = {
             MainTopBar(
                 windowSizeClass = windowSizeClass,
-                onNavigateToSettings = onNavigateToSettings
             )
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),

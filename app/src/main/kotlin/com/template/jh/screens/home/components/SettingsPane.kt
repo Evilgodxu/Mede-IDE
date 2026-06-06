@@ -29,9 +29,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.template.jh.R
-import com.template.jh.screens.settings.SettingsViewModel
-import com.template.jh.screens.settings.components.ThemeSettingsCard
-import com.template.jh.screens.settings.components.LanguageSettingsCard
+import com.template.jh.screens.home.HomeUiState
+import com.template.jh.screens.home.HomeViewModel
 import org.koin.androidx.compose.koinViewModel
 
 // 设置分类枚举
@@ -50,7 +49,7 @@ enum class SettingsCategory(
 @Composable
 fun SettingsPane(
     modifier: Modifier = Modifier,
-    viewModel: SettingsViewModel = koinViewModel()
+    viewModel: HomeViewModel = koinViewModel()
 ) {
     val state by viewModel.state.collectAsState()
     var selectedCategory by remember { mutableStateOf(SettingsCategory.General) }
@@ -135,7 +134,7 @@ private fun SettingsCategoryItem(
 @Composable
 private fun SettingsCategoryContent(
     category: SettingsCategory,
-    state: com.template.jh.screens.settings.SettingsUiState,
+    state: HomeUiState,
     onSetThemeMode: (String) -> Unit,
     onSetLanguage: (String) -> Unit
 ) {

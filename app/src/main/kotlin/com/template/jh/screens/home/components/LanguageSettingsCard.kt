@@ -1,4 +1,4 @@
-package com.template.jh.screens.settings.components
+package com.template.jh.screens.home.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -27,13 +27,13 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.template.jh.R
-import com.template.jh.screens.settings.SettingsUiState
+import com.template.jh.screens.home.HomeUiState
 
-// 主题设置卡片
+// 语言设置卡片
 @Composable
-fun ThemeSettingsCard(
-    state: SettingsUiState,
-    onSetThemeMode: (String) -> Unit,
+fun LanguageSettingsCard(
+    state: HomeUiState,
+    onSetLanguage: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -54,7 +54,7 @@ fun ThemeSettingsCard(
         ) {
             // 标题
             Text(
-                text = stringResource(R.string.settings_theme_title),
+                text = stringResource(R.string.settings_language_title),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.SemiBold,
@@ -62,14 +62,14 @@ fun ThemeSettingsCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            val themeOptions = listOf(
-                "system" to stringResource(R.string.theme_system),
-                "light" to stringResource(R.string.theme_light),
-                "dark" to stringResource(R.string.theme_dark),
+            val languageOptions = listOf(
+                "system" to stringResource(R.string.language_system),
+                "zh" to stringResource(R.string.language_chinese),
+                "en" to stringResource(R.string.language_english),
             )
 
-            themeOptions.forEachIndexed { index, (value, label) ->
-                val isSelected = state.themeMode == value
+            languageOptions.forEachIndexed { index, (value, label) ->
+                val isSelected = state.language == value
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -83,7 +83,7 @@ fun ThemeSettingsCard(
                         )
                         .selectable(
                             selected = isSelected,
-                            onClick = { onSetThemeMode(value) },
+                            onClick = { onSetLanguage(value) },
                             role = Role.RadioButton,
                         )
                         .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -112,7 +112,7 @@ fun ThemeSettingsCard(
                     )
                 }
 
-                if (index < themeOptions.lastIndex) {
+                if (index < languageOptions.lastIndex) {
                     Spacer(modifier = Modifier.height(6.dp))
                 }
             }
