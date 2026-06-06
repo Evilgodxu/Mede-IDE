@@ -53,6 +53,8 @@ fun AIChatPanel(
     onNewTaskClick: () -> Unit = {},
     onHistoryClick: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+
     Column(
         modifier = Modifier.fillMaxSize()
     ) {
@@ -113,10 +115,14 @@ fun AIChatPanel(
                     )
                 }
 
-                // IDE 设置（预留功能）
+                // IDE 设置
                 IconButton(
                     onClick = {
-                        // 预留功能，暂不实现
+                        try {
+                            onSettingsClick()
+                        } catch (e: Exception) {
+                            copyCrashToClipboard(context, "IDE设置", e)
+                        }
                     },
                     modifier = Modifier.size(32.dp)
                 ) {
@@ -181,7 +187,6 @@ fun AIChatPanel(
         ) {
             var inputText by remember { mutableStateOf("") }
             var selectedModel by remember { mutableStateOf("Kimi K2.5") }
-            val context = LocalContext.current
 
             Column(
                 modifier = Modifier.fillMaxWidth()

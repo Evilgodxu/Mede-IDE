@@ -31,6 +31,7 @@ fun HomeScreen(
 ) {
     val windowSizeClass = rememberWindowSizeClass()
     var selectedTab by remember { mutableStateOf<SidebarTab?>(null) }
+    var isSettingsOpen by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -58,6 +59,8 @@ fun HomeScreen(
             isLeftPanelVisible = selectedTab != null,
             centerContent = {
                 MainContentArea(
+                    isSettingsOpen = isSettingsOpen,
+                    onCloseSettings = { isSettingsOpen = false },
                     onOpenFolder = {},
                     onNewProject = {},
                     onCloneGit = {}
@@ -65,7 +68,7 @@ fun HomeScreen(
             },
             rightPanel = {
                 AIChatPanel(
-                    onSettingsClick = onNavigateToSettings
+                    onSettingsClick = { isSettingsOpen = true }
                 )
             },
             modifier = Modifier
