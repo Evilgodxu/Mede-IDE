@@ -233,6 +233,12 @@ fun AIChatPanel(
                     )
                 }
 
+                // 模型选择与输入框之间的分隔线
+                HorizontalDivider(
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                )
+
                 // 输入框
                 TextField(
                     value = inputText,
@@ -240,7 +246,7 @@ fun AIChatPanel(
                     placeholder = {
                         Text(
                             text = stringResource(R.string.chat_with_agent),
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.outline
                         )
                     },
@@ -251,7 +257,14 @@ fun AIChatPanel(
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent
                     ),
+                    textStyle = MaterialTheme.typography.bodySmall,
                     maxLines = 4
+                )
+
+                // 输入框与底部栏之间的分隔线
+                HorizontalDivider(
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                 )
 
                 // 底部工具栏

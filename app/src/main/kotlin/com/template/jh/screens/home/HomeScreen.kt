@@ -82,10 +82,7 @@ private fun LeftPanelContent(
     when (selectedTab) {
         SidebarTab.Explorer -> {
             ResourcePanel(
-                onOpenFolder = {},
-                onNewProject = {},
-                onCloneGit = {},
-                onConnectRemote = {}
+                onOpenFolder = {}
             )
         }
         SidebarTab.Search -> {

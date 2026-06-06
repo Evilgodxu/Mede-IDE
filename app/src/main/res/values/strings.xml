@@ -12,12 +12,13 @@
 
     <!-- 资源管理器 -->
     <string name="resource_manager_title">资源管理器</string>
-    <string name="no_folder_opened">无打开的文件夹</string>
-    <string name="open_folder">打开文件夹</string>
+    <string name="no_folder_opened">尚未打开文件夹</string>
+    
+
+    <!-- 中间面板 -->
     <string name="new_project">新建项目</string>
+    <string name="open_folder">打开文件夹</string>
     <string name="clone_git_repo">克隆 Git 仓库</string>
-    <string name="connect_remote_host">连接远程主机</string>
-    <string name="new_file">新建文件</string>
     <string name="recent_projects">最近</string>
 
     <!-- AI 协作 -->
