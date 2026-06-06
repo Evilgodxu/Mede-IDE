@@ -84,6 +84,11 @@
     <string name="settings_category_rules">规则</string>
     <string name="settings_tab_name">IDE设置</string>
 
+    <!-- Tab 操作 -->
+    <string name="tab_close_all">不保存关闭</string>
+    <string name="tab_save_and_close">保存并关闭</string>
+    <string name="tab_more">更多操作</string>
+
     <!-- 通用 -->
     <string name="back">返回</string>
 </resources>
