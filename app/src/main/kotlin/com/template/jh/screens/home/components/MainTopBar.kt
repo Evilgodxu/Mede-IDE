@@ -82,8 +82,7 @@ fun MainTopBar(
 
                         DropdownMenu(
                             expanded = fileMenuExpanded,
-                            onDismissRequest = { fileMenuExpanded = false },
-                            modifier = Modifier.fillMaxWidth()
+                            onDismissRequest = { fileMenuExpanded = false }
                         ) {
                             // 新建文件
                             DropdownMenuItem(
