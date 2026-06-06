@@ -1,30 +1,108 @@
 <resources>
-    <string name="app_name">My Application</string>
+    <string name="app_name">Android AI IDE</string>
 
-    <!-- 主页 -->
-    <string name="home_title">Home</string>
-    <string name="home_welcome">Welcome</string>
-    <string name="home_welcome_subtitle">This is a sample app with adaptive layout support</string>
-    <string name="home_feature_1">Adaptive Layout</string>
-    <string name="home_feature_1_desc">Automatically adjusts layout based on screen size</string>
-    <string name="home_feature_2">Multi-language Support</string>
-    <string name="home_feature_2_desc">Supports Chinese and English switching</string>
+    <!-- Explorer -->
+    <string name="resource_manager_title">Explorer</string>
+    <string name="no_folder_opened">No folder opened</string>
 
-    <!-- 设置页 -->
+    <!-- Center Panel -->
+    <string name="new_project">New Project</string>
+    <string name="open_folder">Open Folder</string>
+    <string name="clone_git_repo">Clone Git Repository</string>
+    <string name="recent_projects">Recent</string>
+
+    <!-- AI Collaboration -->
+    <string name="trae_title">Chat</string>
+    <string name="ai_collaboration_title">Collaborate with Agent</string>
+    <string name="ai_collaboration_subtitle">Write code and perform routine dev tasks with flexible MCP configuration</string>
+    <string name="chat_with_agent">Chat with Agent</string>
+
+    <!-- Menu -->
+    <string name="menu_file">File</string>
+    <string name="menu_edit">Edit</string>
+    <string name="menu_terminal">Terminal</string>
+
+    <!-- File Menu -->
+    <string name="file_menu_new_file">New File</string>
+    <string name="file_menu_open_file">Open File</string>
+    <string name="file_menu_recent_files">Recent Files</string>
+    <string name="file_menu_save">Save</string>
+    <string name="file_menu_save_as">Save As</string>
+    <string name="file_menu_save_all">Save All</string>
+    <string name="file_menu_auto_save">Auto Save</string>
+
+    <!-- Edit Menu -->
+    <string name="edit_menu_undo">Undo</string>
+    <string name="edit_menu_redo">Redo</string>
+    <string name="edit_menu_cut">Cut</string>
+    <string name="edit_menu_copy">Copy</string>
+    <string name="edit_menu_paste">Paste</string>
+    <string name="edit_menu_find">Find</string>
+    <string name="edit_menu_replace">Replace</string>
+    <string name="edit_menu_find_in_files">Find in Files</string>
+    <string name="edit_menu_replace_in_files">Replace in Files</string>
+
+    <!-- Global Search Panel -->
+    <string name="global_search_title">Search</string>
+    <string name="global_search_refresh">Refresh</string>
+    <string name="global_search_clear">Clear Results</string>
+    <string name="global_search_replace_all">Replace All</string>
+    <string name="global_search_search_hint">Search</string>
+    <string name="global_search_replace_hint">Replace</string>
+
+    <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_theme_title">Theme</string>
     <string name="settings_language_title">Language</string>
 
-    <!-- 主题选项 -->
+    <!-- Theme Options -->
     <string name="theme_system">System</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
 
-    <!-- 语言选项 -->
+    <!-- Language Options -->
     <string name="language_system">System</string>
     <string name="language_chinese">简体中文</string>
     <string name="language_english">English</string>
 
-    <!-- 通用 -->
+    <!-- Settings Categories -->
+    <string name="settings_category_general">General</string>
+    <string name="settings_category_mcp">MCP</string>
+    <string name="settings_category_skill">Skill</string>
+    <string name="settings_category_model">Model</string>
+    <string name="settings_category_conversation">Conversation</string>
+    <string name="settings_category_rules">Rules</string>
+    <string name="settings_tab_name">IDE Settings</string>
+
+    <!-- Tab Actions -->
+    <string name="tab_close_all">Close Without Saving</string>
+    <string name="tab_save_and_close">Save and Close</string>
+    <string name="tab_more">More Actions</string>
+    <string name="tab_close">Close</string>
+
+    <!-- Sidebar -->
+    <string name="source_control">Source Control</string>
+    <string name="preview">Preview</string>
+    <string name="extensions">Extensions</string>
+
+    <!-- AI Actions -->
+    <string name="ai_new_task">New Task</string>
+    <string name="ai_history">History</string>
+    <string name="ai_ide_settings">IDE Settings</string>
+    <string name="ai_add_file">Add File</string>
+    <string name="ai_add_image">Add Image</string>
+    <string name="ai_optimize_input">Optimize Input</string>
+    <string name="ai_voice_input">Voice Input</string>
+    <string name="ai_send_message">Send Message</string>
+
+    <!-- Settings Panel -->
+    <string name="loading">Loading…</string>
+    <string name="settings_category_mcp_desc">MCP Server Configuration</string>
+    <string name="settings_category_skill_desc">AI Skill Management</string>
+    <string name="settings_category_model_desc">Model Selection \&amp; Configuration</string>
+    <string name="settings_category_conversation_desc">Conversation Settings</string>
+    <string name="settings_category_rules_desc">Rules Configuration</string>
+
+    <!-- Common -->
     <string name="back">Back</string>
 </resources>

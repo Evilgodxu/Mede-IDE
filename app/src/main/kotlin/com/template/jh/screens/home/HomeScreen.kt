@@ -11,7 +11,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.window.core.layout.WindowSizeClass
+import com.template.jh.R
 import com.template.jh.ui.adaptive.rememberWindowSizeClass
 import com.template.jh.screens.home.components.ThreeColumnLayout
 import com.template.jh.screens.home.components.Sidebar
@@ -112,7 +114,7 @@ private fun SourceControlPanel() {
         contentAlignment = androidx.compose.ui.Alignment.Center
     ) {
         androidx.compose.material3.Text(
-            text = "代码管理",
+            text = stringResource(R.string.source_control),
             style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -126,7 +128,7 @@ private fun PreviewPanel() {
         contentAlignment = androidx.compose.ui.Alignment.Center
     ) {
         androidx.compose.material3.Text(
-            text = "预览",
+            text = stringResource(R.string.preview),
             style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -140,7 +142,7 @@ private fun ExtensionsPanel() {
         contentAlignment = androidx.compose.ui.Alignment.Center
     ) {
         androidx.compose.material3.Text(
-            text = "扩展",
+            text = stringResource(R.string.extensions),
             style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
         )

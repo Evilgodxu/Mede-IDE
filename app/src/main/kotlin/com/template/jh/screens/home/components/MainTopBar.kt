@@ -352,13 +352,13 @@ fun MainTopBar(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Search,
-                            contentDescription = "搜索",
+                            contentDescription = stringResource(R.string.global_search_search_hint),
                             modifier = Modifier.size(18.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "搜索",
+                            text = stringResource(R.string.global_search_search_hint),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

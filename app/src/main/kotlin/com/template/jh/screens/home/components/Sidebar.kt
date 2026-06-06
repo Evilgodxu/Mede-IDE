@@ -23,7 +23,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.template.jh.R
 
 enum class SidebarTab {
     Explorer, Search, SourceControl, Preview, Extensions
@@ -50,35 +52,35 @@ fun Sidebar(
         ) {
             SidebarItem(
                 icon = Icons.Default.Folder,
-                contentDescription = "资源管理器",
+                contentDescription = stringResource(R.string.resource_manager_title),
                 isSelected = selectedTab == SidebarTab.Explorer,
                 onClick = { onTabClick(SidebarTab.Explorer) }
             )
 
             SidebarItem(
                 icon = Icons.Default.Search,
-                contentDescription = "全局搜索",
+                contentDescription = stringResource(R.string.global_search_title),
                 isSelected = selectedTab == SidebarTab.Search,
                 onClick = { onTabClick(SidebarTab.Search) }
             )
 
             SidebarItem(
                 icon = Icons.Default.Source,
-                contentDescription = "代码管理",
+                contentDescription = stringResource(R.string.source_control),
                 isSelected = selectedTab == SidebarTab.SourceControl,
                 onClick = { onTabClick(SidebarTab.SourceControl) }
             )
 
             SidebarItem(
                 icon = Icons.Default.PlayArrow,
-                contentDescription = "预览",
+                contentDescription = stringResource(R.string.preview),
                 isSelected = selectedTab == SidebarTab.Preview,
                 onClick = { onTabClick(SidebarTab.Preview) }
             )
 
             SidebarItem(
                 icon = Icons.Default.Extension,
-                contentDescription = "扩展",
+                contentDescription = stringResource(R.string.extensions),
                 isSelected = selectedTab == SidebarTab.Extensions,
                 onClick = { onTabClick(SidebarTab.Extensions) }
             )

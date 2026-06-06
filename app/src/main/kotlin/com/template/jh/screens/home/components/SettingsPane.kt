@@ -162,7 +162,7 @@ private fun SettingsCategoryContent(
             SettingsCategory.General -> {
                 if (state.isLoading) {
                     Text(
-                        text = "加载中…",
+                        text = stringResource(R.string.loading),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -180,19 +180,19 @@ private fun SettingsCategoryContent(
                 }
             }
             SettingsCategory.MCP -> {
-                CategoryPlaceholder(text = "MCP 服务器配置")
+                CategoryPlaceholder(text = stringResource(R.string.settings_category_mcp_desc))
             }
             SettingsCategory.Skill -> {
-                CategoryPlaceholder(text = "AI 技能管理")
+                CategoryPlaceholder(text = stringResource(R.string.settings_category_skill_desc))
             }
             SettingsCategory.Model -> {
-                CategoryPlaceholder(text = "模型选择与配置")
+                CategoryPlaceholder(text = stringResource(R.string.settings_category_model_desc))
             }
             SettingsCategory.Conversation -> {
-                CategoryPlaceholder(text = "对话设置")
+                CategoryPlaceholder(text = stringResource(R.string.settings_category_conversation_desc))
             }
             SettingsCategory.Rules -> {
-                CategoryPlaceholder(text = "规则配置")
+                CategoryPlaceholder(text = stringResource(R.string.settings_category_rules_desc))
             }
         }
     }

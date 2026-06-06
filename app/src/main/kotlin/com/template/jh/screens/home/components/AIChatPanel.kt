@@ -90,7 +90,7 @@ fun AIChatPanel(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
-                        contentDescription = "新建任务",
+                        contentDescription = stringResource(R.string.ai_new_task),
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -109,7 +109,7 @@ fun AIChatPanel(
                 ) {
                     Icon(
                         imageVector = Icons.Default.History,
-                        contentDescription = "历史对话",
+                        contentDescription = stringResource(R.string.ai_history),
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -128,7 +128,7 @@ fun AIChatPanel(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Settings,
-                        contentDescription = "IDE设置",
+                        contentDescription = stringResource(R.string.ai_ide_settings),
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -261,7 +261,7 @@ fun AIChatPanel(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.AttachFile,
-                                contentDescription = "添加文件",
+                                contentDescription = stringResource(R.string.ai_add_file),
                                 modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -280,7 +280,7 @@ fun AIChatPanel(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Image,
-                                contentDescription = "添加图片",
+                                contentDescription = stringResource(R.string.ai_add_image),
                                 modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -299,7 +299,7 @@ fun AIChatPanel(
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.AutoFixHigh,
-                                contentDescription = "优化输入内容",
+                                contentDescription = stringResource(R.string.ai_optimize_input),
                                 modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -318,7 +318,7 @@ fun AIChatPanel(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Mic,
-                                contentDescription = "语音输入",
+                                contentDescription = stringResource(R.string.ai_voice_input),
                                 modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -342,7 +342,7 @@ fun AIChatPanel(
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "发送信息",
+                            contentDescription = stringResource(R.string.ai_send_message),
                             modifier = Modifier.size(20.dp),
                             tint = if (inputText.isNotEmpty()) {
                                 MaterialTheme.colorScheme.primary
