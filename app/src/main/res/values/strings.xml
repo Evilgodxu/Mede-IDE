@@ -52,6 +52,14 @@
     <string name="edit_menu_find_in_files">在文件中查找</string>
     <string name="edit_menu_replace_in_files">在文件中替换</string>
 
+    <!-- 全局搜索面板 -->
+    <string name="global_search_title">全局搜索</string>
+    <string name="global_search_refresh">刷新</string>
+    <string name="global_search_clear">清除搜索结果</string>
+    <string name="global_search_replace_all">全部替换</string>
+    <string name="global_search_search_hint">搜索</string>
+    <string name="global_search_replace_hint">替换</string>
+
     <!-- 设置页 -->
     <string name="settings_title">设置</string>
     <string name="settings_theme_title">主题设置</string>

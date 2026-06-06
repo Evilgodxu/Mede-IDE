@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -228,8 +227,7 @@ fun AIChatPanel(
                         unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                     ),
                     textStyle = MaterialTheme.typography.bodySmall,
-                    maxLines = 2,
-                    shape = RoundedCornerShape(8.dp)
+                    maxLines = 2
                 )
 
                 // 底部工具栏
