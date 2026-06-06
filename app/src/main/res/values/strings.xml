@@ -41,6 +41,17 @@
     <string name="file_menu_save_all">全部保存</string>
     <string name="file_menu_auto_save">自动保存</string>
 
+    <!-- 编辑菜单 -->
+    <string name="edit_menu_undo">撤销</string>
+    <string name="edit_menu_redo">恢复</string>
+    <string name="edit_menu_cut">剪切</string>
+    <string name="edit_menu_copy">复制</string>
+    <string name="edit_menu_paste">粘贴</string>
+    <string name="edit_menu_find">查找</string>
+    <string name="edit_menu_replace">替换</string>
+    <string name="edit_menu_find_in_files">在文件中查找</string>
+    <string name="edit_menu_replace_in_files">在文件中替换</string>
+
     <!-- 设置页 -->
     <string name="settings_title">设置</string>
     <string name="settings_theme_title">主题设置</string>

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -38,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -58,8 +60,11 @@ fun MainTopBar(
     }
 
     var fileMenuExpanded by remember { mutableStateOf(false) }
+    var editMenuExpanded by remember { mutableStateOf(false) }
     var autoSaveEnabled by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    val dropdownMaxHeight = (screenHeightDp * 0.75f).dp
 
     Column {
         TopAppBar(
@@ -82,7 +87,8 @@ fun MainTopBar(
 
                         DropdownMenu(
                             expanded = fileMenuExpanded,
-                            onDismissRequest = { fileMenuExpanded = false }
+                            onDismissRequest = { fileMenuExpanded = false },
+                            modifier = Modifier.heightIn(max = dropdownMaxHeight)
                         ) {
                             // 新建文件
                             DropdownMenuItem(
@@ -188,14 +194,134 @@ fun MainTopBar(
                     )
 
                     // 编辑
-                    Text(
-                        text = stringResource(R.string.menu_edit),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier
-                            .clickable { }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
+                    Box {
+                        Text(
+                            text = stringResource(R.string.menu_edit),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier
+                                .clickable { editMenuExpanded = true }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+
+                        DropdownMenu(
+                            expanded = editMenuExpanded,
+                            onDismissRequest = { editMenuExpanded = false },
+                            modifier = Modifier.heightIn(max = dropdownMaxHeight)
+                        ) {
+                            // 撤销
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.edit_menu_undo)) },
+                                onClick = {
+                                    try {
+                                        // 撤销逻辑
+                                        editMenuExpanded = false
+                                    } catch (e: Exception) {
+                                        copyCrashToClipboard(context, e)
+                                    }
+                                }
+                            )
+                            // 恢复
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.edit_menu_redo)) },
+                                onClick = {
+                                    try {
+                                        // 恢复逻辑
+                                        editMenuExpanded = false
+                                    } catch (e: Exception) {
+                                        copyCrashToClipboard(context, e)
+                                    }
+                                }
+                            )
+                            HorizontalDivider()
+                            // 剪切
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.edit_menu_cut)) },
+                                onClick = {
+                                    try {
+                                        // 剪切逻辑
+                                        editMenuExpanded = false
+                                    } catch (e: Exception) {
+                                        copyCrashToClipboard(context, e)
+                                    }
+                                }
+                            )
+                            // 复制
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.edit_menu_copy)) },
+                                onClick = {
+                                    try {
+                                        // 复制逻辑
+                                        editMenuExpanded = false
+                                    } catch (e: Exception) {
+                                        copyCrashToClipboard(context, e)
+                                    }
+                                }
+                            )
+                            // 粘贴
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.edit_menu_paste)) },
+                                onClick = {
+                                    try {
+                                        // 粘贴逻辑
+                                        editMenuExpanded = false
+                                    } catch (e: Exception) {
+                                        copyCrashToClipboard(context, e)
+                                    }
+                                }
+                            )
+                            HorizontalDivider()
+                            // 查找
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.edit_menu_find)) },
+                                onClick = {
+                                    try {
+                                        // 查找逻辑
+                                        editMenuExpanded = false
+                                    } catch (e: Exception) {
+                                        copyCrashToClipboard(context, e)
+                                    }
+                                }
+                            )
+                            // 替换
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.edit_menu_replace)) },
+                                onClick = {
+                                    try {
+                                        // 替换逻辑
+                                        editMenuExpanded = false
+                                    } catch (e: Exception) {
+                                        copyCrashToClipboard(context, e)
+                                    }
+                                }
+                            )
+                            HorizontalDivider()
+                            // 在文件中查找
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.edit_menu_find_in_files)) },
+                                onClick = {
+                                    try {
+                                        // 在文件中查找逻辑
+                                        editMenuExpanded = false
+                                    } catch (e: Exception) {
+                                        copyCrashToClipboard(context, e)
+                                    }
+                                }
+                            )
+                            // 在文件中替换
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.edit_menu_replace_in_files)) },
+                                onClick = {
+                                    try {
+                                        // 在文件中替换逻辑
+                                        editMenuExpanded = false
+                                    } catch (e: Exception) {
+                                        copyCrashToClipboard(context, e)
+                                    }
+                                }
+                            )
+                        }
+                    }
 
                     Text(
                         text = "丨",
