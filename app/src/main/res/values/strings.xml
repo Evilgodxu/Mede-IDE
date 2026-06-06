@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">My Application</string>
+
+    <!-- 主页 -->
+    <string name="home_title">首页</string>
+    <string name="home_welcome">欢迎使用</string>
+    <string name="home_welcome_subtitle">这是一个支持自适应布局的示例应用</string>
+    <string name="home_feature_1">自适应布局</string>
+    <string name="home_feature_1_desc">根据设备屏幕尺寸自动调整布局</string>
+    <string name="home_feature_2">多语言支持</string>
+    <string name="home_feature_2_desc">支持中文和英文切换</string>
+
+    <!-- 设置页 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_theme_title">主题设置</string>
+    <string name="settings_language_title">语言设置</string>
+
+    <!-- 主题选项 -->
+    <string name="theme_system">跟随系统</string>
+    <string name="theme_light">始终浅色</string>
+    <string name="theme_dark">始终深色</string>
+
+    <!-- 语言选项 -->
+    <string name="language_system">跟随系统</string>
+    <string name="language_chinese">简体中文</string>
+    <string name="language_english">English</string>
+
+    <!-- 通用 -->
+    <string name="back">返回</string>
+</resources>
