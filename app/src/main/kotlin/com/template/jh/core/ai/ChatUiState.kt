@@ -1,6 +1,5 @@
 package com.template.jh.core.ai
 
-import com.template.jh.data.model.NotificationEventType
 import com.template.jh.data.model.TaskItem
 import java.util.UUID
 
@@ -44,13 +43,6 @@ data class ConversationEntry(
     val timestamp: Long = System.currentTimeMillis(),
 )
 
-// 对话流通知事件
-data class NotificationEvent(
-    val type: NotificationEventType,
-    val message: String,
-    val timestamp: Long = System.currentTimeMillis(),
-)
-
 // 聊天 UI 状态
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
@@ -77,17 +69,6 @@ data class ChatUiState(
     val taskList: List<TaskItem> = emptyList(),
     val fileChanges: List<FileChangeItem> = emptyList(),
     val isTaskListOpen: Boolean = false,
-    // 通知事件
-    val lastNotification: NotificationEvent? = null,
-    // 删除行为卡片开关
-    val deleteCardEnabled: Boolean = false,
-    val showToolCalls: Boolean = false, // 是否在对话中展示工具调用信息
-    // 上下文参考计数
-    val activeRulesCount: Int = 0,
-    val activeSkillsCount: Int = 0,
-    // 深度思考
-    val deepThinkEnabled: Boolean = true,
-    val thinkingRounds: Int = 2,
     // 云端模型
     val cloudModelEnabled: Boolean = false,
     val cloudModelProfiles: List<CloudModelProfile> = emptyList(),

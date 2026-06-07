@@ -137,14 +137,6 @@ fun AIChatPanel(
         }
     }
 
-    // 通知事件弹出提示
-    LaunchedEffect(state.lastNotification) {
-        state.lastNotification?.let { notif ->
-            kotlinx.coroutines.delay(4000)
-            viewModel.clearNotification()
-        }
-    }
-
     Column(modifier = Modifier.fillMaxSize()) {
         ChatTopBar(
             engineStatus = state.engineStatus,
@@ -159,11 +151,6 @@ fun AIChatPanel(
         )
 
         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-        // 通知横幅
-        state.lastNotification?.let { notif ->
-            NotificationBanner(notif)
-        }
 
         // 任务清单面板（始终可打开）
         if (state.isTaskListOpen) {
@@ -182,20 +169,14 @@ fun AIChatPanel(
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp),
                 state = listState, verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(state.messages, key = { it.id }) {
-                    if (it.isToolMessage && !state.showToolCalls) return@items
+                items(state.messages, key = { it.id }) { msg ->
                     ChatBubble(
-                        message = it,
+                        message = msg,
                         onFileCardClick = { path -> viewModel.requestOpenFile(path) },
-                        deleteCardEnabled = state.deleteCardEnabled,
-                        showContextBadge = it.role == ChatRole.Model && !it.isStreaming,
-                        activeRulesCount = state.activeRulesCount,
-                        activeSkillsCount = state.activeSkillsCount,
                         onAcceptAllChanges = { path -> viewModel.acceptAllChanges(path) },
                         onRejectAllChanges = { path -> viewModel.rejectAllChanges(path) },
                     )
                 }
-
             }
         }
 
@@ -226,8 +207,6 @@ fun AIChatPanel(
                 usedTokens = contextUsedTokens,
                 maxTokens = contextMaxTokens,
                 messagesCount = state.messages.size,
-                activeRulesCount = state.activeRulesCount,
-                activeSkillsCount = state.activeSkillsCount,
                 openedFilePaths = state.openedFilePaths,
                 onDismiss = { showContextInfoDialog = false },
             )
@@ -307,16 +286,11 @@ private fun EmptyChatState(engineStatus: EngineStatus) {
 private fun ChatBubble(
     message: ChatMessage,
     onFileCardClick: ((String) -> Unit)? = null,
-    deleteCardEnabled: Boolean = false,
-    showContextBadge: Boolean = false,
-    activeRulesCount: Int = 0,
-    activeSkillsCount: Int = 0,
     onAcceptAllChanges: ((String) -> Unit)? = null,
     onRejectAllChanges: ((String) -> Unit)? = null,
 ) {
     // 文件操作卡片
     message.fileOp?.let { op ->
-        if (op.opType == com.template.jh.core.ai.FileOpType.Delete && deleteCardEnabled) return
         FileOperationCard(
             op = op,
             onFileCardClick = onFileCardClick,
@@ -332,19 +306,11 @@ private fun ChatBubble(
     val context = LocalContext.current
 
     // 提取 [think]...[/think] 块
-    val thinkRegex = remember { Regex("""\[think\](.*?)\[/think\]""", RegexOption.DOT_MATCHES_ALL) }
+    val thinkRegex = remember { Regex("""\[think\](.*?)\[/think]""", RegexOption.DOT_MATCHES_ALL) }
     val thinks = remember(message.content) { thinkRegex.findAll(message.content).map { it.groupValues[1].trim() }.toList() }
     val displayContent = remember(message.content) { message.content.replace(thinkRegex, "").trim() }
 
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
-        if (showContextBadge) {
-            val parts = mutableListOf<String>()
-            if (activeRulesCount > 0) parts.add("参考${activeRulesCount}条规则")
-            if (activeSkillsCount > 0) parts.add("${activeSkillsCount}项技能")
-            if (parts.isNotEmpty()) {
-                ContextBadge(parts.joinToString(" · "))
-            }
-        }
         Text(if (isUser) "You" else "AI", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
 
         // 可折叠思考块
@@ -394,32 +360,6 @@ private fun ChatBubble(
                 Text(displayContent, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
             }
         }
-    }
-}
-
-@Composable
-private fun ContextBadge(text: String) {
-    Row(
-        modifier = Modifier
-            .background(
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                RoundedCornerShape(6.dp),
-            )
-            .padding(horizontal = 8.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Default.CheckCircle,
-            null,
-            Modifier.size(10.dp),
-            tint = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.width(4.dp))
-        Text(
-            text,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
     }
 }
 
@@ -612,43 +552,6 @@ private fun ChatInputBar(
     }
 }
 
-// 通知横幅
-@Composable
-private fun NotificationBanner(notif: com.template.jh.core.ai.NotificationEvent) {
-    val bgColor = when (notif.type) {
-        com.template.jh.data.model.NotificationEventType.TaskCompleted -> Color(0xFF4CAF50).copy(alpha = 0.15f)
-        com.template.jh.data.model.NotificationEventType.TaskFailed -> MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
-        com.template.jh.data.model.NotificationEventType.WaitingUserAction -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-    }
-    val textColor = when (notif.type) {
-        com.template.jh.data.model.NotificationEventType.TaskCompleted -> Color(0xFF4CAF50)
-        com.template.jh.data.model.NotificationEventType.TaskFailed -> MaterialTheme.colorScheme.error
-        com.template.jh.data.model.NotificationEventType.WaitingUserAction -> MaterialTheme.colorScheme.primary
-    }
-    val icon = when (notif.type) {
-        com.template.jh.data.model.NotificationEventType.TaskCompleted -> Icons.Default.CheckCircle
-        com.template.jh.data.model.NotificationEventType.TaskFailed -> Icons.Default.Error
-        com.template.jh.data.model.NotificationEventType.WaitingUserAction -> Icons.Default.Refresh
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(bgColor)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, Modifier.size(14.dp), tint = textColor)
-        Spacer(Modifier.width(8.dp))
-        Text(
-            notif.message,
-            style = MaterialTheme.typography.labelSmall,
-            color = textColor,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
 // 任务清单面板（双Tab：任务列表 + 文件列表）
 @Composable
 private fun TaskListPanel(
@@ -769,8 +672,6 @@ private fun ContextInfoDialog(
     usedTokens: Int,
     maxTokens: Int,
     messagesCount: Int,
-    activeRulesCount: Int,
-    activeSkillsCount: Int,
     openedFilePaths: List<String>,
     onDismiss: () -> Unit,
 ) {
@@ -826,20 +727,6 @@ private fun ContextInfoDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (activeRulesCount > 0 || activeSkillsCount > 0) {
-                    HorizontalDivider()
-                    Text("系统上下文", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
-                    if (activeRulesCount > 0) Text(
-                        text = "活跃规则: $activeRulesCount 条",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (activeSkillsCount > 0) Text(
-                        text = "活跃技能: $activeSkillsCount 项",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 if (openedFilePaths.isNotEmpty()) {
                     HorizontalDivider()
                     Text("已打开文件", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)

@@ -199,10 +199,17 @@ fun CodeEditor(
                 scrollState = scrollState,
                 hScrollState = hScrollState,
                 verticalPadding = verticalPadding,
-                onExitEditMode = { isEditMode = false }
+                onExitEditMode = { isEditMode = false },
+                onZoom = { zoom -> fontSizeSp = (fontSizeSp * zoom).coerceIn(8f, 32f) },
+                onDoubleTap = { isEditMode = true },
+                onLongPress = { selected, offset ->
+                    selectedText = selected
+                    menuOffset = offset
+                    showContextMenu = true
+                }
             )
         } else {
-            // 普通编辑模式
+            // 普通编辑模式（预览状态，支持手势）
             NormalEditMode(
                 text = text,
                 onTextChange = onTextChange,
@@ -214,7 +221,16 @@ fun CodeEditor(
                 scrollState = scrollState,
                 hScrollState = hScrollState,
                 verticalPadding = verticalPadding,
-                readOnly = readOnly
+                readOnly = readOnly,
+                isEditMode = isEditMode,
+                onZoom = { zoom -> fontSizeSp = (fontSizeSp * zoom).coerceIn(8f, 32f) },
+                onDoubleTap = { if (!readOnly) isEditMode = true },
+                onLongPress = { selected, offset ->
+                    selectedText = selected
+                    menuOffset = offset
+                    showContextMenu = true
+                },
+                onExitEditMode = { isEditMode = false }
             )
         }
 
@@ -451,78 +467,107 @@ private fun ReviewEditMode(
     hScrollState: androidx.compose.foundation.ScrollState,
     verticalPadding: Dp,
     onExitEditMode: () -> Unit,
+    onZoom: (Float) -> Unit,
+    onDoubleTap: () -> Unit,
+    onLongPress: (String, Offset) -> Unit,
 ) {
     val lineCount = text.text.lines().size.coerceAtLeast(1)
+    val lines = text.text.lines()
 
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(vertical = verticalPadding)
-    ) {
-        // 行号列
-        Column(
-            modifier = Modifier
-                .fillMaxHeight()
-                .width(lineNumWidth)
-                .verticalScroll(scrollState)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                .padding(horizontal = 4.dp),
-        ) {
-            for (i in 1..lineCount) {
-                val changeType = lineDiffs[i - 1]
-                val rowBg = when (changeType) {
-                    LineChangeType.Added -> Color(0x3322CC22)
-                    LineChangeType.Removed -> Color(0x33CC2222)
-                    LineChangeType.Modified -> Color(0x33CCAA00)
-                    else -> Color.Transparent
+            .pointerInput(Unit) {
+                coroutineScope {
+                    var zoom = 1f
+                    detectTransformGestures { _, _, gestureZoom, _ ->
+                        zoom = gestureZoom
+                        onZoom(zoom)
+                    }
                 }
-                Text(
-                    text = i.toString(),
-                    style = TextStyle(
+            }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = verticalPadding)
+        ) {
+            // 行号列
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(lineNumWidth)
+                    .verticalScroll(scrollState)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    .padding(horizontal = 4.dp),
+            ) {
+                for (i in 1..lineCount) {
+                    val changeType = lineDiffs[i - 1]
+                    val rowBg = when (changeType) {
+                        LineChangeType.Added -> Color(0x3322CC22)
+                        LineChangeType.Removed -> Color(0x33CC2222)
+                        LineChangeType.Modified -> Color(0x33CCAA00)
+                        else -> Color.Transparent
+                    }
+                    Text(
+                        text = i.toString(),
+                        style = TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = fontSizeSp.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            lineHeight = lineHeightSp.sp,
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Visible,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(lineHeightDp)
+                            .background(rowBg),
+                        textAlign = TextAlign.End,
+                    )
+                }
+            }
+
+            // 编辑器（支持手势）
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(scrollState)
+                    .horizontalScroll(hScrollState)
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onDoubleTap = { onDoubleTap() },
+                            onLongPress = { offset ->
+                                val lineIndex = (offset.y / lineHeightDp.toPx()).toInt()
+                                if (lineIndex in lines.indices) {
+                                    onLongPress(lines[lineIndex], offset)
+                                }
+                            }
+                        )
+                    }
+            ) {
+                BasicTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    readOnly = false,
+                    textStyle = TextStyle(
                         fontFamily = FontFamily.Monospace,
                         fontSize = fontSizeSp.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.onSurface,
                         lineHeight = lineHeightSp.sp,
                     ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Visible,
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    visualTransformation = if (lineDiffs.isNotEmpty()) {
+                        DiffHighlightTransformation(lineDiffs)
+                    } else {
+                        SyntaxHighlightTransformation()
+                    },
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(lineHeightDp)
-                        .background(rowBg),
-                    textAlign = TextAlign.End,
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp),
                 )
             }
-        }
-
-        // 编辑器
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .verticalScroll(scrollState)
-                .horizontalScroll(hScrollState)
-        ) {
-            BasicTextField(
-                value = text,
-                onValueChange = onTextChange,
-                readOnly = false,
-                textStyle = TextStyle(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = fontSizeSp.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    lineHeight = lineHeightSp.sp,
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                visualTransformation = if (lineDiffs.isNotEmpty()) {
-                    DiffHighlightTransformation(lineDiffs)
-                } else {
-                    SyntaxHighlightTransformation()
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp),
-            )
         }
     }
 }
@@ -543,88 +588,119 @@ private fun NormalEditMode(
     hScrollState: androidx.compose.foundation.ScrollState,
     verticalPadding: Dp,
     readOnly: Boolean,
+    isEditMode: Boolean,
+    onZoom: (Float) -> Unit,
+    onDoubleTap: () -> Unit,
+    onLongPress: (String, Offset) -> Unit,
+    onExitEditMode: () -> Unit,
 ) {
     val lineCount = text.text.lines().size.coerceAtLeast(1)
+    val lines = text.text.lines()
 
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(vertical = verticalPadding)
-    ) {
-        // 行号列
-        Column(
-            modifier = Modifier
-                .fillMaxHeight()
-                .width(lineNumWidth)
-                .verticalScroll(scrollState)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                .padding(horizontal = 4.dp),
-        ) {
-            for (i in 1..lineCount) {
-                val changeType = lineDiffs[i - 1]
-                val rowBg = when (changeType) {
-                    LineChangeType.Added -> Color(0x3322CC22)
-                    LineChangeType.Removed -> Color(0x33CC2222)
-                    LineChangeType.Modified -> Color(0x33CCAA00)
-                    else -> Color.Transparent
+            .pointerInput(Unit) {
+                coroutineScope {
+                    var zoom = 1f
+                    detectTransformGestures { _, _, gestureZoom, _ ->
+                        zoom = gestureZoom
+                        onZoom(zoom)
+                    }
                 }
-                Text(
-                    text = i.toString(),
-                    style = TextStyle(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = fontSizeSp.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        lineHeight = lineHeightSp.sp,
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Visible,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(lineHeightDp)
-                        .background(rowBg),
-                    textAlign = TextAlign.End,
-                )
             }
-        }
-
-        // 编辑器
-        Box(
+    ) {
+        Row(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .verticalScroll(scrollState)
-                .horizontalScroll(hScrollState)
+                .fillMaxSize()
+                .padding(vertical = verticalPadding)
         ) {
-            BasicTextField(
-                value = text,
-                onValueChange = onTextChange,
-                readOnly = readOnly,
-                textStyle = TextStyle(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = fontSizeSp.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    lineHeight = lineHeightSp.sp,
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                visualTransformation = SyntaxHighlightTransformation(),
+            // 行号列
+            Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp),
-                decorationBox = { innerTextField ->
-                    if (text.text.isEmpty()) {
-                        Text(
-                            text = "// 开始输入代码…",
-                            style = TextStyle(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = fontSizeSp.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                                lineHeight = lineHeightSp.sp,
-                            ),
+                    .fillMaxHeight()
+                    .width(lineNumWidth)
+                    .verticalScroll(scrollState)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    .padding(horizontal = 4.dp),
+            ) {
+                for (i in 1..lineCount) {
+                    val changeType = lineDiffs[i - 1]
+                    val rowBg = when (changeType) {
+                        LineChangeType.Added -> Color(0x3322CC22)
+                        LineChangeType.Removed -> Color(0x33CC2222)
+                        LineChangeType.Modified -> Color(0x33CCAA00)
+                        else -> Color.Transparent
+                    }
+                    Text(
+                        text = i.toString(),
+                        style = TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = fontSizeSp.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            lineHeight = lineHeightSp.sp,
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Visible,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(lineHeightDp)
+                            .background(rowBg),
+                        textAlign = TextAlign.End,
+                    )
+                }
+            }
+
+            // 编辑器（支持手势）
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(scrollState)
+                    .horizontalScroll(hScrollState)
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onDoubleTap = { onDoubleTap() },
+                            onLongPress = { offset ->
+                                val lineIndex = (offset.y / lineHeightDp.toPx()).toInt()
+                                if (lineIndex in lines.indices) {
+                                    onLongPress(lines[lineIndex], offset)
+                                }
+                            }
                         )
                     }
-                    innerTextField()
-                },
-            )
+            ) {
+                BasicTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    readOnly = readOnly || !isEditMode,
+                    textStyle = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = fontSizeSp.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        lineHeight = lineHeightSp.sp,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    visualTransformation = SyntaxHighlightTransformation(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp),
+                    decorationBox = { innerTextField ->
+                        if (text.text.isEmpty()) {
+                            Text(
+                                text = "// 开始输入代码…",
+                                style = TextStyle(
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = fontSizeSp.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                    lineHeight = lineHeightSp.sp,
+                                ),
+                            )
+                        }
+                        innerTextField()
+                    },
+                )
+            }
         }
     }
 }

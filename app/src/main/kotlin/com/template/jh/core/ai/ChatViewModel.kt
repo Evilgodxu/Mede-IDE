@@ -132,36 +132,6 @@ class ChatViewModel(
             }
         }
         viewModelScope.launch {
-            preferencesRepo.notificationSettings.collect { settings ->
-                _state.update { it.copy(deleteCardEnabled = settings.deleteCardEnabled) }
-            }
-        }
-        viewModelScope.launch {
-            preferencesRepo.showToolCalls.collect { enabled ->
-                _state.update { it.copy(showToolCalls = enabled) }
-            }
-        }
-        viewModelScope.launch {
-            preferencesRepo.rules.collect { rules ->
-                _state.update { it.copy(activeRulesCount = rules.count { r -> r.type == RuleType.Global || r.type == RuleType.Project }) }
-            }
-        }
-        viewModelScope.launch {
-            preferencesRepo.skills.collect { skills ->
-                _state.update { it.copy(activeSkillsCount = skills.count { it.enabled }) }
-            }
-        }
-        viewModelScope.launch {
-            preferencesRepo.deepThinkEnabled.collect { enabled ->
-                _state.update { it.copy(deepThinkEnabled = enabled) }
-            }
-        }
-        viewModelScope.launch {
-            preferencesRepo.thinkingRounds.collect { rounds ->
-                _state.update { it.copy(thinkingRounds = rounds) }
-            }
-        }
-        viewModelScope.launch {
             preferencesRepo.cloudModelEnabled.collect { enabled ->
                 _state.update { it.copy(cloudModelEnabled = enabled) }
             }
@@ -176,18 +146,6 @@ class ChatViewModel(
                 _state.update { it.copy(activeCloudProfileId = id) }
             }
         }
-    }
-
-    fun setShowToolCalls(enabled: Boolean) {
-        viewModelScope.launch { preferencesRepo.setShowToolCalls(enabled) }
-    }
-
-    fun setDeepThinkEnabled(enabled: Boolean) {
-        viewModelScope.launch { preferencesRepo.setDeepThinkEnabled(enabled) }
-    }
-
-    fun setThinkingRounds(rounds: Int) {
-        viewModelScope.launch { preferencesRepo.setThinkingRounds(rounds) }
     }
 
     fun setInputText(text: String) {
@@ -267,7 +225,6 @@ class ChatViewModel(
                 finalizeModelMessage(modelMsgId)
                 updateTaskStatus(taskId, TaskStatus.Failed)
                 ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "任务异常: ${e.message}", notifSettings)
-                emitNotification(NotificationEventType.TaskFailed, "任务异常: ${e.message}")
             }
         }
     }
@@ -297,18 +254,11 @@ class ChatViewModel(
         val ctx = getApplication<Application>()
         val notifSettings = runBlocking { preferencesRepo.notificationSettings.first() }
         ConversationNotifier.notify(ctx, NotificationEventType.WaitingUserAction, message, notifSettings)
-        emitNotification(NotificationEventType.WaitingUserAction, message)
     }
 
     private fun updateTaskStatus(taskId: String, status: TaskStatus) {
         _state.update { state -> state.copy(taskList = state.taskList.map { if (it.id == taskId) it.copy(status = status) else it }) }
     }
-
-    private fun emitNotification(type: NotificationEventType, message: String) {
-        _state.update { it.copy(lastNotification = NotificationEvent(type = type, message = message)) }
-    }
-
-    fun clearNotification() { _state.update { it.copy(lastNotification = null) } }
 
     fun setProjectRoot(uri: Uri?) {
         aiToolSet.projectUri = uri
@@ -421,6 +371,13 @@ class ChatViewModel(
     private fun buildSystemInstruction(): String {
         val sb = StringBuilder()
         sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简体中文).\n\n")
+        sb.append("## 对话规范（必须遵守）\n")
+        sb.append("- 无社交废话：不问候、不感谢、不道歉、不总结\n")
+        sb.append("- 无解释铺垫：不用'我来帮你解决'等引导句\n")
+        sb.append("- 最小有效长度：词 > 短语 > 短句 > 长句\n")
+        sb.append("- 仅必要信息：命令、路径、报错、数据、结论\n")
+        sb.append("- 输出格式：优先列表 / 代码块 / 键值对，避免段落\n")
+        sb.append("- 禁止重复：同一信息只出现一次\n\n")
         sb.append("## 核心规则\n")
         sb.append("- 用户要求修改/创建文件时，立即执行，不要请求确认。\n")
         sb.append("- 不要只提供代码建议——使用工具实际写入文件。\n")
@@ -524,7 +481,7 @@ class ChatViewModel(
             "readFile" -> aiToolSet.readFile(args["path"] ?: "")
             "writeFile" -> aiToolSet.writeFile(args["path"] ?: "", args["content"] ?: "")
             "replaceInFile" -> aiToolSet.replaceInFile(args["path"] ?: "", args["old_string"] ?: "", args["new_string"] ?: "")
-            "searchInFiles" -> aiToolSet.searchInFiles(args["query"] ?: "", args["extension"] ?: "")
+            "searchInFiles" -> aiToolSet.grep(args["query"] ?: "", args["extension"] ?: "")
             "runCommand" -> aiToolSet.runCommand(args["command"] ?: "")
             "searchWeb" -> aiToolSet.searchWeb(args["query"] ?: "")
             "gitStatus" -> aiToolSet.gitStatus()
@@ -569,7 +526,6 @@ class ChatViewModel(
                 updateModelMessage(currentMsgId, "\n\n[错误: ${t.message}]", false)
                 updateTaskStatus(taskId, TaskStatus.Failed)
                 ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "异常: ${t.message}", notif)
-                emitNotification(NotificationEventType.TaskFailed, "异常: ${t.message}")
             }.collect { chunk ->
                 val c = chunk.toString()
                 fullResponse.append(c)
@@ -581,7 +537,6 @@ class ChatViewModel(
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Completed)
                 ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成（空响应）", notif)
-                emitNotification(NotificationEventType.TaskCompleted, "任务完成")
                 return
             }
 
@@ -590,7 +545,6 @@ class ChatViewModel(
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Completed)
                 ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成", notif)
-                emitNotification(NotificationEventType.TaskCompleted, "任务完成")
                 return
             }
 
@@ -671,7 +625,6 @@ class ChatViewModel(
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Failed)
                 ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "云端模型异常: ${e.message}", notif)
-                emitNotification(NotificationEventType.TaskFailed, "云端模型异常: ${e.message}")
                 return
             }
 
@@ -680,7 +633,6 @@ class ChatViewModel(
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Completed)
                 ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成", notif)
-                emitNotification(NotificationEventType.TaskCompleted, "任务完成")
                 return
             }
 
@@ -691,7 +643,6 @@ class ChatViewModel(
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Completed)
                 ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成", notif)
-                emitNotification(NotificationEventType.TaskCompleted, "任务完成")
                 return
             }
 
@@ -847,7 +798,7 @@ class ChatViewModel(
                 ChatRole.User -> Message.user(msg.content)
                 ChatRole.Model -> Message.model(msg.content)
                 ChatRole.System -> Message.system(msg.content)
-                ChatRole.Tool -> null
+                ChatRole.Tool -> Message.tool(com.google.ai.edge.litertlm.Contents.of(listOf(com.google.ai.edge.litertlm.Content.ToolResponse("", msg.content))))
             }
         }
         _state.update { it.copy(messages = entry.messages, inputText = "", isLoading = false, activeConversationId = entry.id, isHistoryOpen = false) }

@@ -40,8 +40,6 @@ class HomeViewModel(
             combine(
                 userPreferencesRepository.themeMode,
                 userPreferencesRepository.language,
-                userPreferencesRepository.modelName,
-                userPreferencesRepository.userName,
                 userPreferencesRepository.rules,
                 userPreferencesRepository.skills,
                 userPreferencesRepository.mcpServers,
@@ -52,14 +50,12 @@ class HomeViewModel(
                     isLoading = false,
                     themeMode = values[0] as? String ?: "system",
                     language = values[1] as? String ?: "system",
-                    modelName = values[2] as? String ?: "",
-                    userName = values[3] as? String ?: "",
-                    rules = (values[4] as? List<Rule>) ?: emptyList(),
-                    skills = (values[5] as? List<SkillItem>) ?: emptyList(),
-                    mcpServers = (values[6] as? List<McpServer>) ?: emptyList(),
-                    notificationSettings = (values[7] as? NotificationSettings) ?: NotificationSettings(),
-                    openedFolderName = (values[8] as? FolderState)?.folderName,
-                    openedFolderUri = (values[8] as? FolderState)?.folderUri?.toString(),
+                    rules = (values[2] as? List<Rule>) ?: emptyList(),
+                    skills = (values[3] as? List<SkillItem>) ?: emptyList(),
+                    mcpServers = (values[4] as? List<McpServer>) ?: emptyList(),
+                    notificationSettings = (values[5] as? NotificationSettings) ?: NotificationSettings(),
+                    openedFolderName = (values[6] as? FolderState)?.folderName,
+                    openedFolderUri = (values[6] as? FolderState)?.folderUri?.toString(),
                 )
             }.collect { _state.value = it }
         }
@@ -230,18 +226,6 @@ class HomeViewModel(
     fun setLanguage(language: String) {
         viewModelScope.launch {
             userPreferencesRepository.setLanguage(language)
-        }
-    }
-
-    fun setModelName(name: String) {
-        viewModelScope.launch {
-            userPreferencesRepository.setModelName(name)
-        }
-    }
-
-    fun setUserName(name: String) {
-        viewModelScope.launch {
-            userPreferencesRepository.setUserName(name)
         }
     }
 

@@ -153,14 +153,63 @@ class FileManager(private val context: Context) {
     /**
      * 读取文件内容（带行号）
      * @param path 相对于项目根目录的文件路径
+     * @param offset 起始行号（1-based）
+     * @param limit 最大读取行数
      * @return 带行号的文件内容
      */
-    fun readFileWithLineNumbers(path: String): String {
+    fun readFileWithLineNumbers(path: String, offset: Int = 1, limit: Int = 1000): String {
         val text = readFileRaw(path) ?: return "File not found: $path"
-        val lineNumWidth = text.lines().size.toString().length
-        return text.lines().mapIndexed { i, line ->
-            "${(i + 1).toString().padStart(lineNumWidth)}: $line"
-        }.joinToString("\n")
+        val allLines = text.lines()
+        val startIdx = (offset - 1).coerceIn(0, allLines.size)
+        val endIdx = (startIdx + limit).coerceAtMost(allLines.size)
+        val lines = allLines.subList(startIdx, endIdx)
+        
+        val lineNumWidth = allLines.size.toString().length
+        return buildString {
+            if (startIdx > 0 || endIdx < allLines.size) {
+                appendLine("// Showing lines ${startIdx + 1}-$endIdx of ${allLines.size}")
+            }
+            lines.forEachIndexed { i, line ->
+                val lineNum = startIdx + i + 1
+                appendLine("${lineNum.toString().padStart(lineNumWidth)}: $line")
+            }
+        }.trimEnd()
+    }
+
+    /**
+     * 查看文件指定范围内容（优化版，适合大文件）
+     * @param path 相对于项目根目录的文件路径
+     * @param offset 起始行号（1-based）
+     * @param limit 最大读取行数
+     * @return 带行号的文件内容
+     */
+    fun viewFile(path: String, offset: Int = 1, limit: Int = 100): String {
+        val text = readFileRaw(path) ?: return "File not found: $path"
+        val allLines = text.lines()
+        val totalLines = allLines.size
+        val startIdx = (offset - 1).coerceIn(0, totalLines)
+        val endIdx = (startIdx + limit).coerceAtMost(totalLines)
+        
+        if (startIdx >= totalLines) {
+            return "File has $totalLines lines. Cannot start at line $offset."
+        }
+        
+        val lines = allLines.subList(startIdx, endIdx)
+        val lineNumWidth = totalLines.toString().length
+        
+        return buildString {
+            appendLine("// File: $path")
+            appendLine("// Lines ${startIdx + 1}-$endIdx of $totalLines")
+            appendLine("// ---")
+            lines.forEachIndexed { i, line ->
+                val lineNum = startIdx + i + 1
+                appendLine("${lineNum.toString().padStart(lineNumWidth)}: $line")
+            }
+            if (endIdx < totalLines) {
+                appendLine("// ---")
+                appendLine("// Use viewFile(path=\"$path\", offset=${endIdx + 1}, limit=$limit) to see more")
+            }
+        }.trimEnd()
     }
 
     /**
@@ -347,10 +396,374 @@ class FileManager(private val context: Context) {
         }
     }
 
+    /**
+     * Grep 搜索 - 正则表达式搜索文件内容
+     * @param pattern 正则表达式模式
+     * @param extension 文件扩展名过滤
+     * @param glob Glob 模式过滤
+     * @param ignoreCase 是否忽略大小写
+     * @param contextLines 上下文行数
+     * @return 搜索结果字符串
+     */
+    fun grep(
+        pattern: String,
+        extension: String = "",
+        glob: String = "",
+        ignoreCase: Boolean = true,
+        contextLines: Int = 2,
+    ): String {
+        val root = rootDocFile ?: return "No project folder is open."
+        if (pattern.isBlank()) return "Search pattern is empty."
+
+        return try {
+            val results = mutableListOf<GrepResult>()
+            val searchedFiles = mutableListOf<String>()
+            val regex = if (ignoreCase) {
+                Regex(pattern, RegexOption.IGNORE_CASE)
+            } else {
+                Regex(pattern)
+            }
+            val extLower = extension.lowercase().trimStart('.')
+
+            grepRecursive(root, "", regex, extLower, glob, results, searchedFiles, contextLines)
+
+            if (results.isEmpty()) {
+                buildString {
+                    appendLine("No matches found for pattern \"$pattern\"${if (extension.isNotBlank()) " in *.$extension files" else ""}.")
+                    appendLine("Searched ${searchedFiles.size} files.")
+                }
+            } else {
+                buildString {
+                    appendLine("Found ${results.size} match${if (results.size != 1) "es" else ""} for pattern \"$pattern\":")
+                    appendLine("---")
+                    results.take(30).forEach { result ->
+                        appendLine("${result.filePath}:${result.lineNumber}:")
+                        result.contextLines.forEach { (lineNum, line, isMatch) ->
+                            val marker = if (isMatch) ">>>" else "   "
+                            appendLine("$marker $lineNum: $line")
+                        }
+                        appendLine()
+                    }
+                    if (results.size > 30) appendLine("... and ${results.size - 30} more matches")
+                }.trimEnd()
+            }
+        } catch (e: Exception) {
+            Log.e("FileManager", "grep failed", e)
+            "Search failed: ${e.message}"
+        }
+    }
+
+    private data class GrepResult(
+        val filePath: String,
+        val lineNumber: Int,
+        val contextLines: List<Triple<Int, String, Boolean>>
+    )
+
+    private fun grepRecursive(
+        dirDoc: DocumentFile,
+        relativePath: String,
+        regex: Regex,
+        extLower: String,
+        glob: String,
+        results: MutableList<GrepResult>,
+        searchedFiles: MutableList<String>,
+        contextLines: Int,
+    ) {
+        if (results.size >= 50) return
+
+        val children = dirDoc.listFiles()
+
+        for (doc in children) {
+            val name = doc.name ?: continue
+            if (name.startsWith(".")) continue
+
+            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+
+            if (glob.isNotBlank() && !matchesGlob(name, glob)) continue
+
+            if (doc.isDirectory) {
+                if (currentPath.count { it == '/' } < 10) {
+                    grepRecursive(doc, currentPath, regex, extLower, glob, results, searchedFiles, contextLines)
+                }
+            } else {
+                val fileExt = name.substringAfterLast('.', "").lowercase()
+                if (extLower.isNotBlank()) {
+                    if (fileExt != extLower) continue
+                } else {
+                    if (fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
+                }
+
+                if (doc.length() > 512 * 1024) continue
+
+                searchedFiles.add(currentPath)
+
+                try {
+                    val text = context.contentResolver.openInputStream(doc.uri)
+                        ?.bufferedReader()
+                        ?.use { it.readText() }
+                        ?: continue
+
+                    val lines = text.lines()
+                    lines.forEachIndexed { idx, line ->
+                        if (regex.containsMatchIn(line)) {
+                            val lineNum = idx + 1
+                            val startContext = maxOf(0, idx - contextLines)
+                            val endContext = minOf(lines.size - 1, idx + contextLines)
+                            
+                            val context = (startContext..endContext).map { i ->
+                                Triple(i + 1, lines[i].take(120), i == idx)
+                            }
+                            
+                            results.add(GrepResult(currentPath, lineNum, context))
+                        }
+                    }
+                } catch (_: Exception) { }
+
+                if (results.size >= 50) return
+            }
+        }
+    }
+
+    private fun matchesGlob(filename: String, glob: String): Boolean {
+        val pattern = glob
+            .replace(".", "\\.")
+            .replace("**", "<<DOUBLESTAR>>")
+            .replace("*", "[^/]*")
+            .replace("?", "[^/]")
+            .replace("<<DOUBLESTAR>>", ".*")
+        return Regex(pattern).matches(filename)
+    }
+
+    /**
+     * 语义搜索
+     */
+    fun searchCodebase(query: String, targetDirectories: String = ""): String {
+        val root = rootDocFile ?: return "No project folder is open."
+        if (query.isBlank()) return "Search query is empty."
+
+        return try {
+            val targetDirs = if (targetDirectories.isBlank()) {
+                emptyList()
+            } else {
+                targetDirectories.split(",").map { it.trim().trim('/') }
+            }
+
+            val files = mutableListOf<FileContent>()
+            val dirsToSearch = if (targetDirs.isEmpty()) {
+                listOf(root to "")
+            } else {
+                targetDirs.mapNotNull { dir ->
+                    resolvePath(dir)?.let { it to dir }
+                }
+            }
+
+            dirsToSearch.forEach { (dirDoc, basePath) ->
+                collectFilesForSearch(dirDoc, basePath, files)
+            }
+
+            if (files.isEmpty()) return "No searchable files found."
+
+            val queryTerms = extractSearchTerms(query)
+            val scoredResults = files.mapNotNull { file ->
+                val score = calculateRelevanceScore(file.content, query, queryTerms)
+                if (score > 0) file to score else null
+            }.sortedByDescending { it.second }
+
+            if (scoredResults.isEmpty()) {
+                "No relevant code found for: $query\nSearched ${files.size} files."
+            } else {
+                buildString {
+                    appendLine("Search results for: \"$query\"")
+                    appendLine("Found ${scoredResults.size} relevant files:")
+                    appendLine("---")
+                    scoredResults.take(10).forEach { (file, score) ->
+                        appendLine("[Relevance: ${(score * 100).toInt()}%] ${file.path}")
+                        val snippet = extractRelevantSnippet(file.content, queryTerms)
+                        if (snippet.isNotBlank()) {
+                            appendLine("Snippet:")
+                            snippet.lines().take(5).forEach { appendLine("  $it") }
+                        }
+                        appendLine()
+                    }
+                }.trimEnd()
+            }
+        } catch (e: Exception) {
+            Log.e("FileManager", "searchCodebase failed", e)
+            "Search failed: ${e.message}"
+        }
+    }
+
+    private data class FileContent(val path: String, val content: String)
+
+    private fun collectFilesForSearch(dirDoc: DocumentFile, relativePath: String, files: MutableList<FileContent>) {
+        if (files.size >= 200) return
+
+        dirDoc.listFiles().forEach { doc ->
+            val name = doc.name ?: return@forEach
+            if (name.startsWith(".")) return@forEach
+
+            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+
+            if (doc.isDirectory) {
+                if (currentPath.count { it == '/' } < 8) {
+                    collectFilesForSearch(doc, currentPath, files)
+                }
+            } else {
+                val fileExt = name.substringAfterLast('.', "").lowercase()
+                if (fileExt !in searchableExtensions) return@forEach
+                if (doc.length() > 256 * 1024) return@forEach
+
+                try {
+                    val text = context.contentResolver.openInputStream(doc.uri)
+                        ?.bufferedReader()
+                        ?.use { it.readText() }
+                        ?: return@forEach
+                    files.add(FileContent(currentPath, text))
+                } catch (_: Exception) { }
+            }
+        }
+    }
+
+    private fun extractSearchTerms(query: String): List<String> {
+        val stopWords = setOf(
+            "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+            "have", "has", "had", "do", "does", "did", "will", "would", "could",
+            "should", "may", "might", "must", "shall", "can", "need", "dare",
+            "ought", "used", "to", "of", "in", "for", "on", "with", "at", "by",
+            "from", "as", "into", "through", "during", "before", "after", "above",
+            "below", "between", "under", "again", "further", "then", "once", "here",
+            "there", "when", "where", "why", "how", "all", "each", "few", "more",
+            "most", "other", "some", "such", "no", "nor", "not", "only", "own",
+            "same", "so", "than", "too", "very", "just", "and", "but", "if", "or",
+            "because", "until", "while", "what", "which", "who", "whom", "this",
+            "that", "these", "those", "am", "it", "its", "i", "me", "my", "myself",
+            "we", "our", "you", "your", "he", "him", "his", "she", "her", "they",
+            "them", "their", "where", "how", "does", "work", "implemented", "find",
+            "look", "search", "get", "set", "use", "using"
+        )
+
+        return query.lowercase()
+            .replace(Regex("[^a-z0-9_\\s]"), " ")
+            .split(Regex("\\s+"))
+            .filter { it.length > 2 && it !in stopWords }
+            .distinct()
+    }
+
+    private fun calculateRelevanceScore(content: String, query: String, terms: List<String>): Double {
+        val contentLower = content.lowercase()
+        var score = 0.0
+
+        if (contentLower.contains(query.lowercase())) {
+            score += 0.5
+        }
+
+        terms.forEach { term ->
+            val count = contentLower.split(term).size - 1
+            score += count * 0.1
+
+            val patterns = listOf(
+                "fun\\s+$term",
+                "class\\s+$term",
+                "interface\\s+$term",
+                "object\\s+$term",
+                "val\\s+$term",
+                "var\\s+$term",
+                "def\\s+$term",
+                "function\\s+$term"
+            )
+            patterns.forEach { pattern ->
+                if (Regex(pattern, RegexOption.IGNORE_CASE).containsMatchIn(content)) {
+                    score += 0.3
+                }
+            }
+        }
+
+        return (score / (1 + contentLower.length / 1000.0)).coerceIn(0.0, 1.0)
+    }
+
+    private fun extractRelevantSnippet(content: String, terms: List<String>): String {
+        val lines = content.lines()
+        if (terms.isEmpty()) return lines.take(3).joinToString("\n")
+
+        val scoredLines = lines.mapIndexed { idx, line ->
+            val lineLower = line.lowercase()
+            val score = terms.count { lineLower.contains(it) }
+            Triple(idx, line, score)
+        }.filter { it.third > 0 }
+            .sortedByDescending { it.third }
+
+        if (scoredLines.isEmpty()) return lines.take(3).joinToString("\n")
+
+        val bestLine = scoredLines.first()
+        val start = maxOf(0, bestLine.first - 2)
+        val end = minOf(lines.size, bestLine.first + 3)
+        return lines.subList(start, end).joinToString("\n")
+    }
+
     private fun formatSize(bytes: Long): String = when {
         bytes < 1024 -> "$bytes B"
         bytes < 1024 * 1024 -> "${bytes / 1024} KB"
         else -> "${"%.1f".format(bytes.toDouble() / (1024 * 1024))} MB"
+    }
+
+    /**
+     * 删除文件或目录
+     * @param path 相对于项目根目录的路径
+     * @return 操作结果描述
+     */
+    fun deleteFile(path: String): String {
+        val root = rootDocFile ?: return "No project folder is open."
+
+        return try {
+            val target = resolvePath(path.trim('/'))
+                ?: return "File or directory not found: $path"
+
+            val deleted = target.delete()
+            if (deleted) {
+                "Deleted: $path"
+            } else {
+                "Failed to delete: $path"
+            }
+        } catch (e: Exception) {
+            "Failed to delete: ${e.message}"
+        }
+    }
+
+    /**
+     * 创建目录
+     * @param path 相对于项目根目录的目录路径
+     * @return 操作结果描述
+     */
+    fun createDirectory(path: String): String {
+        val root = rootDocFile ?: return "No project folder is open."
+
+        return try {
+            val trimmedPath = path.trim('/')
+            if (trimmedPath.isEmpty()) return "Cannot create root directory"
+
+            // 检查是否已存在
+            if (resolvePath(trimmedPath) != null) {
+                return "Directory already exists: $path"
+            }
+
+            val parentPath = trimmedPath.substringBeforeLast('/', "")
+            val dirName = trimmedPath.substringAfterLast('/')
+
+            val parentDoc = if (parentPath.isEmpty()) {
+                root
+            } else {
+                ensureDirectory(parentPath) ?: return "Failed to create parent directory: $parentPath"
+            }
+
+            val created = parentDoc.createDirectory(dirName)
+            if (created != null) {
+                "Directory created: $path"
+            } else {
+                "Failed to create directory: $path"
+            }
+        } catch (e: Exception) {
+            "Failed to create directory: ${e.message}"
+        }
     }
 
 }

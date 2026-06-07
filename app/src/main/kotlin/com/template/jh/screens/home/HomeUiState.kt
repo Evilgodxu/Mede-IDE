@@ -12,8 +12,6 @@ data class HomeUiState(
     val language: String = "system",
     val openedFolderName: String? = null,
     val openedFolderUri: String? = null,
-    val modelName: String = "",
-    val userName: String = "",
     val rules: List<Rule> = emptyList(),
     val skills: List<SkillItem> = emptyList(),
     val mcpServers: List<McpServer> = emptyList(),

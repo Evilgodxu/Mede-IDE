@@ -132,11 +132,9 @@ fun SettingsPane(
             SettingsCategoryContent(
                 category = selectedCategory, state = state,
                 onSetThemeMode = { viewModel.setThemeMode(it) }, onSetLanguage = { viewModel.setLanguage(it) },
-                onSetModelName = { viewModel.setModelName(it) }, onSetUserName = { viewModel.setUserName(it) },
                 onSetRules = { viewModel.setRules(it) }, onSetSkills = { viewModel.setSkills(it) },
                 onSetMcpServers = { viewModel.setMcpServers(it) },
                 onSetNotificationSettings = { viewModel.setNotificationSettings(it) },
-                onSetShowToolCalls = { chatViewModel?.setShowToolCalls(it) },
                 chatViewModel = chatViewModel, onBrowseModelFile = onBrowseModelFile,
             )
         }
@@ -158,10 +156,9 @@ private fun SettingsCategoryItem(category: SettingsCategory, isSelected: Boolean
 @Composable
 private fun SettingsCategoryContent(
     category: SettingsCategory, state: HomeUiState, onSetThemeMode: (String) -> Unit, onSetLanguage: (String) -> Unit,
-    onSetModelName: (String) -> Unit, onSetUserName: (String) -> Unit, onSetRules: (List<Rule>) -> Unit,
+    onSetRules: (List<Rule>) -> Unit,
     onSetSkills: (List<SkillItem>) -> Unit, onSetMcpServers: (List<McpServer>) -> Unit,
     onSetNotificationSettings: (NotificationSettings) -> Unit,
-    onSetShowToolCalls: (Boolean) -> Unit,
     chatViewModel: ChatViewModel?, onBrowseModelFile: () -> Unit,
 ) {
     Column(
@@ -177,20 +174,15 @@ private fun SettingsCategoryContent(
                 else {
                     ThemeSettingsCard(state, onSetThemeMode, Modifier.fillMaxWidth())
                     LanguageSettingsCard(state, onSetLanguage, Modifier.fillMaxWidth())
-                    GeneralSettingsCard(state, onSetModelName, onSetUserName, Modifier.fillMaxWidth())
+                    GeneralSettingsCard(Modifier.fillMaxWidth())
                 }
             }
             SettingsCategory.Model -> ModelSettingsContent(chatViewModel, onBrowseModelFile)
             SettingsCategory.Skill -> SkillsSettingsContent(state.skills, onSetSkills)
             SettingsCategory.MCP -> McpSettingsContent(state.mcpServers, onSetMcpServers)
             SettingsCategory.Conversation -> {
-                val chatStateVal = chatViewModel?.let { vm -> vm.state.collectAsState().value }
-                val showToolCalls = chatStateVal?.showToolCalls ?: false
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ThinkingSettingsContent(chatViewModel)
-                    HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    NotificationSettingsContent(state.notificationSettings, onSetNotificationSettings, showToolCalls, onSetShowToolCalls)
-                }
+                // 对话设置已简化，仅保留通知设置
+                NotificationSettingsContent(state.notificationSettings, onSetNotificationSettings)
             }
             SettingsCategory.Rules -> RulesSettingsContent(state.rules, onSetRules)
         }
@@ -747,12 +739,9 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
     }
 }
 
-// 对话配置卡片 - IDE风格紧凑行内布局
+// 通用设置卡片 - 仅保留发送日志功能
 @Composable
 private fun GeneralSettingsCard(
-    state: HomeUiState,
-    onSetModelName: (String) -> Unit,
-    onSetUserName: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -760,59 +749,7 @@ private fun GeneralSettingsCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("对话配置", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-
-            var modelName by remember(state) { mutableStateOf(state.modelName) }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "AI 模型名称",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.width(96.dp),
-                )
-                OutlinedTextField(
-                    value = modelName,
-                    onValueChange = { modelName = it; onSetModelName(it) },
-                    placeholder = { Text("例如: Gemini 2.5 Pro", style = MaterialTheme.typography.bodySmall) },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                    ),
-                )
-            }
-
-            var userName by remember(state) { mutableStateOf(state.userName) }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "用户名称",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.width(96.dp),
-                )
-                OutlinedTextField(
-                    value = userName,
-                    onValueChange = { userName = it; onSetUserName(it) },
-                    placeholder = { Text("你的名字", style = MaterialTheme.typography.bodySmall) },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                    ),
-                )
-            }
-
-            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+            Text("通用", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
 
             // 发送日志按钮
             val context = androidx.compose.ui.platform.LocalContext.current
@@ -1271,30 +1208,9 @@ private fun McpSettingsContent(
 }
 
 @Composable
-private fun ThinkingSettingsContent(chatViewModel: ChatViewModel?) {
-    val chatState = chatViewModel?.state?.collectAsState()
-    val deepThink = chatState?.value?.deepThinkEnabled ?: true
-
-    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("深度思考", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-            Text("模型在调用工具前进行逐步推理，提升准确性。思考内容可折叠。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(checked = deepThink, onCheckedChange = { chatViewModel?.setDeepThinkEnabled(it) })
-                Spacer(Modifier.width(8.dp))
-                Text(if (deepThink) "已启用" else "已禁用", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-    }
-}
-
-@Composable
 private fun NotificationSettingsContent(
     settings: NotificationSettings,
     onSetNotificationSettings: (NotificationSettings) -> Unit,
-    showToolCalls: Boolean,
-    onSetShowToolCalls: (Boolean) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
@@ -1332,64 +1248,6 @@ private fun NotificationSettingsContent(
             onSoundChange = { onSetNotificationSettings(settings.copy(waitingUserActionSound = it)) },
             onPopupChange = { onSetNotificationSettings(settings.copy(waitingUserActionPopup = it)) },
         )
-
-        HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-
-        // 删除行为卡片开关
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-        ) {
-            Column(Modifier.padding(12.dp)) {
-                Text("删除文件行为", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                Text(
-                    "开启后删除文件时不在对话中显示确认卡片，直接删除",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (settings.deleteCardEnabled) "直接删除（不显示卡片）" else "显示删除确认卡片",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    androidx.compose.material3.Switch(
-                        checked = settings.deleteCardEnabled,
-                        onCheckedChange = { onSetNotificationSettings(settings.copy(deleteCardEnabled = it)) },
-                    )
-                }
-            }
-        }
-
-        // 展示工具调用开关
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-        ) {
-            Column(Modifier.padding(12.dp)) {
-                Text("展示工具调用", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                Text(
-                    "开启后在对话中展示AI的工具调用JSON及执行结果",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (showToolCalls) "展示工具调用" else "隐藏工具调用",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    androidx.compose.material3.Switch(
-                        checked = showToolCalls,
-                        onCheckedChange = { onSetShowToolCalls(it) },
-                    )
-                }
-            }
-        }
     }
 }
 
