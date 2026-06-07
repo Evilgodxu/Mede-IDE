@@ -18,6 +18,7 @@ import com.template.jh.data.model.RuleType
 import com.template.jh.data.model.TaskItem
 import com.template.jh.data.model.TaskStatus
 import com.template.jh.data.repository.UserPreferencesRepository
+import com.template.jh.core.utils.FileLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -29,17 +30,25 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import java.io.File
+import java.io.FileOutputStream
 
 class ChatViewModel(
     application: Application,
     private val conversationRepo: ConversationRepository,
     private val preferencesRepo: UserPreferencesRepository,
     private val fileManager: com.template.jh.core.storage.FileManager,
+    private val imageGenManager: ImageGenManager? = null,
 ) : AndroidViewModel(application) {
 
     private val liteRTManager = LiteRTManager(application)
-    private val aiToolSet = AIToolSet(application, fileManager)
+    private val imageGenManagerInternal: ImageGenManager =
+        imageGenManager ?: ImageGenManager(application)
+    private val aiToolSet = AIToolSet(application, fileManager).also {
+        it.imageGenManager = imageGenManagerInternal
+    }
     private val cloudLLMClient = CloudLLMClient(application)
+    private val userPreferencesRepo = preferencesRepo
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
@@ -151,6 +160,22 @@ class ChatViewModel(
                 _state.update { it.copy(notificationSettings = settings) }
             }
         }
+        // 图像生成状态收集
+        viewModelScope.launch {
+            imageGenManagerInternal.state.collect { genState ->
+                _state.update { it.copy(imageGenState = genState) }
+            }
+        }
+        viewModelScope.launch {
+            preferencesRepo.imageGenProfiles.collect { profiles ->
+                _state.update { it.copy(imageGenProfiles = profiles) }
+            }
+        }
+        viewModelScope.launch {
+            preferencesRepo.activeImageGenProfileId.collect { id ->
+                _state.update { it.copy(activeImageGenProfileId = id) }
+            }
+        }
     }
 
     fun setTaskCompletedSound(enabled: Boolean) {
@@ -167,6 +192,23 @@ class ChatViewModel(
 
     fun setInputText(text: String) {
         _state.update { it.copy(inputText = text) }
+    }
+
+    // 图片附件管理
+    fun attachImage(uri: Uri) {
+        val current = _state.value.attachedImageUris
+        if (current.size >= 4) return // 最多 4 张
+        if (uri !in current) {
+            _state.update { it.copy(attachedImageUris = current + uri) }
+        }
+    }
+
+    fun detachImage(uri: Uri) {
+        _state.update { it.copy(attachedImageUris = it.attachedImageUris - uri) }
+    }
+
+    fun clearAttachedImages() {
+        _state.update { it.copy(attachedImageUris = emptyList()) }
     }
 
     fun loadModel(modelPath: String) {
@@ -198,6 +240,9 @@ class ChatViewModel(
         viewModelScope.launch { liteRTManager.downloadModel(url, fileName) }
     }
 
+    fun cancelDownload() { liteRTManager.cancelDownload() }
+    fun pauseDownload() { liteRTManager.pauseDownload() }
+    fun resumeDownload() { liteRTManager.resumeDownload() }
     fun resetDownload() { liteRTManager.resetDownloadState() }
 
     fun setModelParams(params: ModelParams) {
@@ -211,16 +256,20 @@ class ChatViewModel(
     // 发送消息（手动 JSON 工具调用: automaticToolCalling=false + 解析 JSON tool_name）
     fun sendMessage() {
         val text = _state.value.inputText.trim()
-        if (text.isEmpty()) return
+        val images = _state.value.attachedImageUris
+        if (text.isEmpty() && images.isEmpty()) return
         val isCloud = _state.value.cloudModelEnabled
         if (!isCloud && !liteRTManager.isInitialized) {
             _state.update { it.copy(engineErrorMessage = "请先加载模型或启用云端模型") }
             return
         }
-        val userMsg = ChatMessage(role = ChatRole.User, content = text)
+        val userContent = if (images.isNotEmpty()) {
+            if (text.isNotBlank()) "$text\n[已附加 ${images.size} 张图片]" else "[已附加 ${images.size} 张图片]"
+        } else text
+        val userMsg = ChatMessage(role = ChatRole.User, content = userContent)
         val taskId = java.util.UUID.randomUUID().toString()
-        val task = TaskItem(id = taskId, title = text.take(50), status = TaskStatus.Running, description = text)
-        _state.update { it.copy(messages = it.messages + userMsg, inputText = "", isLoading = true, taskList = it.taskList + task) }
+        val task = TaskItem(id = taskId, title = userContent.take(50), status = TaskStatus.Running, description = userContent)
+        _state.update { it.copy(messages = it.messages + userMsg, inputText = "", attachedImageUris = emptyList(), isLoading = true, taskList = it.taskList + task) }
         val modelMsgId = java.util.UUID.randomUUID().toString()
         val placeholderMsg = ChatMessage(id = modelMsgId, role = ChatRole.Model, content = "", isStreaming = true)
         _state.update { it.copy(messages = it.messages + placeholderMsg) }
@@ -228,16 +277,25 @@ class ChatViewModel(
         val notifSettings = runBlocking { preferencesRepo.notificationSettings.first() }
         sendJob = viewModelScope.launch(Dispatchers.IO) {
             try {
+                // 将图片 URI 复制到临时文件
+                val tempImagePaths = mutableListOf<String>()
+                for (uri in images) {
+                    try {
+                        val tempFile = uriToTempFile(ctx, uri)
+                        if (tempFile != null) tempImagePaths.add(tempFile.absolutePath)
+                    } catch (_: Exception) {}
+                }
                 if (isCloud) {
                     processWithCloudTools(text, modelMsgId, taskId, ctx, notifSettings)
                 } else {
                     val conv = ensureConversation()
-                    processWithJsonTools(text, modelMsgId, taskId, ctx, notifSettings)
+                    processWithJsonTools(text, modelMsgId, taskId, ctx, notifSettings, tempImagePaths)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "sendMessage failed", e)
+                FileLogger.e("ChatViewModel", "sendMessage failed: ${e.message}", e)
                 updateModelMessage(modelMsgId, "\n\n[错误: ${e.message}]", false)
                 finalizeModelMessage(modelMsgId)
                 updateTaskStatus(taskId, TaskStatus.Failed)
@@ -378,7 +436,7 @@ class ChatViewModel(
                 initialMessages = initialMessages ?: emptyList(),
                 samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
                 tools = listOf(tool(aiToolSet)),
-                automaticToolCalling = false,
+                automaticToolCalling = true,
             )
         )
         activeConversation = conv
@@ -414,6 +472,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         sb.append("## 可用工具\n")
         sb.append("文件: listFiles, readFile(先读取再修改), writeFile(新建), replaceInFile(编辑), deleteFile, createDirectory\n")
         sb.append("搜索: searchInFiles(正则), searchCodebase(语义)\n")
+        sb.append("图像: generateImage(根据描述生成图片, 参数prompt), listGeneratedImages(列出已生成图片)\n")
         sb.append("其他: runCommand, searchWeb, gitStatus/gitAdd/gitCommit/gitPush/gitBranch/gitDiff, readLints\n\n")
         sb.append("## 修改文件策略\n")
         sb.append("- 编辑文件唯一方式: replaceInFile，参数 path, old_string, new_string\n")
@@ -432,6 +491,16 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         }
         return sb.toString()
     }
+
+    // ---- 图像支持：URI 转临时文件 ----
+
+    private fun uriToTempFile(ctx: android.content.Context, uri: Uri): File? = try {
+        val input = ctx.contentResolver.openInputStream(uri) ?: return null
+        val ext = uri.lastPathSegment?.substringAfterLast('.', "jpg") ?: "jpg"
+        val tempFile = File.createTempFile("img_", ".$ext", ctx.cacheDir)
+        FileOutputStream(tempFile).use { out -> input.use { it.copyTo(out) } }
+        tempFile
+    } catch (e: Exception) { null }
 
     // ---- JSON 工具调用解析与调度（手动模式，适配 gemma-4 JSON 格式） ----
 
@@ -477,6 +546,15 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             "gitBranch" -> aiToolSet.gitBranch(args["args"] ?: "")
             "gitDiff" -> aiToolSet.gitDiff(args["args"] ?: "")
             "readLints" -> aiToolSet.readLints()
+            "generateImage" -> aiToolSet.generateImage(
+                args["prompt"] ?: "",
+                args["negativePrompt"] ?: "",
+                args["steps"]?.toIntOrNull() ?: 20,
+                args["cfgScale"]?.toFloatOrNull() ?: 7.0f,
+                args["width"]?.toIntOrNull() ?: 512,
+                args["height"]?.toIntOrNull() ?: 512,
+            )
+            "listGeneratedImages" -> aiToolSet.listGeneratedImages()
             else -> "Unknown tool: $name"
         }
     } catch (e: Exception) { "Tool error: ${e.message}" }
@@ -484,71 +562,40 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
     private suspend fun processWithJsonTools(
         text: String, msgId: String, taskId: String,
         ctx: Application, notif: com.template.jh.data.model.NotificationSettings,
+        imagePaths: List<String> = emptyList(),
     ) {
-        var currentMsgId = msgId
-        // 在首轮注入编辑器上下文，让模型知道当前编辑的文件和光标位置
+        val conv = activeConversation ?: return
         val editorCtx = buildEditorContext()
-        val firstInput = if (editorCtx.isNotBlank()) "$editorCtx\n[用户消息]\n$text" else text
-        var nextInput: Any = firstInput
-        var rounds = 0
-        var lastCtxRefresh = 0
+        val hasImages = imagePaths.isNotEmpty()
 
-        while (true) {
-            rounds++
-            val fullResponse = StringBuilder()
-            val conv = activeConversation ?: return
-
-            // 每隔 3 轮刷新上下文（编辑器状态可能变化）
-            if (rounds > 0 && rounds - lastCtxRefresh >= 3) {
-                val freshCtx = buildEditorContext()
-                if (freshCtx.isNotBlank()) {
-                    nextInput = "$freshCtx\n[继续]\n$nextInput"
-                    lastCtxRefresh = rounds
-                }
+        val userInput = if (editorCtx.isNotBlank()) "$editorCtx\n[用户消息]\n$text" else text
+        val firstMessage: Message = if (hasImages) {
+            val contentList = mutableListOf<Content>().apply {
+                add(Content.Text(userInput))
+                imagePaths.forEach { add(Content.ImageFile(absolutePath = it)) }
             }
-
-            conv.sendMessageAsync(nextInput.toString()).catch { t ->
-                Log.e("ChatViewModel", "sendMessageAsync(round=$rounds) failed", t)
-                updateModelMessage(currentMsgId, "\n\n[错误: ${t.message}]", false)
-                updateTaskStatus(taskId, TaskStatus.Failed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, notif)
-            }.collect { chunk ->
-                val c = chunk.toString()
-                fullResponse.append(c)
-                updateModelMessage(currentMsgId, c, true)
-            }
-
-            val response = fullResponse.toString().trim()
-            if (response.isBlank()) {
-                finalizeModelMessage(currentMsgId)
-                updateTaskStatus(taskId, TaskStatus.Completed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, notif)
-                return
-            }
-
-            val toolCall = extractJsonToolCall(response)
-            if (toolCall == null) {
-                finalizeModelMessage(currentMsgId)
-                updateTaskStatus(taskId, TaskStatus.Completed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, notif)
-                return
-            }
-
-            // 标记为工具调用中间消息
-            _state.update { s -> s.copy(messages = s.messages.map { if (it.id == currentMsgId) it.copy(isToolMessage = true) else it }) }
-
-            val (prefixText, funcName, funcArgs) = toolCall
-            val toolResult = executeAiTool(funcName, funcArgs)
-            val toolDisplay = "\n\n$toolResult"
-
-            if (prefixText != null) updateModelMessage(currentMsgId, toolDisplay, true)
-            else updateModelMessage(currentMsgId, toolDisplay, false)
-            finalizeModelMessage(currentMsgId)
-
-            nextInput = Message.tool(Contents.of(listOf(Content.ToolResponse(funcName, toolResult))))
-            currentMsgId = java.util.UUID.randomUUID().toString()
-            _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true), isLoading = true) }
+            Message.user(Contents.of(contentList))
+        } else {
+            Message.user(userInput)
         }
+
+        // automaticToolCalling=true 时库内部自动处理工具检测→执行→回传
+        // Flow 仅发射最终文本响应
+        conv.sendMessageAsync(firstMessage).catch { t ->
+            Log.e("ChatViewModel", "sendMessageAsync failed", t)
+            FileLogger.e("ChatViewModel", "sendMessageAsync failed: ${t.message}", t)
+            updateModelMessage(msgId, "\n\n[错误: ${t.message}]", false)
+            finalizeModelMessage(msgId)
+            updateTaskStatus(taskId, TaskStatus.Failed)
+            ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, notif)
+        }.collect { chunk ->
+            val c = chunk.toString()
+            updateModelMessage(msgId, c, true)
+        }
+
+        finalizeModelMessage(msgId)
+        updateTaskStatus(taskId, TaskStatus.Completed)
+        ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, notif)
     }
 
     // ---- 云端模型工具循环（OpenAI 兼容 API）----
@@ -607,6 +654,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                 )
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "cloudSendMessage failed", e)
+                FileLogger.e("ChatViewModel", "cloudSendMessage failed: ${e.message}", e)
                 updateModelMessage(currentMsgId, "\n\n[云端模型错误: ${e.message}]", false)
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Failed)
@@ -735,6 +783,90 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             _state.update { it.copy(engineErrorMessage = if (result == "ok") "" else result) }
         }
     }
+
+    // ---- 图像生成方法 ----
+
+    fun setImageGenParams(params: ImageGenParams) {
+        imageGenManagerInternal.setParams(params)
+    }
+
+    fun downloadImageModel(url: String, fileName: String) {
+        viewModelScope.launch { imageGenManagerInternal.downloadModel(url, fileName) }
+    }
+
+    fun loadImageModelFromUri(uri: Uri) {
+        val fileName = uri.lastPathSegment?.substringAfterLast('/')
+            ?.takeIf { it.endsWith(".zip", true) }
+            ?: "external_model_${System.currentTimeMillis()}.zip"
+        viewModelScope.launch { imageGenManagerInternal.loadModelFromZipUri(uri, fileName) }
+    }
+
+    fun cancelImageDownload() { imageGenManagerInternal.cancelDownload() }
+    fun pauseImageDownload() { imageGenManagerInternal.pauseDownload() }
+    fun resumeImageDownload() { imageGenManagerInternal.resumeDownload() }
+    fun resetImageDownload() { imageGenManagerInternal.resetDownloadState() }
+
+    fun submitImageGeneration(params: ImageGenParams) {
+        viewModelScope.launch {
+            try {
+                val result = imageGenManagerInternal.generateImage(params)
+                _state.update { it.copy(engineErrorMessage = "图片已生成: $result") }
+            } catch (e: Exception) {
+                _state.update { it.copy(engineErrorMessage = "生成失败: ${e.message}") }
+            }
+        }
+    }
+
+    fun getImageOutputDir(): java.io.File = imageGenManagerInternal.getOutputDir()
+
+    fun refreshGeneratedImages() {
+        val images = imageGenManagerInternal.listGeneratedImages()
+        _state.update { it.copy(imageGenState = it.imageGenState.copy(generatedImages = images)) }
+    }
+
+    // 云端生图 API 配置
+    fun addImageGenProfile(name: String, apiEndpoint: String, apiKey: String, modelName: String) {
+        val newProfile = CloudImageGenProfile(
+            name = name.ifEmpty { modelName },
+            apiEndpoint = apiEndpoint,
+            apiKey = apiKey,
+            modelName = modelName,
+        )
+        viewModelScope.launch {
+            val current = preferencesRepo.imageGenProfiles.first()
+            val updated = current + newProfile
+            preferencesRepo.setImageGenProfiles(updated)
+        }
+    }
+
+    fun removeImageGenProfile(profileId: String) {
+        viewModelScope.launch {
+            val current = preferencesRepo.imageGenProfiles.first()
+            val updated = current.filter { it.id != profileId }
+            preferencesRepo.setImageGenProfiles(updated)
+            val activeId = preferencesRepo.activeImageGenProfileId.first()
+            if (activeId == profileId) {
+                val newActive = updated.firstOrNull()?.id ?: ""
+                preferencesRepo.setActiveImageGenProfileId(newActive)
+            }
+        }
+    }
+
+    fun updateImageGenProfile(profile: CloudImageGenProfile) {
+        viewModelScope.launch {
+            val current = preferencesRepo.imageGenProfiles.first()
+            val updated = current.map { if (it.id == profile.id) profile else it }
+            preferencesRepo.setImageGenProfiles(updated)
+        }
+    }
+
+    fun switchImageGenProfile(profileId: String) {
+        viewModelScope.launch {
+            preferencesRepo.setActiveImageGenProfileId(profileId)
+        }
+    }
+
+
 
     // 关闭对话
 

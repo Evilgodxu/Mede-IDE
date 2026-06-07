@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
@@ -134,6 +135,12 @@ fun MainContentArea(
                     TabType.File -> {
                         tabContent(activeTab.id)
                     }
+                    TabType.Image -> {
+                        ImagePreview(
+                            imagePath = activeTab.id,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             } else if (openedFolderName == null) {
                 // 欢迎页（仅未打开文件夹时）
@@ -198,6 +205,7 @@ private fun EditorTabBar(
                         imageVector = when (tab.type) {
                             TabType.Settings -> Icons.Default.Settings
                             TabType.File -> Icons.Default.Description
+                            TabType.Image -> Icons.Default.Image
                         },
                         contentDescription = null,
                         modifier = Modifier

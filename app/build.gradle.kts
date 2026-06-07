@@ -91,6 +91,9 @@ android {
                 "META-INF/androidx/**",
             )
         }
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21

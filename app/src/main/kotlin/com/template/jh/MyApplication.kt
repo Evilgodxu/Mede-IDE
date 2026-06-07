@@ -1,6 +1,7 @@
 package com.template.jh
 
 import android.app.Application
+import com.template.jh.core.utils.FileLogger
 import com.template.jh.di.appModule
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger
@@ -17,6 +18,8 @@ class MyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+
+        FileLogger.init(this)
 
         startKoin {
             androidLogger()

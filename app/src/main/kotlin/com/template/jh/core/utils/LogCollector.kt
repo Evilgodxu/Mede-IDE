@@ -17,7 +17,7 @@ object LogCollector {
 
     suspend fun collectAndShareLogs(context: Context): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val logContent = collectLogs()
+            val logContent = collectLogs(context)
             val logFile = createLogFile(context, logContent)
             shareLogFile(context, logFile)
             Result.success(Unit)
@@ -26,34 +26,56 @@ object LogCollector {
         }
     }
 
-    private fun collectLogs(): String {
-        val process = Runtime.getRuntime().exec("logcat -d -v threadtime")
-        val reader = BufferedReader(InputStreamReader(process.inputStream))
-        val logBuilder = StringBuilder()
-        
-        // 添加设备信息头
-        logBuilder.append("=".repeat(60)).append("\n")
-        logBuilder.append("Android AI IDE Log Report\n")
-        logBuilder.append("Generated: ").append(SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())).append("\n")
-        logBuilder.append("Device: ").append(android.os.Build.MANUFACTURER).append(" ").append(android.os.Build.MODEL).append("\n")
-        logBuilder.append("Android: ").append(android.os.Build.VERSION.RELEASE).append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n")
-        logBuilder.append("App Version: ").append(getAppVersion()).append("\n")
-        logBuilder.append("=".repeat(60)).append("\n\n")
-        
-        reader.use { br ->
-            var line: String?
-            while (br.readLine().also { line = it } != null) {
-                logBuilder.append(line).append("\n")
-            }
+    private fun collectLogs(context: Context): String {
+        val sb = StringBuilder()
+
+        // 头部信息
+        sb.append("=".repeat(60)).append("\n")
+        sb.append("Android AI IDE Log Report\n")
+        sb.append("Generated: ").append(SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())).append("\n")
+        sb.append("Device: ").append(android.os.Build.MANUFACTURER).append(" ").append(android.os.Build.MODEL).append("\n")
+        sb.append("Android: ").append(android.os.Build.VERSION.RELEASE).append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")\n")
+        sb.append("App Version: ").append(getAppVersion()).append("\n")
+        sb.append("=".repeat(60)).append("\n\n")
+
+        // 1. 优先从文件日志读取（release 构建 logcat 不可用）
+        val fileLogs = FileLogger.readAll()
+        if (fileLogs.isNotBlank()) {
+            sb.append("--- File Logs ---\n")
+            sb.append(fileLogs)
+            sb.append("\n\n")
+        } else {
+            sb.append("(文件日志为空，文件目录: ").append(FileLogger.getLogDir()).append(")\n\n")
         }
-        
-        return logBuilder.toString()
+
+        // 2. 尝试从 logcat 补充（仅在 debuggable 构建有效）
+        try {
+            val process = Runtime.getRuntime().exec("logcat -d -v threadtime -t 200")
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val logcatSb = StringBuilder()
+            reader.use { br ->
+                var line: String?
+                while (br.readLine().also { line = it } != null) {
+                    logcatSb.append(line).append("\n")
+                }
+            }
+            val logcatText = logcatSb.toString().trim()
+            if (logcatText.isNotBlank()) {
+                sb.append("--- Logcat (last 200 lines) ---\n")
+                sb.append(logcatText)
+                sb.append("\n")
+            }
+        } catch (_: Exception) {
+            sb.append("(logcat 不可用，非 debuggable 构建)\n")
+        }
+
+        return sb.toString()
     }
 
     private fun getAppVersion(): String {
         return try {
-            val context = com.template.jh.MyApplication.instance
-            val pkgInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            val ctx = com.template.jh.MyApplication.instance
+            val pkgInfo = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
             "${pkgInfo.versionName} (${pkgInfo.longVersionCode})"
         } catch (_: Exception) {
             "Unknown"
@@ -63,11 +85,11 @@ object LogCollector {
     private fun createLogFile(context: Context, content: String): File {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val fileName = "android_ai_ide_logs_$timestamp.log"
-        
+
         val logsDir = File(context.cacheDir, "logs").apply {
             if (!exists()) mkdirs()
         }
-        
+
         return File(logsDir, fileName).apply {
             writeText(content)
         }
@@ -92,7 +114,7 @@ object LogCollector {
         val chooser = Intent.createChooser(shareIntent, "Send Logs").apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        
+
         context.startActivity(chooser)
     }
 }

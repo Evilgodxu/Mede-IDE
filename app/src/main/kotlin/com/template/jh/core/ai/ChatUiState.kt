@@ -1,5 +1,6 @@
 package com.template.jh.core.ai
 
+import android.net.Uri
 import com.template.jh.data.model.TaskItem
 import java.util.UUID
 
@@ -80,4 +81,10 @@ data class ChatUiState(
     val cursorLine: Int = 0,
     // 通知设置
     val notificationSettings: com.template.jh.data.model.NotificationSettings = com.template.jh.data.model.NotificationSettings(),
+    // 附着的图片 URI 列表
+    val attachedImageUris: List<Uri> = emptyList(),
+    // 图像生成
+    val imageGenState: ImageGenState = ImageGenState(),
+    val imageGenProfiles: List<CloudImageGenProfile> = emptyList(),
+    val activeImageGenProfileId: String = "",
 )

@@ -3,6 +3,7 @@ package com.template.jh.core.ai
 import android.content.Context
 import android.util.Log
 import android.net.Uri
+import com.template.jh.core.utils.FileLogger
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -15,13 +16,17 @@ import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.LogSeverity
 import com.google.ai.edge.litertlm.SamplerConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 // 引擎状态
 enum class EngineStatus {
@@ -38,7 +43,7 @@ data class EngineState(
 
 // 下载状态
 enum class DownloadStatus {
-    Idle, Downloading, Completed, Error
+    Idle, Downloading, Paused, Completed, Error
 }
 
 data class DownloadState(
@@ -80,63 +85,118 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
 
     @Volatile var modelParams: ModelParams = ModelParams()
 
+    // 图像/多模态相关配置
+    @Volatile var maxNumImages: Int = 4
+    @Volatile var visualTokenBudget: Int = 140
+
     init {
         Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
         // 禁用工具名的 snake_case 转换，保持原始函数名
         ExperimentalFlags.convertCamelToSnakeCaseInToolDescription = false
+        // 设置视觉 token 预算（Gemma4 支持: 70, 140, 280, 560, 1120）
+        ExperimentalFlags.visualTokenBudget = visualTokenBudget
     }
 
-    // 直接从 URL 下载模型到系统下载目录
+    @Volatile private var downloadCancelled = false
+    @Volatile private var downloadPaused = false
+
+    private val httpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
+
+    // 直接从 URL 下载模型到私有目录（确保 scanModels 能扫描到）
     suspend fun downloadModel(url: String, fileName: String) {
+        downloadCancelled = false
+        downloadPaused = false
         _downloadState.value = DownloadState(status = DownloadStatus.Downloading, fileName = fileName, progress = 0f)
         try {
             withContext(Dispatchers.IO) {
-                val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val downloadDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "models")
                 if (!downloadDir.exists()) downloadDir.mkdirs()
                 val destFile = File(downloadDir, fileName)
 
-                val connection = URL(url).openConnection() as HttpURLConnection
-                connection.apply {
-                    connectTimeout = 15000
-                    readTimeout = 30000
-                    instanceFollowRedirects = true
-                }
-                val totalBytes = connection.contentLengthLong
-                connection.inputStream.use { input ->
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36")
+                    .header("Accept", "*/*")
+                    .header("Accept-Encoding", "identity")
+                    .build()
+
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        throw IOException("服务器返回 ${response.code}: ${response.message}")
+                    }
+                    val body = response.body ?: throw IOException("响应体为空")
+                    val totalBytes = body.contentLength()
+                    val input = body.byteStream()
                     FileOutputStream(destFile).use { output ->
-                        val buf = ByteArray(8192)
+                        val buf = ByteArray(32 * 1024)
                         var read: Int
                         var copied = 0L
+                        var lastReportTime = 0L
                         while (input.read(buf).also { read = it } != -1) {
+                            if (downloadCancelled) throw java.util.concurrent.CancellationException("下载已取消")
+                            while (downloadPaused) {
+                                if (downloadCancelled) throw java.util.concurrent.CancellationException("下载已取消")
+                                delay(200)
+                            }
                             output.write(buf, 0, read)
                             copied += read
-                            if (totalBytes > 0) {
+                            // 限频更新进度（最多每50ms一次）
+                            val now = System.currentTimeMillis()
+                            if (now - lastReportTime > 50 || copied >= totalBytes) {
+                                lastReportTime = now
+                                val progress = if (totalBytes > 0) {
+                                    copied.toFloat() / totalBytes
+                                } else {
+                                    // chunked 编码：用已下载字节数估算，最大给 0.95
+                                    (copied.toFloat() / (copied + 512 * 1024)).coerceAtMost(0.95f)
+                                }
                                 _downloadState.value = DownloadState(
-                                    status = DownloadStatus.Downloading,
+                                    status = if (downloadPaused) DownloadStatus.Paused else DownloadStatus.Downloading,
                                     fileName = fileName,
-                                    progress = copied.toFloat() / totalBytes,
+                                    progress = progress,
                                 )
                             }
                         }
                     }
                 }
-                connection.disconnect()
             }
-            _downloadState.value = DownloadState(status = DownloadStatus.Completed, fileName = fileName, progress = 1f)
+            if (!downloadCancelled) {
+                _downloadState.value = DownloadState(status = DownloadStatus.Completed, fileName = fileName, progress = 1f)
+            }
+        } catch (e: java.util.concurrent.CancellationException) {
+            _downloadState.value = DownloadState(status = DownloadStatus.Idle, fileName = fileName, progress = 0f, errorMessage = "已取消")
         } catch (e: Exception) {
             Log.e("LiteRTManager", "downloadModel failed", e)
+            FileLogger.e("LiteRTManager", "downloadModel failed: ${e.message}", e)
             _downloadState.value = DownloadState(status = DownloadStatus.Error, fileName = fileName,
                 progress = 0f, errorMessage = e.message ?: "下载失败")
         }
     }
 
+    fun cancelDownload() { downloadCancelled = true; downloadPaused = false }
+
+    fun pauseDownload() { downloadPaused = true; _downloadState.update { it.copy(status = DownloadStatus.Paused) } }
+
+    fun resumeDownload() { downloadPaused = false; _downloadState.update { it.copy(status = DownloadStatus.Downloading) } }
+
     fun resetDownloadState() {
         _downloadState.value = DownloadState()
+        downloadCancelled = false
+        downloadPaused = false
     }
 
     // 从 SAF URI 加载模型
     suspend fun loadModelFromUri(uri: Uri) {
-        val modelDir = File(context.filesDir, "models")
+        val modelDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "models")
         if (!modelDir.exists()) modelDir.mkdirs()
         val fileName = resolveUriFileName(uri) ?: "model.litertlm"
         val destFile = File(modelDir, fileName)
@@ -157,6 +217,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
             loadModel(destFile.absolutePath)
         } catch (e: Exception) {
             Log.e("LiteRTManager", "loadModelFromUri failed", e)
+            FileLogger.e("LiteRTManager", "loadModelFromUri failed: ${e.message}", e)
             _state.value = EngineState(status = EngineStatus.Error, modelPath = destFile.absolutePath, modelName = fileName, errorMessage = e.message ?: "文件复制失败")
         }
     }
@@ -189,7 +250,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         try {
             withContext(Dispatchers.IO) {
                 closeEngine()
-                val config = EngineConfig(modelPath = modelPath, backend = Backend.CPU(), cacheDir = context.cacheDir.absolutePath)
+                val config = EngineConfig(modelPath = modelPath, backend = Backend.CPU(), maxNumImages = maxNumImages, cacheDir = context.cacheDir.absolutePath)
                 val newEngine = Engine(config)
                 newEngine.initialize()
                 engine = newEngine
@@ -198,6 +259,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
             _state.value = EngineState(status = EngineStatus.Ready, modelPath = modelPath, modelName = file.name, progress = 1f)
         } catch (e: Exception) {
             Log.e("LiteRTManager", "loadModel failed", e)
+            FileLogger.e("LiteRTManager", "loadModel failed: ${e.message}", e)
             engine = null; isInitialized = false
             _state.value = EngineState(status = EngineStatus.Error, modelPath = modelPath, modelName = file.name, errorMessage = e.message ?: "未知错误")
         }
@@ -246,8 +308,9 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         // 2. 外部存储根目录（有 MANAGE_EXTERNAL_STORAGE 时可读）
         try { scanPaths.add(Environment.getExternalStorageDirectory().absolutePath) } catch (_: Exception) {}
 
-        // 3. 应用专属外部存储
+        // 3. 应用专属外部存储（用户可通过文件管理器访问）
         context.getExternalFilesDir(null)?.absolutePath?.let { scanPaths.add(it) }
+        context.getExternalFilesDir(null)?.let { scanPaths.add(File(it, "models").absolutePath) }
 
         // 4. 应用内部存储
         scanPaths.add(context.filesDir.absolutePath)
@@ -312,12 +375,24 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
 
     companion object {
         val RECOMMENDED_MODELS = listOf(
-            RecommendedModel("gemma-4-E2B-IT", "~2.6 GB",
+            RecommendedModel("gemma-4-E2B-IT-多模态", "~2.6 GB",
                 "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm?download=true",
-                "Gemma4 最新，6GB+ RAM", "gemma-4-E2B-it.litertlm"),
+                "Gemma4 多模态，支持图像理解，6GB+ RAM", "gemma-4-E2B-it.litertlm"),
+            RecommendedModel("gemma-4-E4B-IT-多模态", "~5 GB",
+                "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm?download=true",
+                "Gemma4 多模态，支持图像理解，8GB+ RAM", "gemma-4-E4B-it.litertlm"),
         )
     }
 }
+
+// 图像生成模型推荐信息（独立于 LiteRT）
+data class ImageGenRecommendedModel(
+    val name: String,
+    val size: String,
+    val url: String,
+    val description: String,
+    val fileName: String,
+)
 
 data class ModelInfo(val path: String, val name: String, val size: Long) {
     val sizeText: String get() = when {

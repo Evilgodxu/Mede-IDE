@@ -357,10 +357,15 @@ fun HomeScreen(
         }
     }
 
-    // 打开 AI 操作卡片指定的文件
+    // 打开 AI 操作卡片指定的文件（含图片）
     LaunchedEffect(Unit) {
         chatViewModel.openFileRequests.collect { path ->
-            openFileTab(path)
+            val fileName = displayNameFromPath(path)
+            if (isImageFile(fileName)) {
+                openTab(TabItem(path, fileName, TabType.Image))
+            } else {
+                openFileTab(path)
+            }
         }
     }
 
@@ -505,9 +510,13 @@ fun HomeScreen(
                     chatViewModel = chatViewModel,
                     chatState = chatState,
                     onFileClick = { fileItem ->
-                        val rel = safPathToRelative(fileItem.uri.toString())
-                        editorContent.remove(rel)
-                        openFileTab(fileItem.uri.toString(), fileItem.name)
+                        if (isImageFile(fileItem.name)) {
+                            openTab(TabItem(fileItem.uri.toString(), fileItem.name, TabType.Image))
+                        } else {
+                            val rel = safPathToRelative(fileItem.uri.toString())
+                            editorContent.remove(rel)
+                            openFileTab(fileItem.uri.toString(), fileItem.name)
+                        }
                     },
                     onAddToConversation = { fileItem ->
                         val currentText = chatViewModel.state.value.inputText
@@ -875,4 +884,8 @@ private fun LeftPanelContent(
     }
 }
 
+private fun isImageFile(name: String): Boolean =
+    name.endsWith(".png", true) || name.endsWith(".jpg", true) ||
+    name.endsWith(".jpeg", true) || name.endsWith(".webp", true) ||
+    name.endsWith(".gif", true) || name.endsWith(".bmp", true)
 

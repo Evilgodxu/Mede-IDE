@@ -495,6 +495,52 @@ class AIToolSet(
             ?: "No project folder is open."
     }
 
+    // ---- 图像生成（AnythingV5 SD1.5）----
+
+    @Volatile var imageGenManager: com.template.jh.core.ai.ImageGenManager? = null
+
+    @Tool(description = "Generate an image using Stable Diffusion 1.5 (AnythingV5). Provide a detailed prompt describing what you want to generate. Returns the file path of the generated image. Model must be downloaded first via Settings > 推荐下载模型 > 下载模型.")
+    fun generateImage(
+        @ToolParam(description = "Detailed description of the image to generate. Be specific about subject, style, lighting, colors, etc.") prompt: String,
+        @ToolParam(description = "Things to avoid in the generated image, e.g. 'nsfw, low quality, blurry'. Optional.") negativePrompt: String = "",
+        @ToolParam(description = "Number of denoising steps. Higher = more detail but slower. Range 10-50, default 20.") steps: Int = 20,
+        @ToolParam(description = "Classifier-Free Guidance scale. Higher = follows prompt more closely. Range 1-20, default 7.") cfgScale: Float = 7.0f,
+        @ToolParam(description = "Width of the output image in pixels. Default 512.") width: Int = 512,
+        @ToolParam(description = "Height of the output image in pixels. Default 512.") height: Int = 512,
+    ): String {
+        val mgr = imageGenManager ?: return "Image generation is not available. Configure ImageGenManager first."
+        try {
+            // 检查模型是否已下载
+            if (!mgr.isModelDownloaded(ImageGenManager.ANYTHING_V5_MODEL.fileName)) {
+                return "Model not downloaded yet. Please go to Settings > 推荐下载模型 to download the image generation model first."
+            }
+
+            val params = com.template.jh.core.ai.ImageGenParams(
+                prompt = prompt,
+                negativePrompt = negativePrompt,
+                steps = steps.coerceIn(10, 50),
+                cfgScale = cfgScale.coerceIn(1f, 20f),
+                seed = -1,
+                width = width.coerceIn(256, 2048),
+                height = height.coerceIn(256, 2048),
+            )
+            val result = kotlinx.coroutines.runBlocking {
+                mgr.generateImage(params)
+            }
+            return "Image generated successfully. File path: $result"
+        } catch (e: Exception) {
+            return "Image generation failed: ${e.message}"
+        }
+    }
+
+    @Tool(description = "List recently generated images in the output directory. Returns file names and paths.")
+    fun listGeneratedImages(): String {
+        val mgr = imageGenManager ?: return "ImageGenManager not available."
+        val images = mgr.listGeneratedImages()
+        if (images.isEmpty()) return "No generated images found."
+        return images.joinToString("\n") { "• ${it.name}  (${formatSize(it.size)})  path: ${it.path}" }
+    }
+
     private fun formatSize(bytes: Long): String = when {
         bytes < 1024 -> "$bytes B"
         bytes < 1024 * 1024 -> "${bytes / 1024} KB"

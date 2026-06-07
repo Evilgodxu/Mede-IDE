@@ -193,4 +193,20 @@
     <!-- 任务清单 -->
     <string name="task_list_title">任务清单</string>
 
+    <!-- 图像生成 -->
+    <string name="image_gen_title">图像生成</string>
+    <string name="image_gen_model">AnythingV5 (SD1.5)</string>
+    <string name="image_gen_download">下载模型</string>
+    <string name="image_gen_params">生成参数</string>
+    <string name="image_gen_prompt">Prompt</string>
+    <string name="image_gen_negative">Negative Prompt</string>
+    <string name="image_gen_steps">Steps</string>
+    <string name="image_gen_cfg">CFG Scale</string>
+    <string name="image_gen_seed">Seed</string>
+    <string name="image_gen_width">Width</string>
+    <string name="image_gen_height">Height</string>
+    <string name="image_gen_generate">生成图片</string>
+    <string name="image_gen_no_images">暂无已生成的图片</string>
+    <string name="image_gen_preview">图片预览</string>
+
 </resources>

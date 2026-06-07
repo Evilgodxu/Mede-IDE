@@ -3,7 +3,10 @@ package com.template.jh.screens.home.components
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Bitmap
+import android.provider.MediaStore
 import android.util.Log
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -29,6 +32,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.derivedStateOf
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.delay
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -45,6 +50,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -72,6 +78,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -184,6 +192,13 @@ fun AIChatPanel(
         val contextMaxTokens = 128000
         var showContextInfoDialog by remember { mutableStateOf(false) }
 
+        // 图片选择启动器
+        val imagePickerLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.GetContent()
+        ) { uri: android.net.Uri? ->
+            uri?.let { viewModel.attachImage(it) }
+        }
+
         ChatInputBar(
             inputText = state.inputText,
             onInputChange = { viewModel.setInputText(it) },
@@ -193,9 +208,12 @@ fun AIChatPanel(
             engineStatus = state.engineStatus,
             onCancel = { viewModel.cancelGeneration() },
             onOptimize = { viewModel.optimizeInput() },
+            attachedImageUris = state.attachedImageUris,
+            onDetachImage = { viewModel.detachImage(it) },
             contextUsedTokens = contextUsedTokens,
             contextMaxTokens = contextMaxTokens,
             onContextInfoClick = { showContextInfoDialog = true },
+            onImagePick = { imagePickerLauncher.launch("image/*") },
         )
 
         if (showContextInfoDialog) {
@@ -471,7 +489,11 @@ private fun ChatInputBar(
     onCancel: () -> Unit, onOptimize: () -> Unit,
     contextUsedTokens: Int = 0, contextMaxTokens: Int = 128000,
     onContextInfoClick: () -> Unit = {},
+    onImagePick: () -> Unit = {},
+    attachedImageUris: List<android.net.Uri> = emptyList(),
+    onDetachImage: (android.net.Uri) -> Unit = {},
 ) {
+    val context = LocalContext.current
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         OutlinedTextField(
             value = inputText, onValueChange = onInputChange,
@@ -481,79 +503,125 @@ private fun ChatInputBar(
             textStyle = MaterialTheme.typography.bodySmall, maxLines = 3, enabled = engineStatus == EngineStatus.Ready,
         )
 
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                // 优化按钮 - 常驻显示，无内容时禁用
-                if (engineStatus == EngineStatus.Ready) {
-                    if (isOptimizing) {
-                        IconButton(onClick = {}, Modifier.size(28.dp), enabled = false) {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
-                        }
-                    } else {
+        // 图片缩略图预览区
+        if (attachedImageUris.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                attachedImageUris.forEach { uri ->
+                    Box(modifier = Modifier.size(56.dp)) {
+                        // 加载缩略图
+                        val thumbnail = remember(uri) { loadThumbnail(context, uri) }
+                        thumbnail?.let { bmp ->
+                            Image(bitmap = bmp.asImageBitmap(), contentDescription = null, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(6.dp)),
+                                contentScale = ContentScale.Crop)
+                        } ?: Box(Modifier.size(56.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp)))
+                        // 删除按钮
                         IconButton(
-                            onClick = onOptimize,
-                            Modifier.size(28.dp),
-                            enabled = inputText.isNotBlank() && !isLoading
+                            onClick = { onDetachImage(uri) },
+                            modifier = Modifier.align(Alignment.TopEnd).size(18.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape),
                         ) {
-                            Icon(
-                                Icons.Default.AutoAwesome,
-                                stringResource(R.string.ai_optimize_input),
-                                Modifier.size(16.dp),
-                                tint = if (inputText.isNotBlank() && !isLoading) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                                }
-                            )
+                            Icon(Icons.Default.Close, "移除", Modifier.size(12.dp), tint = Color.White)
                         }
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                // 语音输入按钮
-                VoiceInputButton(
-                    onTextRecognized = { recognizedText ->
-                        onInputChange(inputText + recognizedText)
-                    },
-                    enabled = engineStatus == EngineStatus.Ready && !isLoading
-                )
-                // 上下文窗口进度按钮
-                val ratio = if (contextMaxTokens > 0) (contextUsedTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
-                Box(
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clip(CircleShape)
-                        .background(Color.White)
-                        .clickable { onContextInfoClick() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(
-                        progress = { ratio },
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 1.5.dp,
-                        color = if (ratio < 0.5f) Color(0xFF4CAF50)
-                            else if (ratio < 0.8f) Color(0xFFFFA000)
-                            else Color(0xFFE53935),
-                        trackColor = Color(0xFFE0E0E0),
-                    )
-                }
-                if (isLoading) {
-                    // 生成中：暂停按钮 + 环绕加载动画（不依赖 engineStatus，兼容云端模型）
-                    IconButton(onClick = onCancel, Modifier.size(36.dp)) {
-                        Box(contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.primary)
-                            Icon(Icons.Default.Pause, stringResource(R.string.chat_cancel), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                        }
+        }
+
+        // 工具栏：居中显示所有按钮
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            // 优化按钮
+            if (engineStatus == EngineStatus.Ready) {
+                if (isOptimizing) {
+                    IconButton(onClick = {}, Modifier.size(28.dp), enabled = false) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
                     }
                 } else {
-                    IconButton(onClick = onSend, Modifier.size(32.dp), enabled = inputText.isNotBlank() && engineStatus == EngineStatus.Ready) {
-                        Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.ai_send_message), Modifier.size(20.dp), tint = if (inputText.isNotBlank() && engineStatus == EngineStatus.Ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                    IconButton(
+                        onClick = onOptimize,
+                        Modifier.size(28.dp),
+                        enabled = inputText.isNotBlank() && !isLoading
+                    ) {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            stringResource(R.string.ai_optimize_input),
+                            Modifier.size(16.dp),
+                            tint = if (inputText.isNotBlank() && !isLoading) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                            }
+                        )
                     }
+                }
+            }
+
+            // 添加图片按钮
+            if (engineStatus == EngineStatus.Ready) {
+                IconButton(onClick = onImagePick, Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Image, "添加图片", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+
+            Spacer(Modifier.width(4.dp))
+
+            // 语音输入按钮
+            VoiceInputButton(
+                onTextRecognized = { recognizedText ->
+                    onInputChange(inputText + recognizedText)
+                },
+                enabled = engineStatus == EngineStatus.Ready && !isLoading
+            )
+
+            // 上下文窗口进度按钮
+            val ratio = if (contextMaxTokens > 0) (contextUsedTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(Color.White)
+                    .clickable { onContextInfoClick() },
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    progress = { ratio },
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 1.5.dp,
+                    color = if (ratio < 0.5f) Color(0xFF4CAF50)
+                        else if (ratio < 0.8f) Color(0xFFFFA000)
+                        else Color(0xFFE53935),
+                    trackColor = Color(0xFFE0E0E0),
+                )
+            }
+
+            if (isLoading) {
+                IconButton(onClick = onCancel, Modifier.size(36.dp)) {
+                    Box(contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Default.Pause, stringResource(R.string.chat_cancel), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            } else {
+                val canSend = (inputText.isNotBlank() || attachedImageUris.isNotEmpty()) && engineStatus == EngineStatus.Ready
+                IconButton(onClick = onSend, Modifier.size(32.dp), enabled = canSend) {
+                    Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.ai_send_message), Modifier.size(20.dp), tint = if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
                 }
             }
         }
     }
 }
+
+// 从 content URI 加载缩略图（Compose 中缓存）
+private fun loadThumbnail(context: Context, uri: android.net.Uri): Bitmap? = try {
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+        val size = android.util.Size(200, 200)
+        context.contentResolver.loadThumbnail(uri, size, null)
+    } else {
+        @Suppress("DEPRECATION")
+        MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+    }
+} catch (_: Exception) { null }
 
 // 语音输入按钮组件
 @Composable
@@ -574,8 +642,8 @@ private fun VoiceInputButton(
 
     // 语音识别启动器
     val speechRecognizerLauncher = rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
-    ) { result ->
+        ActivityResultContracts.StartActivityForResult()
+    ) { result: androidx.activity.result.ActivityResult ->
         isListening = false
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             val matches = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
@@ -587,8 +655,8 @@ private fun VoiceInputButton(
 
     // 权限请求启动器
     val permissionLauncher = rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
         hasPermission = isGranted
         if (isGranted) {
             startVoiceRecognition(context, speechRecognizerLauncher) { isListening = it }
@@ -633,8 +701,7 @@ private fun startVoiceRecognition(
     onListeningStateChange: (Boolean) -> Unit
 ) {
     try {
-        val intent = android.speech.RecognizerIntent().apply {
-            action = android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
             putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
