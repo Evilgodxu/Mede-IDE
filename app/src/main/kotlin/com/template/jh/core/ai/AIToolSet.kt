@@ -9,6 +9,7 @@ import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 import com.template.jh.core.editor.applyPatches
 import com.template.jh.core.editor.PatchOp
+import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -156,32 +157,95 @@ class AIToolSet(private val context: Context) : ToolSet {
     fun searchWeb(
         @ToolParam(description = "Search query keywords, concise and specific") query: String,
     ): String {
-        return runCatching {
-            val encoded = URLEncoder.encode(query, "UTF-8")
-            // 使用 DuckDuckGo HTML 搜索（非 Lite 版，结构更稳定）
-            val url = URL("https://html.duckduckgo.com/html/?q=$encoded")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 10000; readTimeout = 10000
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+        if (query.isBlank()) return "Search query is empty."
+        return try {
+            searchViaDuckDuckGo(query)
+        } catch (e: Exception) {
+            "Search failed: ${e.message}"
+        }
+    }
+
+    private fun searchViaDuckDuckGo(query: String): String {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+
+        val urls = listOf(
+            "https://lite.duckduckgo.com/lite/?q=$encoded",
+            "https://html.duckduckgo.com/html/?q=$encoded",
+        )
+
+        for (searchUrl in urls) {
+            try {
+                val html = fetchUrl(searchUrl)
+                val results = parseDdgResults(html)
+                if (results.isNotEmpty()) {
+                    return results.joinToString("\n---\n") { "• ${it.first}\n  ${it.second}" }
+                }
+            } catch (_: Exception) { }
+        }
+
+        try {
+            val apiUrl = "https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1&skip_disambig=1"
+            val json = fetchUrl(apiUrl)
+            val obj = org.json.JSONObject(json)
+            val abstractText = obj.optString("AbstractText", "")
+            val answer = obj.optString("Answer", "")
+            val heading = obj.optString("Heading", "")
+            val results = mutableListOf<String>()
+            if (abstractText.isNotBlank()) results.add("$heading\n$abstractText")
+            if (answer.isNotBlank() && answer != abstractText) results.add("Answer: $answer")
+            val topics = obj.optJSONArray("RelatedTopics")
+            if (topics != null) {
+                for (i in 0 until minOf(topics.length(), 5)) {
+                    val topic = topics.optJSONObject(i) ?: continue
+                    val text = topic.optString("Text", "")
+                    if (text.isNotBlank()) results.add("• ${text.take(200)}")
+                }
             }
-            val html = conn.inputStream.bufferedReader().readText()
-            conn.disconnect()
+            if (results.isNotEmpty()) return results.joinToString("\n---\n")
+        } catch (_: Exception) { }
 
-            // 提取标题 + 摘要（DDG HTML 搜索使用 result__a + result__snippet）
-            val pattern = Regex(
-                """class="result__a"[^>]*>\s*(.*?)\s*</a>.*?class="result__snippet"[^>]*>\s*(.*?)\s*</a>""",
-                setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
-            )
-            val results = pattern.findAll(html).take(5).map { match ->
-                val title = match.groupValues[1].replace(Regex("<[^>]*>"), "").trim()
-                val snippet = match.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
-                "• $title\n  $snippet"
-            }.toList()
+        return "Search returned no results for: $query"
+    }
 
-            if (results.isEmpty()) "Search returned no results for: $query"
-            else results.joinToString("\n---\n")
-        }.getOrDefault("Search failed. Answer based on your knowledge.")
+    private fun fetchUrl(urlString: String): String {
+        val url = URL(urlString)
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15000; readTimeout = 15000
+            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36")
+            setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+        }
+        val html = conn.inputStream.bufferedReader().readText()
+        val code = conn.responseCode
+        conn.disconnect()
+        if (code != 200) throw RuntimeException("HTTP $code")
+        return html
+    }
+
+    private fun parseDdgResults(html: String): List<Pair<String, String>> {
+        val results = mutableListOf<Pair<String, String>>()
+
+        val litePattern = Regex(
+            """class="result-link"[^>]*>\s*(.*?)\s*</a>.*?class="result-snippet"[^>]*>\s*(.*?)\s*</""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
+        )
+        for (m in litePattern.findAll(html).take(5)) {
+            val t = m.groupValues[1].replace(Regex("<[^>]*>"), "").trim()
+            val s = m.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
+            if (t.isNotBlank()) results.add(t to s)
+        }
+        if (results.isNotEmpty()) return results
+
+        val htmlPattern = Regex(
+            """class="result__a"[^>]*>\s*(.*?)\s*</a>.*?class="result__snippet"[^>]*>\s*(.*?)\s*</a>""",
+            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
+        )
+        for (m in htmlPattern.findAll(html).take(5)) {
+            val t = m.groupValues[1].replace(Regex("<[^>]*>"), "").trim()
+            val s = m.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
+            if (t.isNotBlank()) results.add(t to s)
+        }
+        return results
     }
 
     // ---- Git 集成 ----
@@ -390,30 +454,18 @@ class AIToolSet(private val context: Context) : ToolSet {
 
     private fun listViaSaf(treeUri: Uri, subPath: String): String {
         return try {
-            val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-            val childrenUri = if (subPath.isBlank()) {
-                DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, rootDocId)
-            } else {
-                val docId = findDocId(treeUri, rootDocId, subPath.trimStart('/'))
-                    ?: return "Directory not found: $subPath"
-                DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
-            }
             val items = mutableListOf<String>()
-            val projection = arrayOf(
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE,
-                DocumentsContract.Document.COLUMN_SIZE,
-            )
-            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { c ->
-                val nameCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                val mimeCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
-                val sizeCol = c.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
-                while (c.moveToNext()) {
-                    val name = c.getString(nameCol) ?: continue
-                    val isDir = c.getString(mimeCol) == DocumentsContract.Document.MIME_TYPE_DIR
-                    val size = if (sizeCol >= 0) c.getLong(sizeCol) else 0L
-                    val tag = if (isDir) "[DIR]" else "[FILE]"
-                    val sizeStr = if (!isDir && size > 0) " (${formatSize(size)})" else ""
+            if (subPath.isBlank()) {
+                val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
+                queryChildrenForList(treeUri, rootDocId, items)
+            } else {
+                val doc = navigateToDocFile(subPath.trimStart('/'))
+                    ?: return "Directory not found: $subPath"
+                val children = doc.listFiles() ?: return "Empty directory."
+                for (child in children) {
+                    val name = child.name ?: continue
+                    val tag = if (child.isDirectory) "[DIR]" else "[FILE]"
+                    val sizeStr = if (!child.isDirectory && child.length() > 0) " (${formatSize(child.length())})" else ""
                     items.add("$tag $name$sizeStr")
                 }
             }
@@ -429,82 +481,102 @@ class AIToolSet(private val context: Context) : ToolSet {
         }
     }
 
-    private fun resolveSafChild(treeUri: Uri, path: String): Uri? {
+    private fun queryChildrenForList(treeUri: Uri, parentDocId: String, items: MutableList<String>) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+        )
+        context.contentResolver.query(childrenUri, projection, null, null, null)?.use { c ->
+            val nameCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val sizeCol = c.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+            while (c.moveToNext()) {
+                val name = c.getString(nameCol) ?: continue
+                val isDir = c.getString(mimeCol) == DocumentsContract.Document.MIME_TYPE_DIR
+                val size = if (sizeCol >= 0) c.getLong(sizeCol) else 0L
+                val tag = if (isDir) "[DIR]" else "[FILE]"
+                val sizeStr = if (!isDir && size > 0) " (${formatSize(size)})" else ""
+                items.add("$tag $name$sizeStr")
+            }
+        }
+    }
+
+    private fun navigateToDocFile(path: String): DocumentFile? {
+        val treeUri = projectUri ?: return null
+        if (path.isBlank()) return DocumentFile.fromTreeUri(context, treeUri)
+
+        val docFileResult = try {
+            var doc = DocumentFile.fromTreeUri(context, treeUri) ?: null
+            if (doc != null) {
+                var current: DocumentFile = doc
+                for (segment in path.trimStart('/').split('/')) {
+                    if (segment.isEmpty()) continue
+                    current = current.findFile(segment) ?: break
+                }
+                doc = current
+            }
+            doc
+        } catch (_: Exception) { null }
+        if (docFileResult != null) return docFileResult
+
         return try {
             val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-            val docId = findDocId(treeUri, rootDocId, path.trimStart('/')) ?: return null
-            DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+            val segments = path.trimStart('/').split('/')
+            var current = rootDocId
+            for (seg in segments) {
+                if (seg.isEmpty()) continue
+                current = findChildDocId(treeUri, current, seg) ?: return null
+            }
+            val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, current)
+            DocumentFile.fromSingleUri(context, docUri)
         } catch (_: Exception) { null }
     }
 
-    private fun findDocId(treeUri: Uri, parentDocId: String, path: String): String? {
-        if (path.isEmpty()) return parentDocId
-        val segments = path.split('/')
-        var current = parentDocId
-        for (seg in segments) {
-            if (seg.isEmpty()) continue
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, current)
-            var found: String? = null
-            context.contentResolver.query(
-                childrenUri,
-                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
-                null, null, null
-            )?.use { c ->
-                val idCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                val nameCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                while (c.moveToNext()) {
-                    if (c.getString(nameCol) == seg) { found = c.getString(idCol); break }
-                }
+    private fun findChildDocId(treeUri: Uri, parentDocId: String, childName: String): String? {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+        return context.contentResolver.query(childrenUri,
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null, null, null
+        )?.use { c ->
+            val idCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            while (c.moveToNext()) {
+                if (childName == c.getString(nameCol)) return@use c.getString(idCol)
             }
-            if (found == null) return null
-            current = found
+            null
         }
-        return current
+    }
+
+    private fun resolveSafChild(treeUri: Uri, path: String): Uri? {
+        return navigateToDocFile(path.trimStart('/'))?.uri
     }
 
     private fun ensureSafDir(treeUri: Uri, path: String) {
-        val parts = path.trimStart('/').split('/')
-        var currentDocId = try { DocumentsContract.getTreeDocumentId(treeUri) } catch (_: Exception) { return }
-        for (part in parts) {
+        var doc = DocumentFile.fromTreeUri(context, treeUri) ?: return
+        for (part in path.trimStart('/').split('/')) {
             if (part.isEmpty()) continue
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, currentDocId)
-            var found: String? = null
-            context.contentResolver.query(
-                childrenUri,
-                arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
-                null, null, null
-            )?.use { c ->
-                val idCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                val nameCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                while (c.moveToNext()) { if (c.getString(nameCol) == part) { found = c.getString(idCol); break } }
+            val child = doc.findFile(part)
+            if (child != null) {
+                doc = child
+            } else {
+                doc = doc.createDirectory(part) ?: return
             }
-            if (found != null) { currentDocId = found; continue }
-            // 创建目录
-            val parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, currentDocId)
-            val newDoc = DocumentsContract.createDocument(
-                context.contentResolver, parentUri,
-                DocumentsContract.Document.MIME_TYPE_DIR, part
-            ) ?: return
-            currentDocId = DocumentsContract.getDocumentId(newDoc)
         }
     }
 
     private fun createSafFile(treeUri: Uri, path: String): Uri? {
-        try {
+        return try {
             val fileName = path.substringAfterLast('/')
             val parentPath = path.substringBeforeLast('/')
             if (parentPath.isNotEmpty() && parentPath != path) {
-                val parentDocId = findDocId(treeUri,
-                    DocumentsContract.getTreeDocumentId(treeUri), parentPath.trimStart('/'))
-                    ?: return null
-                val parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDocId)
-                return DocumentsContract.createDocument(context.contentResolver, parentUri, "application/octet-stream", fileName)
+                val parentDoc = navigateToDocFile(parentPath.trimStart('/')) ?: return null
+                parentDoc.createFile("application/octet-stream", fileName)?.uri
             } else {
-                val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-                val rootUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootDocId)
-                return DocumentsContract.createDocument(context.contentResolver, rootUri, "application/octet-stream", fileName)
+                DocumentFile.fromTreeUri(context, treeUri)?.createFile("application/octet-stream", fileName)?.uri
             }
-        } catch (_: Exception) { return null }
+        } catch (_: Exception) { null }
     }
 
     private fun formatSize(bytes: Long): String = when {

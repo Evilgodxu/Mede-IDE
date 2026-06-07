@@ -237,6 +237,8 @@ class ChatViewModel(
                     val conv = ensureConversation()
                     processWithJsonTools(text, modelMsgId, taskId, ctx, notifSettings)
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 copyCrashToClipboard("sendMessage", e)
                 updateModelMessage(modelMsgId, "\n\n[错误: ${e.message}]", false)
@@ -448,7 +450,7 @@ class ChatViewModel(
 
     private fun executeAiTool(name: String, args: Map<String, String>): String = try {
         when (name) {
-            "listFiles" -> aiToolSet.listFiles(args["subPath"] ?: "")
+            "listFiles" -> aiToolSet.listFiles(args["subPath"] ?: args["path"] ?: "")
             "readFile" -> aiToolSet.readFile(args["path"] ?: "")
             "writeFile" -> aiToolSet.writeFile(args["path"] ?: "", args["content"] ?: "")
             "applyPatch" -> aiToolSet.applyPatch(args["path"] ?: "", args["patches"] ?: "")
@@ -544,7 +546,7 @@ class ChatViewModel(
 
             nextInput = Message.tool(Contents.of(listOf(Content.ToolResponse(funcName, toolResult))))
             currentMsgId = java.util.UUID.randomUUID().toString()
-            _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true)) }
+            _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true), isLoading = true) }
         }
     }
 
@@ -667,7 +669,7 @@ class ChatViewModel(
             }
 
             currentMsgId = java.util.UUID.randomUUID().toString()
-            _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true)) }
+            _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true), isLoading = true) }
         }
     }
 
@@ -746,32 +748,39 @@ class ChatViewModel(
 
     fun clearMessages() {
         sendJob?.cancel()
-        closeConversation()
         _state.update { it.copy(messages = emptyList(), inputText = "", taskList = emptyList(), fileChanges = emptyList()) }
+        viewModelScope.launch(Dispatchers.IO) { closeConversation() }
     }
 
     fun newConversation() {
         sendJob?.cancel()
-        closeConversation()
-        _state.update { state ->
-            val updatedConversations = if (state.messages.isNotEmpty()) {
-                val title = state.messages.firstOrNull { it.role == ChatRole.User }?.content?.take(30) ?: "新对话"
-                val entry = ConversationEntry(
-                    id = state.activeConversationId ?: java.util.UUID.randomUUID().toString(),
-                    title = title, messages = state.messages,
-                )
-                val exists = state.conversations.any { it.id == entry.id }
-                if (exists) state.conversations.map { if (it.id == entry.id) entry else it }
-                else listOf(entry) + state.conversations
-            } else state.conversations
+        // 先计算要保存的对话（使用当前状态快照）
+        val s = _state.value
+        val updatedConversations = if (s.messages.isNotEmpty()) {
+            val title = s.messages.firstOrNull { it.role == ChatRole.User }?.content?.take(30) ?: "新对话"
+            val entry = ConversationEntry(
+                id = s.activeConversationId ?: java.util.UUID.randomUUID().toString(),
+                title = title, messages = s.messages,
+            )
+            val exists = s.conversations.any { it.id == entry.id }
+            if (exists) s.conversations.map { if (it.id == entry.id) entry else it }
+            else listOf(entry) + s.conversations
+        } else s.conversations
+        // 立即重置 UI 状态（同步，主线程，无阻塞）
+        _state.update {
+            it.copy(messages = emptyList(), inputText = "", isLoading = false,
+                conversations = updatedConversations, activeConversationId = null,
+                taskList = emptyList(), fileChanges = emptyList())
+        }
+        // 后台清理：关闭旧会话（可能阻塞）+ 持久化
+        viewModelScope.launch(Dispatchers.IO) {
+            closeConversation()
             persistConversations(updatedConversations)
-            state.copy(messages = emptyList(), inputText = "", isLoading = false, conversations = updatedConversations, activeConversationId = null, taskList = emptyList(), fileChanges = emptyList())
         }
     }
 
     fun switchConversation(entry: ConversationEntry) {
         sendJob?.cancel()
-        closeConversation()
         pendingInitialMessages = entry.messages.mapNotNull { msg ->
             when (msg.role) {
                 ChatRole.User -> Message.user(msg.content)
@@ -781,16 +790,20 @@ class ChatViewModel(
             }
         }
         _state.update { it.copy(messages = entry.messages, inputText = "", isLoading = false, activeConversationId = entry.id, isHistoryOpen = false) }
+        viewModelScope.launch(Dispatchers.IO) { closeConversation() }
     }
 
     fun deleteConversation(entryId: String) {
-        _state.update { state ->
-            val updated = state.conversations.filter { it.id != entryId }
+        val currentState = _state.value
+        val updated = currentState.conversations.filter { it.id != entryId }
+        val isActive = currentState.activeConversationId == entryId
+        _state.update {
+            if (isActive) it.copy(conversations = updated, messages = emptyList(), activeConversationId = null)
+            else it.copy(conversations = updated)
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            if (isActive) closeConversation()
             persistConversations(updated)
-            if (state.activeConversationId == entryId) {
-                closeConversation()
-                state.copy(conversations = updated, messages = emptyList(), activeConversationId = null)
-            } else state.copy(conversations = updated)
         }
     }
 
