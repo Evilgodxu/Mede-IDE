@@ -30,6 +30,7 @@ data class ChatMessage(
     val isStreaming: Boolean = false,
     val timestamp: Long = System.currentTimeMillis(),
     val fileOp: FileOperationMeta? = null,
+    val isToolMessage: Boolean = false, // 是否为工具调用中间消息（JSON+执行结果）
 )
 
 enum class ChatRole { User, Model, System }
@@ -79,6 +80,7 @@ data class ChatUiState(
     val lastNotification: NotificationEvent? = null,
     // 删除行为卡片开关
     val deleteCardEnabled: Boolean = false,
+    val showToolCalls: Boolean = false, // 是否在对话中展示工具调用信息
     // 上下文参考计数
     val activeRulesCount: Int = 0,
     val activeSkillsCount: Int = 0,

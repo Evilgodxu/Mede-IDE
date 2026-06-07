@@ -68,6 +68,8 @@ fun HomeScreen(
     // 编辑器内容缓存
     val editorContent = remember { mutableStateMapOf<String, TextFieldValue>() }
     val workspaceRoot = remember { File(context.filesDir, "workspace") }
+    // 相对路径 → content:// URI 缓存（SAF findFile 可能找不到隐藏文件，直接用原始 URI 读取）
+    val relativeToContentUri = remember { mutableMapOf<String, String>() }
 
     // SAF content:// 路径 → 相对于项目根目录的路径
     fun safPathToRelative(safPath: String): String {
@@ -113,7 +115,11 @@ fun HomeScreen(
 
     // 打开文件 Tab（统一使用相对路径作为 ID，避免 content:// URI 与 AI 操作的相对路径不一致）
     fun openFileTab(path: String, displayName: String? = null) {
-        val relPath = if (path.startsWith("content://")) safPathToRelative(path) else path
+        val relPath = if (path.startsWith("content://")) {
+            val rel = safPathToRelative(path)
+            relativeToContentUri[rel] = path // 缓存原始 content:// URI
+            rel
+        } else path
         openTab(TabItem(relPath, displayName ?: displayNameFromPath(relPath), TabType.File))
     }
 
@@ -139,6 +145,14 @@ fun HomeScreen(
 
     // 从实际存储读取文件（SAF projectUri → workspaceRoot 兜底）
     fun readFileFromSource(path: String): String {
+        // 优先通过缓存获取 content:// URI 直接读取（SAF findFile 可能找不到隐藏文件）
+        val contentUri = relativeToContentUri[path]
+        if (contentUri != null) {
+            return runCatching {
+                context.contentResolver.openInputStream(Uri.parse(contentUri))
+                    ?.bufferedReader()?.readText()
+            }?.getOrDefault("无法读取文件") ?: "无法读取文件"
+        }
         if (path.startsWith("content://")) {
             return runCatching {
                 context.contentResolver.openInputStream(Uri.parse(path))
@@ -313,8 +327,25 @@ fun HomeScreen(
                     viewModel = viewModel,
                     chatViewModel = chatViewModel,
                     onFileClick = { fileItem ->
-                        editorContent.remove(fileItem.uri.toString())
+                        val rel = safPathToRelative(fileItem.uri.toString())
+                        editorContent.remove(rel)
                         openFileTab(fileItem.uri.toString(), fileItem.name)
+                    },
+                    onAddToConversation = { fileItem ->
+                        val currentText = chatViewModel.state.value.inputText
+                        val label = if (fileItem.isDirectory) {
+                            "[目录: ${fileItem.name}]"
+                        } else {
+                            val cached = editorContent[fileItem.uri.toString()]?.text
+                            if (cached != null) {
+                                val trimmed = if (cached.length > 2000) "${cached.take(2000)}\n// ... (剩余内容已截断)" else cached
+                                "文件 `${fileItem.name}` 的内容：\n```\n$trimmed\n```"
+                            } else {
+                                "文件: `${fileItem.name}`（请先打开此文件查看内容）"
+                            }
+                        }
+                        val newText = if (currentText.isBlank()) label else "$currentText\n\n$label"
+                        chatViewModel.setInputText(newText)
                     },
                 )
             },
@@ -365,9 +396,7 @@ fun HomeScreen(
                         }
                     },
                     tabContent = { path ->
-                        val content = readFileFromSource(path)
-                        val tfv = TextFieldValue(content)
-                        editorContent[path] = tfv
+                        val tfv = editorContent.getOrPut(path) { TextFieldValue(readFileFromSource(path)) }
                         val pending = pendingEdits[path]
                         val lineDiffs: Map<Int, LineChangeType> = if (pending != null) {
                             computeLineDiff(pending.originalContent, pending.newContent)
@@ -408,6 +437,7 @@ private fun LeftPanelContent(
     viewModel: HomeViewModel,
     chatViewModel: ChatViewModel,
     onFileClick: (FileItem) -> Unit = {},
+    onAddToConversation: (FileItem) -> Unit = {},
 ) {
     when (selectedTab) {
         SidebarTab.Explorer -> {
@@ -418,12 +448,7 @@ private fun LeftPanelContent(
                     viewModel.listChildren(uri, callback)
                 },
                 onFileClick = onFileClick,
-                onAddToConversation = { fileItem ->
-                    val currentText = chatViewModel.state.value.inputText
-                    val label = if (fileItem.isDirectory) "[${fileItem.name}]" else "[${fileItem.name}]"
-                    val newText = if (currentText.isBlank()) label else "$currentText $label"
-                    chatViewModel.setInputText(newText)
-                },
+                onAddToConversation = onAddToConversation,
                 onRename = { uri, newName -> viewModel.renameFile(uri, newName) },
                 onDelete = { uri -> viewModel.deleteFile(uri) },
                 onCreate = { uri, name, isDir -> viewModel.createFile(uri, name, isDir) },

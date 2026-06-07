@@ -346,14 +346,12 @@ fun MainTopBar(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
 
-                    // 终端
+                    // 终端（暂不可用）
                     Text(
                         text = stringResource(R.string.menu_terminal),
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier
-                            .clickable { onTerminalClick() }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.35f),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
 
                     Text(

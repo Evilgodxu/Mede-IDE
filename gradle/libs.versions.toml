@@ -65,5 +65,3 @@ litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-and
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version = "4.12.0" }
 okhttp-sse = { group = "com.squareup.okhttp3", name = "okhttp-sse", version = "4.12.0" }
-
-termux-terminal-view = { group = "com.termux.termux-app", name = "terminal-view", version = "0.118.0" }

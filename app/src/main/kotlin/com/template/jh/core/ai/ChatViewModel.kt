@@ -114,6 +114,11 @@ class ChatViewModel(
             }
         }
         viewModelScope.launch {
+            preferencesRepo.showToolCalls.collect { enabled ->
+                _state.update { it.copy(showToolCalls = enabled) }
+            }
+        }
+        viewModelScope.launch {
             preferencesRepo.rules.collect { rules ->
                 _state.update { it.copy(activeRulesCount = rules.count { r -> r.type == RuleType.Global || r.type == RuleType.Project }) }
             }
@@ -153,6 +158,10 @@ class ChatViewModel(
                 _state.update { it.copy(cloudModelName = name) }
             }
         }
+    }
+
+    fun setShowToolCalls(enabled: Boolean) {
+        viewModelScope.launch { preferencesRepo.setShowToolCalls(enabled) }
     }
 
     fun setDeepThinkEnabled(enabled: Boolean) {
@@ -267,6 +276,13 @@ class ChatViewModel(
     // 接收 HomeScreen 的打开文件列表，注入到 system prompt
     fun setOpenedFilePaths(paths: List<String>) {
         _state.update { it.copy(openedFilePaths = paths) }
+    }
+
+    // 构建当前打开文件的上下文文本（每次模型输入时注入，不回显给用户）
+    private fun buildFileContext(): String {
+        val paths = _state.value.openedFilePaths
+        if (paths.isEmpty()) return ""
+        return paths.joinToString("\n", "[当前打开的文件]\n", "\n\n") { "- $it" }
     }
 
     // 自动上下文：活动文件 + 光标行号
@@ -453,7 +469,13 @@ class ChatViewModel(
             val fullResponse = StringBuilder()
             val conv = activeConversation ?: return
 
-            conv.sendMessageAsync(nextInput.toString()).catch { t ->
+            // 首轮注入文件上下文（不修改用户可见消息）
+            val sendInput = if (rounds == 1) {
+                val ctx = buildFileContext()
+                if (ctx.isNotEmpty()) ctx + nextInput.toString() else nextInput.toString()
+            } else nextInput.toString()
+
+            conv.sendMessageAsync(sendInput).catch { t ->
                 copyCrashToClipboard("sendMessageAsync(round=$rounds)", t)
                 updateModelMessage(currentMsgId, "\n\n[错误: ${t.message}]", false)
                 updateTaskStatus(taskId, TaskStatus.Failed)
@@ -482,6 +504,9 @@ class ChatViewModel(
                 emitNotification(NotificationEventType.TaskCompleted, "任务完成")
                 return
             }
+
+            // 标记为工具调用中间消息
+            _state.update { s -> s.copy(messages = s.messages.map { if (it.id == currentMsgId) it.copy(isToolMessage = true) else it }) }
 
             val (prefixText, funcName, funcArgs) = toolCall
             val toolResult = executeAiTool(funcName, funcArgs)
@@ -566,6 +591,9 @@ class ChatViewModel(
                 emitNotification(NotificationEventType.TaskCompleted, "任务完成")
                 return
             }
+
+            // 标记为工具调用中间消息
+            _state.update { s -> s.copy(messages = s.messages.map { if (it.id == currentMsgId) it.copy(isToolMessage = true) else it }) }
 
             val (prefixText, funcName, funcArgs) = toolCall
             val toolResult = executeAiTool(funcName, funcArgs)

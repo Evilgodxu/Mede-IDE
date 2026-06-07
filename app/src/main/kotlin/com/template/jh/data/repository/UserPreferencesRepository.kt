@@ -36,6 +36,7 @@ class UserPreferencesRepository(private val context: Context) {
         val NOTIFY_WAITING_AUTH_SOUND = booleanPreferencesKey("notify_waiting_auth_sound")
         val NOTIFY_WAITING_AUTH_POPUP = booleanPreferencesKey("notify_waiting_auth_popup")
         val DELETE_CARD_ENABLED = booleanPreferencesKey("delete_card_enabled")
+        val SHOW_TOOL_CALLS = booleanPreferencesKey("show_tool_calls")
         val DEEP_THINK_ENABLED = booleanPreferencesKey("deep_think_enabled")
         val THINKING_ROUNDS = intPreferencesKey("thinking_rounds")
         val LAST_OPENED_FOLDER_URI = stringPreferencesKey("last_opened_folder_uri")
@@ -216,11 +217,18 @@ class UserPreferencesRepository(private val context: Context) {
         }
     }
 
+    val showToolCalls: Flow<Boolean> = context.dataStore.data
+        .map { it[PreferencesKeys.SHOW_TOOL_CALLS] ?: false }
+
     val deepThinkEnabled: Flow<Boolean> = context.dataStore.data
         .map { it[PreferencesKeys.DEEP_THINK_ENABLED] ?: true }
 
     val thinkingRounds: Flow<Int> = context.dataStore.data
         .map { (it[PreferencesKeys.THINKING_ROUNDS] ?: 2).coerceIn(1, 10) }
+
+    suspend fun setShowToolCalls(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.SHOW_TOOL_CALLS] = enabled }
+    }
 
     suspend fun setDeepThinkEnabled(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.DEEP_THINK_ENABLED] = enabled }

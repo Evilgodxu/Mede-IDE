@@ -139,6 +139,7 @@ fun AIChatPanel(
                 state = listState, verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(state.messages, key = { it.id }) {
+                    if (it.isToolMessage && !state.showToolCalls) return@items
                     ChatBubble(
                         message = it,
                         onFileCardClick = { path -> viewModel.requestOpenFile(path) },

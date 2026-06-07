@@ -138,9 +138,6 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
 
-    // Termux 终端模拟器
-    implementation(libs.termux.terminal.view)
-
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))

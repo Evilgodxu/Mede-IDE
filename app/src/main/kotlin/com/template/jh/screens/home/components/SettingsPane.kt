@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -57,9 +58,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.template.jh.R
 import com.template.jh.core.ai.ChatViewModel
 import com.template.jh.core.ai.DownloadStatus
@@ -120,6 +123,7 @@ fun SettingsPane(
                 onSetRules = { viewModel.setRules(it) }, onSetSkills = { viewModel.setSkills(it) },
                 onSetMcpServers = { viewModel.setMcpServers(it) },
                 onSetNotificationSettings = { viewModel.setNotificationSettings(it) },
+                onSetShowToolCalls = { chatViewModel?.setShowToolCalls(it) },
                 chatViewModel = chatViewModel, onBrowseModelFile = onBrowseModelFile,
             )
         }
@@ -144,6 +148,7 @@ private fun SettingsCategoryContent(
     onSetModelName: (String) -> Unit, onSetUserName: (String) -> Unit, onSetRules: (List<Rule>) -> Unit,
     onSetSkills: (List<SkillItem>) -> Unit, onSetMcpServers: (List<McpServer>) -> Unit,
     onSetNotificationSettings: (NotificationSettings) -> Unit,
+    onSetShowToolCalls: (Boolean) -> Unit,
     chatViewModel: ChatViewModel?, onBrowseModelFile: () -> Unit,
 ) {
     Column(
@@ -165,10 +170,14 @@ private fun SettingsCategoryContent(
             SettingsCategory.Model -> ModelSettingsContent(chatViewModel, onBrowseModelFile)
             SettingsCategory.Skill -> SkillsSettingsContent(state.skills, onSetSkills)
             SettingsCategory.MCP -> McpSettingsContent(state.mcpServers, onSetMcpServers)
-            SettingsCategory.Conversation -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ThinkingSettingsContent(chatViewModel)
-                HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                NotificationSettingsContent(state.notificationSettings, onSetNotificationSettings)
+            SettingsCategory.Conversation -> {
+                val chatStateVal = chatViewModel?.let { vm -> vm.state.collectAsState().value }
+                val showToolCalls = chatStateVal?.showToolCalls ?: false
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ThinkingSettingsContent(chatViewModel)
+                    HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    NotificationSettingsContent(state.notificationSettings, onSetNotificationSettings, showToolCalls, onSetShowToolCalls)
+                }
             }
             SettingsCategory.Rules -> RulesSettingsContent(state.rules, onSetRules)
         }
@@ -799,9 +808,8 @@ private fun McpSettingsContent(
 ) {
     var showDialog by remember { mutableStateOf(false) }
     var editingId by remember { mutableStateOf<String?>(null) }
-    var editName by remember { mutableStateOf("") }
-    var editCommand by remember { mutableStateOf("") }
-    var editArgs by remember { mutableStateOf("") }
+    var jsonInput by remember { mutableStateOf("") }
+    var jsonError by remember { mutableStateOf<String?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
@@ -812,10 +820,7 @@ private fun McpSettingsContent(
 
         val enabledCount = servers.count { it.enabled }
         if (enabledCount > 0) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)),
-            ) {
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))) {
                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.CheckCircle, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))
@@ -825,9 +830,7 @@ private fun McpSettingsContent(
         }
 
         OutlinedButton(
-            onClick = {
-                editName = ""; editCommand = ""; editArgs = ""; editingId = null; showDialog = true
-            },
+            onClick = { jsonInput = ""; jsonError = null; editingId = null; showDialog = true },
             modifier = Modifier.fillMaxWidth(),
         ) {
             Icon(Icons.Default.Add, null, Modifier.size(16.dp))
@@ -836,10 +839,7 @@ private fun McpSettingsContent(
         }
 
         servers.forEach { server ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-            ) {
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
                 Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -851,33 +851,23 @@ private fun McpSettingsContent(
                                 color = if (server.enabled) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Text(
-                            "${server.command} ${server.args}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Text("${server.command} ${server.args}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     androidx.compose.material3.Switch(
                         checked = server.enabled,
-                        onCheckedChange = { checked ->
-                            onSetMcpServers(servers.map { if (it.id == server.id) it.copy(enabled = checked) else it })
-                        },
+                        onCheckedChange = { checked -> onSetMcpServers(servers.map { if (it.id == server.id) it.copy(enabled = checked) else it }) },
                     )
                     IconButton(
                         onClick = {
-                            editName = server.name; editCommand = server.command; editArgs = server.args
-                            editingId = server.id; showDialog = true
+                            jsonInput = """{"name":"${server.name}","command":"${server.command}","args":"${server.args}"}"""
+                            jsonError = null; editingId = server.id; showDialog = true
                         },
                         modifier = Modifier.size(28.dp),
-                    ) {
-                        Icon(Icons.Default.Refresh, "编辑", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    ) { Icon(Icons.Default.Refresh, "编辑", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                     IconButton(
                         onClick = { onSetMcpServers(servers.filter { it.id != server.id }) },
                         modifier = Modifier.size(28.dp),
-                    ) {
-                        Icon(Icons.Default.Delete, "删除", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
-                    }
+                    ) { Icon(Icons.Default.Delete, "删除", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error) }
                 }
             }
         }
@@ -888,36 +878,38 @@ private fun McpSettingsContent(
             onDismissRequest = { showDialog = false },
             title = { Text(if (editingId != null) "编辑 MCP 服务器" else "添加 MCP 服务器") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("粘贴 JSON 配置", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(
-                        value = editName, onValueChange = { editName = it },
-                        label = { Text("服务器名称") },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        value = jsonInput,
+                        onValueChange = { v -> jsonInput = v; jsonError = null },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
+                        placeholder = { Text("{\n  \"name\": \"filesystem\",\n  \"command\": \"npx\",\n  \"args\": \"-y @modelcontextprotocol/server-filesystem\"\n}") },
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
                     )
-                    OutlinedTextField(
-                        value = editCommand, onValueChange = { editCommand = it },
-                        label = { Text("命令/地址") },
-                        placeholder = { Text("例如: npx 或 http://localhost:3000") },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = editArgs, onValueChange = { editArgs = it },
-                        label = { Text("参数") },
-                        placeholder = { Text("-y @server/mcp") },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    )
+                    if (jsonError != null) {
+                        Text(jsonError!!, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    }
                 }
             },
             confirmButton = {
                 Button(onClick = {
-                    if (editName.isNotBlank() && editCommand.isNotBlank()) {
+                    try {
+                        val obj = org.json.JSONObject(jsonInput.trim())
+                        val name = obj.optString("name", "").trim()
+                        val command = obj.optString("command", "").trim()
+                        val args = obj.optString("args", "").trim()
+                        if (name.isBlank()) { jsonError = "缺少 name 字段"; return@Button }
+                        if (command.isBlank()) { jsonError = "缺少 command 字段"; return@Button }
                         val updated = if (editingId != null) {
-                            servers.map { if (it.id == editingId) it.copy(name = editName, command = editCommand, args = editArgs) else it }
+                            servers.map { if (it.id == editingId) it.copy(name = name, command = command, args = args) else it }
                         } else {
-                            servers + McpServer(name = editName, command = editCommand, args = editArgs, enabled = true)
+                            servers + McpServer(name = name, command = command, args = args, enabled = true)
                         }
                         onSetMcpServers(updated)
                         showDialog = false
+                    } catch (e: Exception) {
+                        jsonError = "JSON 解析失败: ${e.message}"
                     }
                 }) { Text("保存") }
             },
@@ -949,6 +941,8 @@ private fun ThinkingSettingsContent(chatViewModel: ChatViewModel?) {
 private fun NotificationSettingsContent(
     settings: NotificationSettings,
     onSetNotificationSettings: (NotificationSettings) -> Unit,
+    showToolCalls: Boolean,
+    onSetShowToolCalls: (Boolean) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
@@ -1012,6 +1006,34 @@ private fun NotificationSettingsContent(
                     androidx.compose.material3.Switch(
                         checked = settings.deleteCardEnabled,
                         onCheckedChange = { onSetNotificationSettings(settings.copy(deleteCardEnabled = it)) },
+                    )
+                }
+            }
+        }
+
+        // 展示工具调用开关
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text("展示工具调用", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    "开启后在对话中展示AI的工具调用JSON及执行结果",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (showToolCalls) "展示工具调用" else "隐藏工具调用",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    androidx.compose.material3.Switch(
+                        checked = showToolCalls,
+                        onCheckedChange = { onSetShowToolCalls(it) },
                     )
                 }
             }

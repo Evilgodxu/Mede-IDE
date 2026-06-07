@@ -191,7 +191,6 @@ fun ResourcePanel(
 private fun FileTreeItem(
     item: FileItem,
     depth: Int,
-    compactParents: List<FileItem> = emptyList(),
     onListChildren: (Uri, (List<FileItem>) -> Unit) -> Unit,
     onFileClick: (FileItem) -> Unit = {},
     onAddToConversation: (FileItem) -> Unit = {},
@@ -204,6 +203,8 @@ private fun FileTreeItem(
     var isExpanded by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var showContextMenu by remember { mutableStateOf(false) }
+    // 紧凑链：展开时解析到最深层的路径片段，显示为 "kotlin / com / template"
+    var compactChain by remember { mutableStateOf<List<String>>(emptyList()) }
 
     Column {
         Row(
@@ -212,20 +213,40 @@ private fun FileTreeItem(
                 .combinedClickable(
                     onClick = {
                         if (item.isDirectory) {
-                            if (!isExpanded) {
+                            if (isLoading) return@combinedClickable
+                            if (isExpanded) {
+                                // 展开状态 → 折叠（重置链）
+                                compactChain = emptyList()
+                                isExpanded = false
+                            } else if (compactChain.isNotEmpty()) {
+                                // 已有紧凑链 → 深入一层
+                                val prevChainSize = compactChain.size
+                                isLoading = true
+                                loadDeepestChild(item.uri, compactChain, childrenCache, onListChildren) { deeperChain, _ ->
+                                    compactChain = deeperChain
+                                    isLoading = false
+                                    if (deeperChain.size == prevChainSize) isExpanded = true
+                                }
+                            } else {
                                 val cached = childrenCache[item.uri.toString()]
                                 if (cached != null) {
-                                    isExpanded = true
+                                    if (cached.size == 1 && cached[0].isDirectory && compactChain.isEmpty()) {
+                                        compactChain = listOf(cached[0].name)
+                                    } else {
+                                        isExpanded = true
+                                    }
                                 } else {
                                     isLoading = true
-                                    isExpanded = true
                                     onListChildren(item.uri) { children ->
                                         childrenCache[item.uri.toString()] = children
                                         isLoading = false
+                                        if (children.size == 1 && children[0].isDirectory) {
+                                            compactChain = listOf(children[0].name)
+                                        } else {
+                                            isExpanded = true
+                                        }
                                     }
                                 }
-                            } else {
-                                isExpanded = false
                             }
                         } else {
                             onFileClick(item)
@@ -237,26 +258,14 @@ private fun FileTreeItem(
                 .heightIn(min = 28.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 缩进：depth 层级 + compactParents 也算额外层级
-            val indent = depth + compactParents.size
-            if (indent > 0) {
-                Spacer(Modifier.width((indent * 16).dp))
-            }
-            // 展开/折叠箭头
+            val indent = depth
+            if (indent > 0) Spacer(Modifier.width((indent * 16).dp))
+
             if (item.isDirectory) {
                 if (isLoading) {
-                    CircularProgressIndicator(
-                        Modifier.size(12.dp).padding(end = 4.dp),
-                        strokeWidth = 1.5.dp,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    CircularProgressIndicator(Modifier.size(12.dp).padding(end = 4.dp), strokeWidth = 1.5.dp, color = MaterialTheme.colorScheme.primary)
                 } else {
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = if (isExpanded) "折叠" else "展开",
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Icon(Icons.Default.ChevronRight, if (isExpanded) "折叠" else "展开", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 Spacer(Modifier.width(14.dp))
@@ -264,21 +273,15 @@ private fun FileTreeItem(
 
             Spacer(Modifier.width(4.dp))
 
-            // 图标
             Icon(
                 imageVector = when {
                     item.isDirectory && isExpanded -> Icons.Default.FolderOpen
                     item.isDirectory -> Icons.Default.Folder
-                    item.name.let {
-                        it.endsWith(".kt") || it.endsWith(".java") || it.endsWith(".xml") || it.endsWith(".gradle")
-                    } -> Icons.Default.Description
-                    item.name.let {
-                        it.endsWith(".png") || it.endsWith(".jpg") || it.endsWith(".webp") || it.endsWith(".gif")
-                    } -> Icons.Default.Image
+                    item.name.let { it.endsWith(".kt") || it.endsWith(".java") || it.endsWith(".xml") || it.endsWith(".gradle") } -> Icons.Default.Description
+                    item.name.let { it.endsWith(".png") || it.endsWith(".jpg") || it.endsWith(".webp") || it.endsWith(".gif") } -> Icons.Default.Image
                     else -> Icons.Default.InsertDriveFile
                 },
-                contentDescription = null,
-                modifier = Modifier.size(14.dp),
+                contentDescription = null, modifier = Modifier.size(14.dp),
                 tint = when {
                     item.isDirectory -> MaterialTheme.colorScheme.primary
                     item.name.endsWith(".kt") -> Color(0xFF7F52FF)
@@ -290,18 +293,15 @@ private fun FileTreeItem(
 
             Spacer(Modifier.width(6.dp))
 
-            // 紧凑路径 + 文件名
-            val displayName = if (compactParents.isNotEmpty()) {
-                compactParents.joinToString(separator = " / ") { it.name } + " / " + item.name
-            } else {
-                item.name
-            }
+            // 紧凑链路径 = 当前目录名 + 链上子目录
+            val displayName = if (compactChain.isNotEmpty()) {
+                item.name + " / " + compactChain.joinToString(" / ")
+            } else item.name
             Text(
                 text = displayName,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
 
@@ -347,8 +347,7 @@ private fun FileTreeItem(
                         onClick = {
                             showContextMenu = false
                             val clip = ClipData.newPlainText("path", item.uri.toString())
-                            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                                .setPrimaryClip(clip)
+                            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
                         },
                         leadingIcon = { Icon(Icons.Default.ContentCopy, null, Modifier.size(16.dp)) },
                     )
@@ -362,17 +361,15 @@ private fun FileTreeItem(
             }
         }
 
-        // 展开的子文件：紧凑模式 -> 唯一子目录自动合并
+        // 展开的子文件
         AnimatedVisibility(visible = isExpanded && item.isDirectory) {
             Column {
-                val children = childrenCache[item.uri.toString()]
-                if (children != null) {
-                    if (children.size == 1 && children[0].isDirectory) {
-                        // 仅有一个子目录且无文件 → 紧凑合并
+                val chainChildren = findChainChildren(item.uri, compactChain, childrenCache)
+                if (chainChildren != null) {
+                    chainChildren.forEach { child ->
                         FileTreeItem(
-                            item = children[0],
-                            depth = depth,
-                            compactParents = compactParents + item,
+                            item = child,
+                            depth = depth + 1,
                             onListChildren = onListChildren,
                             onFileClick = onFileClick,
                             onAddToConversation = onAddToConversation,
@@ -380,21 +377,56 @@ private fun FileTreeItem(
                             onDelete = onDelete,
                             onCreateRequest = onCreateRequest,
                         )
-                    } else {
-                        children.forEach { child ->
-                            FileTreeItem(
-                                item = child,
-                                depth = depth + 1,
-                                onListChildren = onListChildren,
-                                onFileClick = onFileClick,
-                                onAddToConversation = onAddToConversation,
-                                onRenameRequest = onRenameRequest,
-                                onDelete = onDelete,
-                                onCreateRequest = onCreateRequest,
-                            )
-                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+// 遍历紧凑链找到最深层的缓存子文件（展开时渲染用）
+private fun findChainChildren(
+    rootUri: Uri,
+    chain: List<String>,
+    cache: Map<String, List<FileItem>>,
+): List<FileItem>? {
+    var current = cache[rootUri.toString()] ?: return null
+    for (name in chain) {
+        val next = current.firstOrNull { it.name == name && it.isDirectory } ?: return current
+        current = cache[next.uri.toString()] ?: return current
+    }
+    return current
+}
+
+// 沿紧凑链深入一层：根据已有 chain 找到链尾目录，加载它的子文件
+// 如果链尾也是单子目录，继续深入，返回新的链和最终子文件
+private fun loadDeepestChild(
+    rootUri: Uri,
+    chain: List<String>,
+    cache: MutableMap<String, List<FileItem>>,
+    onListChildren: (Uri, (List<FileItem>) -> Unit) -> Unit,
+    onResult: (chain: List<String>, children: List<FileItem>) -> Unit,
+) {
+    // 首节点已在缓存中，直接找到链尾继续加载
+    fun findChainEnd(uri: Uri, remaining: List<String>, onDone: (Uri) -> Unit) {
+        if (remaining.isEmpty()) {
+            onDone(uri)
+        } else {
+            val cached = cache[uri.toString()]
+            if (cached != null && cached.size == 1 && cached[0].isDirectory && cached[0].name == remaining.first()) {
+                findChainEnd(cached[0].uri, remaining.drop(1), onDone)
+            } else {
+                onDone(uri)
+            }
+        }
+    }
+    findChainEnd(rootUri, chain) { endUri ->
+        onListChildren(endUri) { children ->
+            cache[endUri.toString()] = children
+            if (children.size == 1 && children[0].isDirectory) {
+                onResult(chain + children[0].name, children)
+            } else {
+                onResult(chain, children)
             }
         }
     }

@@ -91,6 +91,27 @@ fun MainContentArea(
                 onSaveAllTabs = onSaveAllTabs,
                 onSaveCurrent = onSaveCurrent,
             )
+            // 当前文件路径指示
+            if (activeTabIndex in tabs.indices) {
+                val activeTab = tabs[activeTabIndex]
+                if (activeTab.type == TabType.File) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.12f))
+                            .padding(horizontal = 12.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = activeTab.id,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
             HorizontalDivider(
                 thickness = 1.dp,
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
