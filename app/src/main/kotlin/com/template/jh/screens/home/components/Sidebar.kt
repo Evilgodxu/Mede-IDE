@@ -9,13 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Source
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -29,7 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.template.jh.R
 
 enum class SidebarTab {
-    Explorer, Tasks, Search, SourceControl, Preview, Extensions
+    Explorer
 }
 
 @Composable
@@ -60,33 +54,7 @@ fun Sidebar(
 
             // 任务清单侧边栏项已移除
 
-            SidebarItem(
-                icon = Icons.Default.Search,
-                contentDescription = stringResource(R.string.global_search_title),
-                isSelected = selectedTab == SidebarTab.Search,
-                onClick = { onTabClick(SidebarTab.Search) }
-            )
 
-            SidebarItem(
-                icon = Icons.Default.Source,
-                contentDescription = stringResource(R.string.source_control),
-                isSelected = selectedTab == SidebarTab.SourceControl,
-                onClick = { onTabClick(SidebarTab.SourceControl) }
-            )
-
-            SidebarItem(
-                icon = Icons.Default.PlayArrow,
-                contentDescription = stringResource(R.string.preview),
-                isSelected = selectedTab == SidebarTab.Preview,
-                onClick = { onTabClick(SidebarTab.Preview) }
-            )
-
-            SidebarItem(
-                icon = Icons.Default.Extension,
-                contentDescription = stringResource(R.string.extensions),
-                isSelected = selectedTab == SidebarTab.Extensions,
-                onClick = { onTabClick(SidebarTab.Extensions) }
-            )
         }
     }
 

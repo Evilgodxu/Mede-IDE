@@ -73,13 +73,9 @@ fun MainTopBar(
     onSwitchCloudProfile: (String) -> Unit = {},
     onTerminalClick: () -> Unit = {},
     onCloseFolder: () -> Unit = {},
-    onNewFile: () -> Unit = {},
-    onNewFolder: () -> Unit = {},
     onOpenFile: () -> Unit = {},
     onOpenFolder: () -> Unit = {},
     onRecentFiles: () -> Unit = {},
-    onSaveFile: () -> Unit = {},
-    onSaveAs: () -> Unit = {},
     onSaveAll: () -> Unit = {},
 ) {
     val topBarInsets = if (!windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)) {
@@ -91,7 +87,6 @@ fun MainTopBar(
     var fileMenuExpanded by remember { mutableStateOf(false) }
     var editMenuExpanded by remember { mutableStateOf(false) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
-    var autoSaveEnabled by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val dropdownMaxHeight = (screenHeightDp * 0.75f).dp
@@ -129,22 +124,6 @@ fun MainTopBar(
                                 }
                             )
                             HorizontalDivider()
-                            // 新建文件
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.file_menu_new_file)) },
-                                onClick = {
-                                    try { fileMenuExpanded = false; onNewFile() }
-                                    catch (e: Exception) { Log.e("MainTopBar", "new file failed", e) }
-                                }
-                            )
-                            // 新建文件夹
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.file_menu_new_folder)) },
-                                onClick = {
-                                    try { fileMenuExpanded = false; onNewFolder() }
-                                    catch (e: Exception) { Log.e("MainTopBar", "new folder failed", e) }
-                                }
-                            )
                             // 打开文件
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_open_file)) },
@@ -170,48 +149,12 @@ fun MainTopBar(
                                 }
                             )
                             HorizontalDivider()
-                            // 保存
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.file_menu_save)) },
-                                onClick = {
-                                    try { fileMenuExpanded = false; onSaveFile() }
-                                    catch (e: Exception) { Log.e("MainTopBar", "save file failed", e) }
-                                }
-                            )
-                            // 另存为
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.file_menu_save_as)) },
-                                onClick = {
-                                    try { fileMenuExpanded = false; onSaveAs() }
-                                    catch (e: Exception) { Log.e("MainTopBar", "save as failed", e) }
-                                }
-                            )
                             // 全部保存
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_save_all)) },
                                 onClick = {
                                     try { fileMenuExpanded = false; onSaveAll() }
                                     catch (e: Exception) { Log.e("MainTopBar", "save all failed", e) }
-                                }
-                            )
-                            // 自动保存
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.file_menu_auto_save)) },
-                                trailingIcon = {
-                                    if (autoSaveEnabled) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    try {
-                                        autoSaveEnabled = !autoSaveEnabled
-                                    } catch (e: Exception) {
-                                        Log.e("MainTopBar", "auto save toggle failed", e)
-                                    }
                                 }
                             )
                         }
@@ -264,68 +207,6 @@ fun MainTopBar(
                                 }
                             )
                             HorizontalDivider()
-                            // 剪切
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.edit_menu_cut)) },
-                                onClick = {
-                                    try {
-                                        // 剪切逻辑
-                                        editMenuExpanded = false
-                                    } catch (e: Exception) {
-                                        Log.e("MainTopBar", "cut failed", e)
-                                    }
-                                }
-                            )
-                            // 复制
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.edit_menu_copy)) },
-                                onClick = {
-                                    try {
-                                        // 复制逻辑
-                                        editMenuExpanded = false
-                                    } catch (e: Exception) {
-                                        Log.e("MainTopBar", "copy failed", e)
-                                    }
-                                }
-                            )
-                            // 粘贴
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.edit_menu_paste)) },
-                                onClick = {
-                                    try {
-                                        // 粘贴逻辑
-                                        editMenuExpanded = false
-                                    } catch (e: Exception) {
-                                        Log.e("MainTopBar", "paste failed", e)
-                                    }
-                                }
-                            )
-                            HorizontalDivider()
-                            // 查找
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.edit_menu_find)) },
-                                onClick = {
-                                    try {
-                                        // 查找逻辑
-                                        editMenuExpanded = false
-                                    } catch (e: Exception) {
-                                        Log.e("MainTopBar", "find failed", e)
-                                    }
-                                }
-                            )
-                            // 替换
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.edit_menu_replace)) },
-                                onClick = {
-                                    try {
-                                        // 替换逻辑
-                                        editMenuExpanded = false
-                                    } catch (e: Exception) {
-                                        Log.e("MainTopBar", "replace failed", e)
-                                    }
-                                }
-                            )
-                            HorizontalDivider()
                             // 在文件中查找
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.edit_menu_find_in_files)) },
@@ -373,26 +254,7 @@ fun MainTopBar(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
 
-                    // 搜索按钮
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clickable { /* 搜索功能 */ }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = stringResource(R.string.global_search_search_hint),
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = stringResource(R.string.global_search_search_hint),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+
                 }
             },
             actions = {

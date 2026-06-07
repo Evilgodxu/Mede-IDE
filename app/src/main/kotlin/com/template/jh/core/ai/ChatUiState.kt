@@ -78,4 +78,6 @@ data class ChatUiState(
     // 自动上下文
     val activeFilePath: String = "",
     val cursorLine: Int = 0,
+    // 通知设置
+    val notificationSettings: com.template.jh.data.model.NotificationSettings = com.template.jh.data.model.NotificationSettings(),
 )

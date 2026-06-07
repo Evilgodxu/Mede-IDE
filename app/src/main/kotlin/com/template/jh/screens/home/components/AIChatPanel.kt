@@ -43,6 +43,8 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,6 +66,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -506,6 +510,13 @@ private fun ChatInputBar(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                // 语音输入按钮
+                VoiceInputButton(
+                    onTextRecognized = { recognizedText ->
+                        onInputChange(inputText + recognizedText)
+                    },
+                    enabled = engineStatus == EngineStatus.Ready && !isLoading
+                )
                 // 上下文窗口进度按钮
                 val ratio = if (contextMaxTokens > 0) (contextUsedTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
                 Box(
@@ -541,6 +552,99 @@ private fun ChatInputBar(
                 }
             }
         }
+    }
+}
+
+// 语音输入按钮组件
+@Composable
+private fun VoiceInputButton(
+    onTextRecognized: (String) -> Unit,
+    enabled: Boolean = true,
+) {
+    val context = LocalContext.current
+    var isListening by remember { mutableStateOf(false) }
+    var hasPermission by remember { mutableStateOf(false) }
+
+    // 检查权限
+    LaunchedEffect(Unit) {
+        hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    // 语音识别启动器
+    val speechRecognizerLauncher = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        isListening = false
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val matches = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+            matches?.firstOrNull()?.let { recognizedText ->
+                onTextRecognized(recognizedText)
+            }
+        }
+    }
+
+    // 权限请求启动器
+    val permissionLauncher = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        hasPermission = isGranted
+        if (isGranted) {
+            startVoiceRecognition(context, speechRecognizerLauncher) { isListening = it }
+        }
+    }
+
+    IconButton(
+        onClick = {
+            if (!hasPermission) {
+                permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            } else if (!isListening) {
+                startVoiceRecognition(context, speechRecognizerLauncher) { isListening = it }
+            }
+        },
+        modifier = Modifier.size(28.dp),
+        enabled = enabled && !isListening
+    ) {
+        if (isListening) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary
+            )
+        } else {
+            Icon(
+                imageVector = if (hasPermission) Icons.Default.Mic else Icons.Default.MicOff,
+                contentDescription = "语音输入",
+                modifier = Modifier.size(18.dp),
+                tint = if (enabled) {
+                    if (hasPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                }
+            )
+        }
+    }
+}
+
+private fun startVoiceRecognition(
+    context: Context,
+    launcher: androidx.activity.result.ActivityResultLauncher<android.content.Intent>,
+    onListeningStateChange: (Boolean) -> Unit
+) {
+    try {
+        val intent = android.speech.RecognizerIntent().apply {
+            action = android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
+            putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        }
+        onListeningStateChange(true)
+        launcher.launch(intent)
+    } catch (e: Exception) {
+        onListeningStateChange(false)
+        android.widget.Toast.makeText(context, "语音识别不可用", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 

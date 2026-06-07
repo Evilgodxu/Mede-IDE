@@ -44,10 +44,10 @@ import com.template.jh.screens.home.components.CodeEditor
 import com.template.jh.screens.home.components.MainContentArea
 import com.template.jh.screens.home.components.MainTopBar
 import com.template.jh.screens.home.components.ResourcePanel
-import com.template.jh.screens.home.components.SearchPanel
+
 import com.template.jh.screens.home.components.Sidebar
 import com.template.jh.screens.home.components.SidebarTab
-import com.template.jh.screens.home.components.TaskListPanel
+
 import com.template.jh.screens.home.components.ThreeColumnLayout
 import com.template.jh.ui.adaptive.rememberWindowSizeClass
 import kotlinx.coroutines.launch
@@ -475,21 +475,9 @@ fun HomeScreen(
                 onSwitchCloudProfile = { chatViewModel.switchCloudProfile(it) },
                 onTerminalClick = { isTerminalVisible = !isTerminalVisible },
                 onCloseFolder = closeFolder,
-                onNewFile = { showNewFileDialog = true; newFileName = "" },
-                onNewFolder = { showNewFolderDialog = true; newFolderName = "" },
                 onOpenFile = { fileOpenLauncher.launch(arrayOf("*/*")) },
                 onOpenFolder = { folderPickerLauncher.launch(null) },
                 onRecentFiles = { showRecentFilesDialog = true },
-                onSaveFile = {
-                    val idx = activeTabIndex
-                    val tab = tabs.getOrNull(idx) ?: return@MainTopBar
-                    if (tab.type == TabType.File) saveFile(tab.id)
-                },
-                onSaveAs = {
-                    val tab = tabs.getOrNull(activeTabIndex)
-                    val name = tab?.title ?: "untitled"
-                    saveAsLauncher.launch(name)
-                },
                 onSaveAll = {
                     for (tab in tabs) {
                         if (tab.type == TabType.File) saveFile(tab.id)
@@ -883,68 +871,8 @@ private fun LeftPanelContent(
                 onCreate = { uri, name, isDir -> viewModel.createFile(uri, name, isDir) },
             )
         }
-        SidebarTab.Tasks -> {
-            TaskListPanel(
-                tasks = chatState.taskList,
-                fileChanges = chatState.fileChanges,
-                isExpanded = chatState.isTaskListOpen,
-                onToggleExpand = { chatViewModel.toggleTaskList() },
-                onTaskClick = { task ->
-                    // 任务点击处理
-                },
-                onFileClick = { filePath ->
-                    onOpenFileTab(filePath)
-                },
-                onAcceptAllChanges = onAcceptAllChanges,
-                onRejectAllChanges = onRejectAllChanges
-            )
-        }
-        SidebarTab.Search -> { SearchPanel() }
-        SidebarTab.SourceControl -> { SourceControlPanel() }
-        SidebarTab.Preview -> { PreviewPanel() }
-        SidebarTab.Extensions -> { ExtensionsPanel() }
         null -> {}
     }
 }
 
-@Composable
-private fun SourceControlPanel() {
-    androidx.compose.foundation.layout.Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = androidx.compose.ui.Alignment.Center
-    ) {
-        androidx.compose.material3.Text(
-            text = stringResource(R.string.source_control),
-            style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
-            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
 
-@Composable
-private fun PreviewPanel() {
-    androidx.compose.foundation.layout.Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = androidx.compose.ui.Alignment.Center
-    ) {
-        androidx.compose.material3.Text(
-            text = stringResource(R.string.preview),
-            style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
-            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun ExtensionsPanel() {
-    androidx.compose.foundation.layout.Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = androidx.compose.ui.Alignment.Center
-    ) {
-        androidx.compose.material3.Text(
-            text = stringResource(R.string.extensions),
-            style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
-            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}

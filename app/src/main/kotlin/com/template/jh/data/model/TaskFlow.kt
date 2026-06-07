@@ -76,10 +76,7 @@ enum class NotificationEventType {
 // 对话流通知设置
 data class NotificationSettings(
     val taskCompletedSound: Boolean = true,
-    val taskCompletedPopup: Boolean = true,
     val taskFailedSound: Boolean = true,
-    val taskFailedPopup: Boolean = true,
     val waitingUserActionSound: Boolean = true,
-    val waitingUserActionPopup: Boolean = true,
     val deleteCardEnabled: Boolean = false, // 删除行为卡片：默认关闭(显示卡片)，开启时隐藏
 )

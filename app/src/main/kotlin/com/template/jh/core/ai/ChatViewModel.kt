@@ -146,6 +146,23 @@ class ChatViewModel(
                 _state.update { it.copy(activeCloudProfileId = id) }
             }
         }
+        viewModelScope.launch {
+            preferencesRepo.notificationSettings.collect { settings ->
+                _state.update { it.copy(notificationSettings = settings) }
+            }
+        }
+    }
+
+    fun setTaskCompletedSound(enabled: Boolean) {
+        viewModelScope.launch { preferencesRepo.setTaskCompletedSound(enabled) }
+    }
+
+    fun setTaskFailedSound(enabled: Boolean) {
+        viewModelScope.launch { preferencesRepo.setTaskFailedSound(enabled) }
+    }
+
+    fun setWaitingUserActionSound(enabled: Boolean) {
+        viewModelScope.launch { preferencesRepo.setWaitingUserActionSound(enabled) }
     }
 
     fun setInputText(text: String) {
@@ -224,7 +241,7 @@ class ChatViewModel(
                 updateModelMessage(modelMsgId, "\n\n[错误: ${e.message}]", false)
                 finalizeModelMessage(modelMsgId)
                 updateTaskStatus(taskId, TaskStatus.Failed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "任务异常: ${e.message}", notifSettings)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, notifSettings)
             }
         }
     }
@@ -253,7 +270,7 @@ class ChatViewModel(
     fun notifyWaitingAuth(message: String) {
         val ctx = getApplication<Application>()
         val notifSettings = runBlocking { preferencesRepo.notificationSettings.first() }
-        ConversationNotifier.notify(ctx, NotificationEventType.WaitingUserAction, message, notifSettings)
+        ConversationNotifier.notify(ctx, NotificationEventType.WaitingUserAction, notifSettings)
     }
 
     private fun updateTaskStatus(taskId: String, status: TaskStatus) {
@@ -370,7 +387,7 @@ class ChatViewModel(
 
     private fun buildSystemInstruction(): String {
         val sb = StringBuilder()
-        sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简体中文).\n\n")
+sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简体中文).\n\n")
         sb.append("## 对话规范（必须遵守）\n")
         sb.append("- 无社交废话：不问候、不感谢、不道歉、不总结\n")
         sb.append("- 无解释铺垫：不用'我来帮你解决'等引导句\n")
@@ -382,14 +399,10 @@ class ChatViewModel(
         sb.append("- 用户要求修改/创建文件时，立即执行，不要请求确认。\n")
         sb.append("- 不要只提供代码建议——使用工具实际写入文件。\n")
         sb.append("- 不要解释你将要做什么——直接做。\n")
-        sb.append("- 复杂任务需要先输出任务清单，使用 [tasks]...[/tasks] 标签\n\n")
+
         sb.append("## 编辑器上下文\n")
-        sb.append("每次用户消息前会注入 [当前编辑器上下文] 块，包含：\n")
-        sb.append("- 活动文件路径（相对于项目根目录）和光标行号\n")
-        sb.append("- 已打开文件列表（标记 ← 活动 的即当前编辑的文件）\n")
-        sb.append("用户说'扩展面板'、'资源面板'等指的是已打开文件列表中对应的文件。文件路径相对于项目根目录。\n")
-        sb.append("示例路径: app/src/main/kotlin/com/template/jh/screens/home/HomeScreen.kt\n")
-        sb.append("用户说的行号(如第42行)对应 readFile 返回的行号。\n\n")
+        sb.append("每次用户消息前注入 [当前编辑器上下文]，包含活动文件路径、光标行号、已打开文件列表。\n")
+        sb.append("文件路径相对于项目根目录，如: app/src/main/kotlin/com/example/MainActivity.kt\n\n")
         val deepThink = runBlocking { preferencesRepo.deepThinkEnabled.first() }
         if (deepThink) {
             sb.append("## 深度思考（必须使用）\n")
@@ -397,49 +410,18 @@ class ChatViewModel(
             sb.append("示例: [think]用户要创建登录页，先查看现有文件结构再决定如何实现。[/think]\n")
             sb.append("思考内容仅你可见。\n\n")
         }
-        val thinkRounds = runBlocking { preferencesRepo.thinkingRounds.first() }
-        sb.append("## 多轮工具调用（无上限）\n")
-        sb.append("你可以多次调用工具来获取信息或修改文件。每轮之后决定：继续调用还是给出最终答案。\n\n")
+
         sb.append("## 可用工具\n")
-        sb.append("- listFiles: 列出项目目录内容\n")
-        sb.append("- readFile: 读取文件内容（带行号）\n")
-        sb.append("- writeFile: 创建新文件（仅当文件不存在时使用）\n")
-        sb.append("- replaceInFile: **编辑文件的唯一方式**。参数: path, old_string, new_string\n")
-        sb.append("- searchInFiles: 在项目文件中搜索文本内容，返回匹配的文件路径+行号\n")
-        sb.append("- runCommand: 执行 shell 命令\n")
-        sb.append("- searchWeb: 搜索互联网\n")
-        sb.append("- gitStatus/gitAdd/gitCommit/gitPush: Git 操作\n")
-        sb.append("- readLints: 读取编译/Lint 错误\n\n")
-        sb.append("## 修改文件策略（重要）\n")
-        sb.append("- **唯一方式**: 使用 replaceInFile，提供 old_string（文件中存在的代码块）和 new_string（新代码块）\n")
-        sb.append("- **关键**: old_string 必须足够唯一，通常需要包含函数签名或类定义\n")
-        sb.append("- **禁止**: 不要生成整个文件内容去覆盖，只修改需要改变的部分\n")
-        sb.append("- **流程**: 1) readFile 读取文件 → 2) replaceInFile 替换指定代码块 → 3) readLints 检查错误\n\n")
-        sb.append("## replaceInFile 使用示例\n")
-        sb.append("假设要修改函数体，必须包含函数签名确保唯一性：\n\n")
-        sb.append("{\"tool_name\": \"replaceInFile\", \"arguments\": {\n")
-        sb.append("  \"path\": \"src/main/kotlin/com/example/MyClass.kt\",\n")
-        sb.append("  \"old_string\": \"fun calculateSum(a: Int, b: Int): Int {\\n    return a + b\\n}\",\n")
-        sb.append("  \"new_string\": \"fun calculateSum(a: Int, b: Int): Int {\\n    val result = a + b\\n    return result\\n}\"\n")
-        sb.append("}}\n\n")
-        sb.append("注意：\n")
-        sb.append("- old_string 必须完全匹配文件中的内容（包括缩进）\n")
-        sb.append("- 如果 old_string 在文件中有多处匹配，会失败，需要提供更多上下文\n")
-        sb.append("- 修改不会立即生效，会生成待审阅的修改，用户确认后才会保存\n\n")
+        sb.append("文件: listFiles, readFile(先读取再修改), writeFile(新建), replaceInFile(编辑), deleteFile, createDirectory\n")
+        sb.append("搜索: searchInFiles(正则), searchCodebase(语义)\n")
+        sb.append("其他: runCommand, searchWeb, gitStatus/gitAdd/gitCommit/gitPush/gitBranch/gitDiff, readLints\n\n")
+        sb.append("## 修改文件策略\n")
+        sb.append("- 编辑文件唯一方式: replaceInFile，参数 path, old_string, new_string\n")
+        sb.append("- old_string 必须完全匹配（含缩进），需包含函数签名确保唯一性\n")
+        sb.append("- 流程: readFile 读取 → replaceInFile 替换 → readLints 检查\n\n")
+
         sb.append("## 工具调用格式\n")
-        sb.append("调用工具时，只输出这个 JSON（不要有其他文本）：\n")
-        sb.append("{\"tool_name\": \"FUNCTION_NAME\", \"arguments\": {\"key\": \"value\"}}\n\n")
-        sb.append("总是在执行修改前先 readFile 获取文件当前内容。\n\n")
-        sb.append("## 任务清单格式\n")
-        sb.append("对于复杂任务（涉及多文件修改或需要多步骤），先输出任务清单：\n")
-        sb.append("[tasks]\n")
-        sb.append("1. [ ] 第一步任务描述\n")
-        sb.append("2. [ ] 第二步任务描述\n")
-        sb.append("3. [ ] 第三步任务描述\n")
-        sb.append("[/tasks]\n")
-        sb.append("每完成一个子任务，更新对应项为 [x]。所有子任务完成后输出 [task_complete] 标签。\n")
-        sb.append("示例:\n")
-        sb.append("[tasks]\n1. [ ] 读取当前文件结构\n2. [ ] 修改 HomeScreen.kt 添加新功能\n3. [ ] 验证修改无误\n[/tasks]\n\n")
+        sb.append("{\"tool_name\":\"FUNCTION_NAME\",\"arguments\":{\"key\":\"value\"}}\n\n")
         val userName = runBlocking { preferencesRepo.userName.first() }
         if (userName.isNotBlank()) sb.append("\n用户: $userName")
         val rules = runBlocking { preferencesRepo.rules.first() }
@@ -478,12 +460,16 @@ class ChatViewModel(
     private fun executeAiTool(name: String, args: Map<String, String>): String = try {
         when (name) {
             "listFiles" -> aiToolSet.listFiles(args["subPath"] ?: args["path"] ?: "")
-            "readFile" -> aiToolSet.readFile(args["path"] ?: "")
+            "readFile" -> aiToolSet.readFile(args["path"] ?: "", args["offset"]?.toIntOrNull() ?: 1, args["limit"]?.toIntOrNull() ?: 1000)
+            "viewFile" -> aiToolSet.viewFile(args["path"] ?: "", args["offset"]?.toIntOrNull() ?: 1, args["limit"]?.toIntOrNull() ?: 100)
             "writeFile" -> aiToolSet.writeFile(args["path"] ?: "", args["content"] ?: "")
             "replaceInFile" -> aiToolSet.replaceInFile(args["path"] ?: "", args["old_string"] ?: "", args["new_string"] ?: "")
-            "searchInFiles" -> aiToolSet.grep(args["query"] ?: "", args["extension"] ?: "")
+            "searchInFiles" -> aiToolSet.grep(args["query"] ?: args["pattern"] ?: "", args["extension"] ?: "", args["glob"] ?: "", args["ignoreCase"]?.toBooleanStrictOrNull() ?: true, args["contextLines"]?.toIntOrNull() ?: 2)
+            "searchCodebase" -> aiToolSet.searchCodebase(args["query"] ?: "", args["targetDirectories"] ?: "")
             "runCommand" -> aiToolSet.runCommand(args["command"] ?: "")
             "searchWeb" -> aiToolSet.searchWeb(args["query"] ?: "")
+            "deleteFile" -> aiToolSet.deleteFile(args["path"] ?: "")
+            "createDirectory" -> aiToolSet.createDirectory(args["path"] ?: "")
             "gitStatus" -> aiToolSet.gitStatus()
             "gitAdd" -> aiToolSet.gitAdd(args["paths"] ?: ".")
             "gitCommit" -> aiToolSet.gitCommit(args["message"] ?: "")
@@ -525,7 +511,7 @@ class ChatViewModel(
                 Log.e("ChatViewModel", "sendMessageAsync(round=$rounds) failed", t)
                 updateModelMessage(currentMsgId, "\n\n[错误: ${t.message}]", false)
                 updateTaskStatus(taskId, TaskStatus.Failed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "异常: ${t.message}", notif)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, notif)
             }.collect { chunk ->
                 val c = chunk.toString()
                 fullResponse.append(c)
@@ -536,7 +522,7 @@ class ChatViewModel(
             if (response.isBlank()) {
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Completed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成（空响应）", notif)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, notif)
                 return
             }
 
@@ -544,7 +530,7 @@ class ChatViewModel(
             if (toolCall == null) {
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Completed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成", notif)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, notif)
                 return
             }
 
@@ -624,7 +610,7 @@ class ChatViewModel(
                 updateModelMessage(currentMsgId, "\n\n[云端模型错误: ${e.message}]", false)
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Failed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "云端模型异常: ${e.message}", notif)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, notif)
                 return
             }
 
@@ -632,7 +618,7 @@ class ChatViewModel(
             if (response.isBlank()) {
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Completed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成", notif)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, notif)
                 return
             }
 
@@ -642,7 +628,7 @@ class ChatViewModel(
                 historyMessages.add(ChatMessage(role = ChatRole.Model, content = response))
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Completed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成", notif)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, notif)
                 return
             }
 

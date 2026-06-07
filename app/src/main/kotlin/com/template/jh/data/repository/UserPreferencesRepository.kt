@@ -28,13 +28,10 @@ class UserPreferencesRepository(private val context: Context) {
         val RULES_JSON = stringPreferencesKey("rules_json")
         val SKILLS_JSON = stringPreferencesKey("skills_json")
         val MCP_SERVERS_JSON = stringPreferencesKey("mcp_servers_json")
-        // 通知设置
+        // 通知设置（音效）
         val NOTIFY_TASK_COMPLETED_SOUND = booleanPreferencesKey("notify_task_completed_sound")
-        val NOTIFY_TASK_COMPLETED_POPUP = booleanPreferencesKey("notify_task_completed_popup")
         val NOTIFY_TASK_FAILED_SOUND = booleanPreferencesKey("notify_task_failed_sound")
-        val NOTIFY_TASK_FAILED_POPUP = booleanPreferencesKey("notify_task_failed_popup")
         val NOTIFY_WAITING_AUTH_SOUND = booleanPreferencesKey("notify_waiting_auth_sound")
-        val NOTIFY_WAITING_AUTH_POPUP = booleanPreferencesKey("notify_waiting_auth_popup")
         val DELETE_CARD_ENABLED = booleanPreferencesKey("delete_card_enabled")
         val SHOW_TOOL_CALLS = booleanPreferencesKey("show_tool_calls")
         val DEEP_THINK_ENABLED = booleanPreferencesKey("deep_think_enabled")
@@ -152,11 +149,8 @@ class UserPreferencesRepository(private val context: Context) {
         .map { prefs ->
             NotificationSettings(
                 taskCompletedSound = prefs[PreferencesKeys.NOTIFY_TASK_COMPLETED_SOUND] ?: true,
-                taskCompletedPopup = prefs[PreferencesKeys.NOTIFY_TASK_COMPLETED_POPUP] ?: true,
                 taskFailedSound = prefs[PreferencesKeys.NOTIFY_TASK_FAILED_SOUND] ?: true,
-                taskFailedPopup = prefs[PreferencesKeys.NOTIFY_TASK_FAILED_POPUP] ?: true,
                 waitingUserActionSound = prefs[PreferencesKeys.NOTIFY_WAITING_AUTH_SOUND] ?: true,
-                waitingUserActionPopup = prefs[PreferencesKeys.NOTIFY_WAITING_AUTH_POPUP] ?: true,
                 deleteCardEnabled = prefs[PreferencesKeys.DELETE_CARD_ENABLED] ?: false,
             )
         }
@@ -301,13 +295,22 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun setNotificationSettings(settings: NotificationSettings) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.NOTIFY_TASK_COMPLETED_SOUND] = settings.taskCompletedSound
-            prefs[PreferencesKeys.NOTIFY_TASK_COMPLETED_POPUP] = settings.taskCompletedPopup
             prefs[PreferencesKeys.NOTIFY_TASK_FAILED_SOUND] = settings.taskFailedSound
-            prefs[PreferencesKeys.NOTIFY_TASK_FAILED_POPUP] = settings.taskFailedPopup
             prefs[PreferencesKeys.NOTIFY_WAITING_AUTH_SOUND] = settings.waitingUserActionSound
-            prefs[PreferencesKeys.NOTIFY_WAITING_AUTH_POPUP] = settings.waitingUserActionPopup
             prefs[PreferencesKeys.DELETE_CARD_ENABLED] = settings.deleteCardEnabled
         }
+    }
+
+    suspend fun setTaskCompletedSound(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.NOTIFY_TASK_COMPLETED_SOUND] = enabled }
+    }
+
+    suspend fun setTaskFailedSound(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.NOTIFY_TASK_FAILED_SOUND] = enabled }
+    }
+
+    suspend fun setWaitingUserActionSound(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.NOTIFY_WAITING_AUTH_SOUND] = enabled }
     }
 
     private fun rulesToJson(rules: List<Rule>): String {
