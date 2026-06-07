@@ -8,10 +8,7 @@ import androidx.documentfile.provider.DocumentFile
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
-import com.template.jh.core.editor.applyPatches
-import com.template.jh.core.editor.PatchOp
-import com.template.jh.core.editor.replaceInFile
-import com.template.jh.core.editor.BlockReplaceOp
+import com.template.jh.core.editor.CodeEditTool
 import com.template.jh.core.storage.FileManager
 import java.io.File
 import java.net.HttpURLConnection
@@ -175,84 +172,35 @@ class AIToolSet(
         }
     }
 
-    // 行级差异编辑：对大模型友好的 patch 格式
-    // patches 是 JSON 数组，每个元素: {"type":"replace"|"insert"|"delete", "startLine":int, "endLine":int, "content":"..."}
-    @Tool(description = "Line-level editing with row numbers. Use when you need precise control over which lines to replace/insert/delete.")
-    fun applyPatch(
-        @ToolParam(description = "File path relative to project root") path: String,
-        @ToolParam(description = """JSON array of patches. Each: {"type":"replace"|"insert"|"delete", "startLine":int (1-based), "endLine":int (exclusive), "content":"new text"}""") patchesJson: String,
-    ): String {
-        val uri = projectUri
-        if (uri == null) return "No project folder is open."
-        return try {
-            android.util.Log.d("AIToolSet", "applyPatch called: path=$path, projectUri=$uri")
-            val original = readFileRaw(path)
-            if (original == null) {
-                android.util.Log.w("AIToolSet", "applyPatch: file not found: $path")
-                return "Cannot patch: file not found or not open. Use writeFile to create first."
-            }
-            android.util.Log.d("AIToolSet", "applyPatch: original content length=${original.length}")
-            val patches = org.json.JSONArray(patchesJson)
-            val patchOps = (0 until patches.length()).map { i ->
-                val obj = patches.getJSONObject(i)
-                PatchOp(
-                    type = obj.optString("type", "replace"),
-                    startLine = obj.optInt("startLine", 0),
-                    endLine = obj.optInt("endLine", 0),
-                    content = obj.optString("content", ""),
-                )
-            }
-            val newContent = applyPatches(original, patchOps)
-            android.util.Log.d("AIToolSet", "applyPatch: new content length=${newContent.length}, patchOps=${patchOps.size}")
-
-            // 不直接写入文件，发送pending事件等待用户审阅
-            FileOperationEvents.notify(path, "pending", computeChangedLines(original, newContent), original, newContent)
-            android.util.Log.d("AIToolSet", "applyPatch: FileOperationEvents.notify called")
-            "Patch prepared for review: $path (${patchOps.size} ops). Click the checkmark in editor to apply."
-        } catch (e: Exception) {
-            android.util.Log.e("AIToolSet", "applyPatch failed: ${e.message}", e)
-            "Patch failed: ${e.message}"
-        }
-    }
-
-    // 代码块级精确替换：基于唯一标识字符串的查找替换
-    // 这是推荐的编辑方式，因为大模型不需要计算行号，只需提供代码块内容
-    @Tool(description = "RECOMMENDED for editing existing files. Block-level find-and-replace. Provide the exact code block to find (old_string) and the new code (new_string). No need to calculate line numbers. The old_string must be unique in the file or long enough to be unambiguous.")
+    // 代码编辑工具 - 类似 SearchReplace，只修改指定内容
+    // 这是唯一推荐的编辑方式：提供 old_string（要查找的代码块）和 new_string（新代码块）
+    @Tool(description = "Edit an existing file by replacing a specific code block. Provide the exact code to find (old_string) and the replacement (new_string). The old_string must be unique in the file - include enough context (function signature, class name, etc.) to ensure uniqueness.")
     fun replaceInFile(
         @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
-        @ToolParam(description = """JSON array of replacements. Each: {"old_string":"code to find", "new_string":"replacement code"}""") replacementsJson: String,
+        @ToolParam(description = "The exact code block to find. Must be unique in the file. Include function signature or class definition for uniqueness.") old_string: String,
+        @ToolParam(description = "The new code block to replace with.") new_string: String,
     ): String {
         val uri = projectUri
         if (uri == null) return "No project folder is open."
         return try {
-            android.util.Log.d("AIToolSet", "replaceInFile called: path=$path")
+            android.util.Log.d("AIToolSet", "replaceInFile: path=$path")
             val original = readFileRaw(path)
             if (original == null) {
                 android.util.Log.w("AIToolSet", "replaceInFile: file not found: $path")
-                return "Cannot replace: file not found or not open. Use writeFile to create first."
-            }
-            android.util.Log.d("AIToolSet", "replaceInFile: original content length=${original.length}")
-            
-            val replacements = org.json.JSONArray(replacementsJson)
-            val replaceOps = (0 until replacements.length()).map { i ->
-                val obj = replacements.getJSONObject(i)
-                BlockReplaceOp(
-                    oldString = obj.getString("old_string"),
-                    newString = obj.getString("new_string"),
-                )
-            }
-            
-            val (newContent, message) = replaceInFile(original, replaceOps)
-            android.util.Log.d("AIToolSet", "replaceInFile: new content length=${newContent.length}, message=$message")
-            
-            // 检查是否所有替换都成功
-            if (message.contains("失败")) {
-                return "Replace failed:\n$message"
+                return "Cannot replace: file not found. Use writeFile to create first."
             }
 
-            // 不直接写入文件，发送pending事件等待用户审阅
-            FileOperationEvents.notify(path, "pending", computeChangedLines(original, newContent), original, newContent)
-            "Replace prepared for review: $path.\n$message\nClick the checkmark in editor to apply."
+            // 使用 CodeEditTool 执行替换
+            when (val result = CodeEditTool.replace(original, old_string, new_string)) {
+                is CodeEditTool.ReplaceResult.Success -> {
+                    val newContent = result.newText
+                    FileOperationEvents.notify(path, "pending", computeChangedLines(original, newContent), original, newContent)
+                    "Replace prepared for review: $path. ${result.message}"
+                }
+                is CodeEditTool.ReplaceResult.Error -> {
+                    "Replace failed:\n${result.message}"
+                }
+            }
         } catch (e: Exception) {
             android.util.Log.e("AIToolSet", "replaceInFile failed: ${e.message}", e)
             "Replace failed: ${e.message}"

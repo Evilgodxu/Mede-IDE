@@ -167,4 +167,36 @@ class CloudLLMClient(private val context: Context) {
             conn.disconnect()
         }
     }
+
+    // 获取可用模型列表（OpenAI 兼容 /models 接口）
+    suspend fun fetchModels(apiEndpoint: String, apiKey: String): List<String> = withContext(Dispatchers.IO) {
+        if (apiEndpoint.isBlank()) return@withContext emptyList()
+        val endpoint = apiEndpoint.trimEnd('/') + "/models"
+        val conn = URL(endpoint).openConnection() as HttpURLConnection
+        conn.apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 10000
+            setRequestProperty("Authorization", "Bearer $apiKey")
+            setRequestProperty("Accept", "application/json")
+        }
+        try {
+            val code = conn.responseCode
+            if (code != 200) return@withContext emptyList()
+            val response = conn.inputStream.bufferedReader().use { it.readText() }
+            val json = JSONObject(response)
+            val data = json.optJSONArray("data") ?: return@withContext emptyList()
+            val models = mutableListOf<String>()
+            for (i in 0 until data.length()) {
+                val obj = data.getJSONObject(i)
+                val id = obj.optString("id", "")
+                if (id.isNotEmpty()) models.add(id)
+            }
+            models.sorted()
+        } catch (e: Exception) {
+            emptyList()
+        } finally {
+            conn.disconnect()
+        }
+    }
 }

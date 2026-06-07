@@ -7,8 +7,8 @@ import androidx.compose.ui.graphics.Color
  */
 enum class ChangeBlockStatus {
     PENDING,    // 未审查
-    ACCEPTED,   // 已接受（已锁定）
-    REJECTED,   // 已拒绝（已锁定）
+    ACCEPTED,   // 已接受（保存此修改）
+    REJECTED,   // 已拒绝（丢弃此修改）
 }
 
 /**
@@ -25,7 +25,8 @@ data class ChangeBlock(
     val oldContent: List<String>,         // 旧代码内容
     val newContent: List<String>,         // 新代码内容
 ) {
-    val isLocked: Boolean
+    // 是否已审查（接受或拒绝）
+    val isResolved: Boolean
         get() = status == ChangeBlockStatus.ACCEPTED || status == ChangeBlockStatus.REJECTED
 }
 
@@ -98,26 +99,22 @@ data class CodeReviewState(
     }
 
     /**
-     * 接受指定修改块（锁定）
+     * 接受指定修改块（保存此修改）
      */
     fun acceptBlock(index: Int): CodeReviewState {
         if (index !in changeBlocks.indices) return this
         val updated = changeBlocks.toMutableList()
-        val block = updated[index]
-        if (block.isLocked) return this // 已锁定则忽略
-        updated[index] = block.copy(status = ChangeBlockStatus.ACCEPTED)
+        updated[index] = updated[index].copy(status = ChangeBlockStatus.ACCEPTED)
         return copy(changeBlocks = updated)
     }
 
     /**
-     * 拒绝指定修改块（锁定）
+     * 拒绝指定修改块（丢弃此修改）
      */
     fun rejectBlock(index: Int): CodeReviewState {
         if (index !in changeBlocks.indices) return this
         val updated = changeBlocks.toMutableList()
-        val block = updated[index]
-        if (block.isLocked) return this // 已锁定则忽略
-        updated[index] = block.copy(status = ChangeBlockStatus.REJECTED)
+        updated[index] = updated[index].copy(status = ChangeBlockStatus.REJECTED)
         return copy(changeBlocks = updated)
     }
 

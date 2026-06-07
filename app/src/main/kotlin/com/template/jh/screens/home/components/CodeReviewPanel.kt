@@ -23,7 +23,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -185,11 +184,11 @@ private fun ChangeBlockCard(
 ) {
     val borderColor = when {
         isCurrent -> MaterialTheme.colorScheme.primary
-        block.isLocked -> block.status.color().copy(alpha = 0.5f)
+        block.isResolved -> block.status.color().copy(alpha = 0.5f)
         else -> MaterialTheme.colorScheme.outlineVariant
     }
 
-    val bgAlpha = if (block.isLocked) 0.3f else 1f
+    val bgAlpha = if (block.isResolved) 0.3f else 1f
 
     Column(
         modifier = Modifier
@@ -236,14 +235,6 @@ private fun ChangeBlockCard(
                 }
 
                 // 状态文本
-                if (block.isLocked) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = block.status.color()
-                    )
-                }
                 Text(
                     text = block.status.displayText(),
                     style = MaterialTheme.typography.labelSmall,
@@ -252,43 +243,49 @@ private fun ChangeBlockCard(
                 )
             }
 
-            // 操作按钮（仅未锁定时显示）
-            if (!block.isLocked) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+            // 操作按钮（始终显示，允许重新选择）
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // 拒绝按钮
+                IconButton(
+                    onClick = onReject,
+                    modifier = Modifier.size(28.dp),
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = if (block.status == ChangeBlockStatus.REJECTED)
+                            Color(0xFFCC2222).copy(alpha = 0.3f)
+                        else
+                            Color(0xFFCC2222).copy(alpha = 0.15f)
+                    )
                 ) {
-                    // 拒绝按钮
-                    IconButton(
-                        onClick = onReject,
-                        modifier = Modifier.size(28.dp),
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = Color(0xFFCC2222).copy(alpha = 0.15f)
-                        )
-                    ) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "拒绝",
-                            modifier = Modifier.size(16.dp),
-                            tint = Color(0xFFCC2222)
-                        )
-                    }
-                    // 接受按钮
-                    IconButton(
-                        onClick = onAccept,
-                        modifier = Modifier.size(28.dp),
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = Color(0xFF22CC22).copy(alpha = 0.15f)
-                        )
-                    ) {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = "接受",
-                            modifier = Modifier.size(16.dp),
-                            tint = Color(0xFF22CC22)
-                        )
-                    }
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "拒绝",
+                        modifier = Modifier.size(16.dp),
+                        tint = Color(0xFFCC2222)
+                    )
+                }
+                // 接受按钮
+                IconButton(
+                    onClick = onAccept,
+                    modifier = Modifier.size(28.dp),
+                    colors = IconButtonDefaults.iconButtonColors(
+                        containerColor = if (block.status == ChangeBlockStatus.ACCEPTED)
+                            Color(0xFF22CC22).copy(alpha = 0.3f)
+                        else
+                            Color(0xFF22CC22).copy(alpha = 0.15f)
+                    )
+                ) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = "接受",
+                        modifier = Modifier.size(16.dp),
+                        tint = Color(0xFF22CC22)
+                    )
                 }
             }
+
+
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -524,39 +521,33 @@ fun ReviewNavigator(
                 .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         )
 
-        // 当前块状态
+        // 当前块操作按钮（始终显示，允许重新选择）
         currentBlock?.let { block ->
-            if (block.isLocked) {
-                // 已锁定状态
-                Icon(
-                    imageVector = Icons.Default.Lock,
-                    contentDescription = block.status.displayText(),
-                    modifier = Modifier
-                        .size(20.dp)
-                        .padding(horizontal = 4.dp),
-                    tint = block.status.color()
-                )
-            } else {
-                // 拒绝当前
-                IconButton(
-                    onClick = onRejectCurrent,
-                    modifier = Modifier.size(28.dp),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = Color(0xFFCC2222).copy(alpha = 0.15f)
-                    ),
-                ) {
-                    Icon(Icons.Default.Close, "拒绝", Modifier.size(16.dp), tint = Color(0xFFCC2222))
-                }
-                // 接受当前
-                IconButton(
-                    onClick = onAcceptCurrent,
-                    modifier = Modifier.size(28.dp),
-                    colors = IconButtonDefaults.iconButtonColors(
-                        containerColor = Color(0xFF22CC22).copy(alpha = 0.15f)
-                    ),
-                ) {
-                    Icon(Icons.Default.Check, "接受", Modifier.size(16.dp), tint = Color(0xFF22CC22))
-                }
+            // 拒绝当前
+            IconButton(
+                onClick = onRejectCurrent,
+                modifier = Modifier.size(28.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = if (block.status == ChangeBlockStatus.REJECTED)
+                        Color(0xFFCC2222).copy(alpha = 0.3f)
+                    else
+                        Color(0xFFCC2222).copy(alpha = 0.15f)
+                ),
+            ) {
+                Icon(Icons.Default.Close, "拒绝", Modifier.size(16.dp), tint = Color(0xFFCC2222))
+            }
+            // 接受当前
+            IconButton(
+                onClick = onAcceptCurrent,
+                modifier = Modifier.size(28.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = if (block.status == ChangeBlockStatus.ACCEPTED)
+                        Color(0xFF22CC22).copy(alpha = 0.3f)
+                    else
+                        Color(0xFF22CC22).copy(alpha = 0.15f)
+                ),
+            ) {
+                Icon(Icons.Default.Check, "接受", Modifier.size(16.dp), tint = Color(0xFF22CC22))
             }
         }
     }

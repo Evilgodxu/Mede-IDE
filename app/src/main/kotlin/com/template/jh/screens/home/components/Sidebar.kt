@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PlayArrow
@@ -28,7 +29,7 @@ import androidx.compose.ui.unit.dp
 import com.template.jh.R
 
 enum class SidebarTab {
-    Explorer, Search, SourceControl, Preview, Extensions
+    Explorer, Tasks, Search, SourceControl, Preview, Extensions
 }
 
 @Composable
@@ -55,6 +56,13 @@ fun Sidebar(
                 contentDescription = stringResource(R.string.resource_manager_title),
                 isSelected = selectedTab == SidebarTab.Explorer,
                 onClick = { onTabClick(SidebarTab.Explorer) }
+            )
+
+            SidebarItem(
+                icon = Icons.Default.CheckCircle,
+                contentDescription = "任务清单",
+                isSelected = selectedTab == SidebarTab.Tasks,
+                onClick = { onTabClick(SidebarTab.Tasks) }
             )
 
             SidebarItem(

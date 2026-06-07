@@ -3,6 +3,7 @@ package com.template.jh.screens.home.components
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -27,11 +28,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.derivedStateOf
 import kotlinx.coroutines.delay
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -49,6 +52,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -89,33 +93,47 @@ fun AIChatPanel(
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
 
-    // 自动滚动到最新消息（仅在消息数量变化或加载状态变化时触发，避免内容变化时频繁滚动）
-    LaunchedEffect(state.messages.size, state.isLoading) {
-        if (state.messages.isEmpty()) return@LaunchedEffect
-        val lastIndex = state.messages.size - 1
-        // 延迟检查可见项，避免在重组过程中读取 layoutInfo
-        delay(50)
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-        // 如果用户正在靠近底部（最后可见项在倒数第3以内）或正在生成中，自动滚到底
-        if (lastVisible >= lastIndex - 2 || state.isLoading) {
-            try { listState.animateScrollToItem(lastIndex) } catch (_: Exception) {}
+    // 计算最后一条消息的内容长度，用于触发流式滚动
+    val lastMessageContentLength by remember(state.messages.size) {
+        derivedStateOf {
+            state.messages.lastOrNull()?.content?.length ?: 0
         }
     }
 
-    // 流式生成时的平滑滚动（使用防抖，避免频繁触发）
-    LaunchedEffect(state.messages.lastOrNull()?.isStreaming) {
-        val lastMsg = state.messages.lastOrNull()
-        if (lastMsg?.isStreaming == true) {
-            // 使用 snapshotFlow 监听内容变化，带防抖
-            snapshotFlow { lastMsg.content }
-                .collect { _ ->
-                    delay(300) // 防抖 300ms
-                    val lastIndex = state.messages.size - 1
-                    val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-                    if (lastVisible >= lastIndex - 1) {
-                        try { listState.animateScrollToItem(lastIndex) } catch (_: Exception) {}
-                    }
-                }
+    // 自动滚动到最新消息（消息数量变化时触发）
+    LaunchedEffect(state.messages.size) {
+        if (state.messages.isEmpty()) return@LaunchedEffect
+        val lastIndex = state.messages.size - 1
+        delay(50)
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        // 如果用户正在靠近底部（最后可见项在倒数第3以内），自动滚到底
+        if (lastVisible >= lastIndex - 2) {
+            try {
+                listState.animateScrollToItem(lastIndex)
+            } catch (e: Exception) {
+                Log.e("AIChatPanel", "Scroll error: ${e.message}")
+                // 复制崩溃信息到剪贴板用于调试
+                val clipboard = (viewModel.getApplication<android.app.Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                clipboard.setPrimaryClip(ClipData.newPlainText("Scroll Error", "AIChatPanel scroll error: ${e.message}\n${e.stackTraceToString()}"))
+            }
+        }
+    }
+
+    // 流式生成时的平滑滚动（监听内容长度变化）
+    LaunchedEffect(lastMessageContentLength, state.isLoading) {
+        if (state.messages.isEmpty() || !state.isLoading) return@LaunchedEffect
+        val lastIndex = state.messages.size - 1
+        delay(100) // 防抖 100ms
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        // 当用户靠近底部时自动滚动
+        if (lastVisible >= lastIndex - 1) {
+            try {
+                listState.animateScrollToItem(lastIndex)
+            } catch (e: Exception) {
+                Log.e("AIChatPanel", "Streaming scroll error: ${e.message}")
+                val clipboard = (viewModel.getApplication<android.app.Application>().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                clipboard.setPrimaryClip(ClipData.newPlainText("Streaming Scroll Error", "AIChatPanel streaming scroll error: ${e.message}\n${e.stackTraceToString()}"))
+            }
         }
     }
 
@@ -173,6 +191,8 @@ fun AIChatPanel(
                         showContextBadge = it.role == ChatRole.Model && !it.isStreaming,
                         activeRulesCount = state.activeRulesCount,
                         activeSkillsCount = state.activeSkillsCount,
+                        onAcceptAllChanges = { path -> viewModel.acceptAllChanges(path) },
+                        onRejectAllChanges = { path -> viewModel.rejectAllChanges(path) },
                     )
                 }
 
@@ -291,11 +311,18 @@ private fun ChatBubble(
     showContextBadge: Boolean = false,
     activeRulesCount: Int = 0,
     activeSkillsCount: Int = 0,
+    onAcceptAllChanges: ((String) -> Unit)? = null,
+    onRejectAllChanges: ((String) -> Unit)? = null,
 ) {
     // 文件操作卡片
     message.fileOp?.let { op ->
         if (op.opType == com.template.jh.core.ai.FileOpType.Delete && deleteCardEnabled) return
-        FileOperationCard(op, onFileCardClick)
+        FileOperationCard(
+            op = op,
+            onFileCardClick = onFileCardClick,
+            onAcceptAll = { onAcceptAllChanges?.invoke(op.filePath) },
+            onRejectAll = { onRejectAllChanges?.invoke(op.filePath) }
+        )
         return
     }
 
@@ -396,36 +423,21 @@ private fun ContextBadge(text: String) {
     }
 }
 
-// 文件操作卡片
+// 文件操作卡片 - 新样式：左文件名、中路径、右新增/删除行数 + 确认/拒绝按钮
 @Composable
 private fun FileOperationCard(
     op: com.template.jh.core.ai.FileOperationMeta,
     onFileCardClick: ((String) -> Unit)?,
+    onAcceptAll: (() -> Unit)? = null,
+    onRejectAll: (() -> Unit)? = null,
 ) {
-    val opType = op.opType
-    val isDelete = opType == com.template.jh.core.ai.FileOpType.Delete
-    // 区分操作类型
-    val opLabel = when (opType) {
-        com.template.jh.core.ai.FileOpType.Create -> "创建"
-        com.template.jh.core.ai.FileOpType.Modify -> "修改"
-        com.template.jh.core.ai.FileOpType.Overwrite -> "覆盖"
-        com.template.jh.core.ai.FileOpType.Delete -> "删除"
-    }
-    val opColor = when (opType) {
-        com.template.jh.core.ai.FileOpType.Create -> Color(0xFF4CAF50)
-        com.template.jh.core.ai.FileOpType.Modify -> Color(0xFF2196F3)
-        com.template.jh.core.ai.FileOpType.Overwrite -> Color(0xFFFF9800)
-        com.template.jh.core.ai.FileOpType.Delete -> Color(0xFFE53935)
-    }
-    val lineColor = when {
-        op.lineChanges > 0 -> Color(0xFF4CAF50)
-        op.lineChanges < 0 -> Color(0xFFE53935)
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val linePrefix = if (op.lineChanges > 0) "+" else ""
-
-    // 提取文件名（不带路径）
+    // 提取文件名和路径
     val fileName = op.filePath.substringAfterLast("/")
+    val dirPath = op.filePath.substringBeforeLast("/", "")
+
+    // 解析新增/删除行数
+    val addedLines = if (op.lineChanges > 0) op.lineChanges else 0
+    val deletedLines = if (op.lineChanges < 0) -op.lineChanges else 0
 
     Card(
         modifier = Modifier
@@ -435,61 +447,81 @@ private fun FileOperationCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
         shape = RoundedCornerShape(8.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // 第一行：操作标签 + 文件名(居中) + 行数变化
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // 左侧：操作标签
-                Text(
-                    text = opLabel,
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = opColor,
-                    modifier = Modifier
-                        .background(opColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
+            // 左侧：文件名
+            Text(
+                text = fileName,
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
 
-                // 中间：文件名(居中)
-                Text(
-                    text = fileName,
-                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                )
-
-                // 右侧：行数变化
-                if (!isDelete && op.lineChanges != 0) {
-                    Text(
-                        text = "${linePrefix}${op.lineChanges}",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                        ),
-                        color = lineColor,
-                    )
-                } else {
-                    Spacer(Modifier.width(20.dp))
-                }
-            }
-
-            // 第二行：路径
-            val dirPath = op.filePath.substringBeforeLast("/", "")
+            // 中间：文件路径（自动省略）
             if (dirPath.isNotEmpty()) {
-                Spacer(Modifier.height(4.dp))
                 Text(
                     text = dirPath,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                Spacer(modifier = Modifier.weight(1f))
+            }
+
+            // 右侧：新增/删除行数
+            if (addedLines > 0) {
+                Text(
+                    text = "+$addedLines",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    color = Color(0xFF22CC22),
+                )
+            }
+            if (deletedLines > 0) {
+                Text(
+                    text = "-$deletedLines",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    color = Color(0xFFCC2222),
+                )
+            }
+
+            // 确认按钮（√）
+            IconButton(
+                onClick = { onAcceptAll?.invoke() },
+                modifier = Modifier.size(24.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = Color(0xFF22CC22).copy(alpha = 0.15f)
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "接受所有修改",
+                    modifier = Modifier.size(14.dp),
+                    tint = Color(0xFF22CC22)
+                )
+            }
+
+            // 拒绝按钮（×）
+            IconButton(
+                onClick = { onRejectAll?.invoke() },
+                modifier = Modifier.size(24.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = Color(0xFFCC2222).copy(alpha = 0.15f)
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "拒绝所有修改",
+                    modifier = Modifier.size(14.dp),
+                    tint = Color(0xFFCC2222)
                 )
             }
         }
@@ -515,14 +547,28 @@ private fun ChatInputBar(
 
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (engineStatus == EngineStatus.Ready && inputText.isNotBlank()) {
+                // 优化按钮 - 常驻显示，无内容时禁用
+                if (engineStatus == EngineStatus.Ready) {
                     if (isOptimizing) {
                         IconButton(onClick = {}, Modifier.size(28.dp), enabled = false) {
                             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
                         }
                     } else {
-                        IconButton(onClick = onOptimize, Modifier.size(28.dp), enabled = !isLoading) {
-                            Icon(Icons.Default.AutoAwesome, stringResource(R.string.ai_optimize_input), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                        IconButton(
+                            onClick = onOptimize,
+                            Modifier.size(28.dp),
+                            enabled = inputText.isNotBlank() && !isLoading
+                        ) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                stringResource(R.string.ai_optimize_input),
+                                Modifier.size(16.dp),
+                                tint = if (inputText.isNotBlank() && !isLoading) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                                }
+                            )
                         }
                     }
                 }

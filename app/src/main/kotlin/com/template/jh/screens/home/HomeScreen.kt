@@ -47,6 +47,7 @@ import com.template.jh.screens.home.components.ResourcePanel
 import com.template.jh.screens.home.components.SearchPanel
 import com.template.jh.screens.home.components.Sidebar
 import com.template.jh.screens.home.components.SidebarTab
+import com.template.jh.screens.home.components.TaskListPanel
 import com.template.jh.screens.home.components.ThreeColumnLayout
 import com.template.jh.ui.adaptive.rememberWindowSizeClass
 import kotlinx.coroutines.launch
@@ -76,6 +77,8 @@ fun HomeScreen(
 
     // 编辑器内容缓存
     val editorContent = remember { mutableStateMapOf<String, TextFieldValue>() }
+    // 文件原始内容缓存（用于检测修改和创建审查状态）
+    val originalContents = remember { mutableStateMapOf<String, String>() }
     val workspaceRoot = remember { File(context.filesDir, "workspace") }
     // 相对路径 → content:// URI 缓存（SAF findFile 可能找不到隐藏文件，直接用原始 URI 读取）
     val relativeToContentUri = remember { mutableMapOf<String, String>() }
@@ -197,7 +200,12 @@ fun HomeScreen(
     // 读取文件内容（缓存优先 → readFileFromSource 兜底）
     fun loadFileContent(path: String): TextFieldValue {
         editorContent[path]?.let { return it }
-        val tfv = TextFieldValue(readFileFromSource(path))
+        val content = readFileFromSource(path)
+        // 保存原始内容用于后续比较
+        if (!originalContents.containsKey(path)) {
+            originalContents[path] = content
+        }
+        val tfv = TextFieldValue(content)
         editorContent[path] = tfv
         return tfv
     }
@@ -227,6 +235,8 @@ fun HomeScreen(
             } else {
                 File(workspaceRoot, path.trimStart('/')).writeText(content)
             }
+            // 更新原始内容为保存后的内容
+            originalContents[path] = content
         } catch (_: Exception) {}
     }
 
@@ -272,6 +282,8 @@ fun HomeScreen(
                 }
             }
         }
+        // 更新原始内容为保存后的内容
+        originalContents[path] = content
         editorContent.remove(path)
         reviewStates.remove(path)
         showReviewPanels.remove(path)
@@ -332,6 +344,17 @@ fun HomeScreen(
     // 兼容旧接口：拒绝全部（用于旧版 UI）
     fun rejectEdit(path: String) {
         rejectAllChanges(path)
+    }
+
+    // 监听审查事件（接受/拒绝所有修改）
+    LaunchedEffect(Unit) {
+        FileOperationEvents.reviewEvents.collect { event ->
+            android.util.Log.d("HomeScreen", "ReviewEvent: path=${event.path}, action=${event.action}")
+            when (event.action) {
+                com.template.jh.core.ai.ReviewAction.AcceptAll -> acceptAllChanges(event.path)
+                com.template.jh.core.ai.ReviewAction.RejectAll -> rejectAllChanges(event.path)
+            }
+        }
     }
 
     // 打开 AI 操作卡片指定的文件
@@ -492,6 +515,7 @@ fun HomeScreen(
                     files = files,
                     viewModel = viewModel,
                     chatViewModel = chatViewModel,
+                    chatState = chatState,
                     onFileClick = { fileItem ->
                         val rel = safPathToRelative(fileItem.uri.toString())
                         editorContent.remove(rel)
@@ -512,6 +536,15 @@ fun HomeScreen(
                         }
                         val newText = if (currentText.isBlank()) label else "$currentText\n\n$label"
                         chatViewModel.setInputText(newText)
+                    },
+                    onOpenFileTab = { filePath ->
+                        openFileTab(filePath)
+                    },
+                    onAcceptAllChanges = { filePath ->
+                        acceptAllChanges(filePath)
+                    },
+                    onRejectAllChanges = { filePath ->
+                        rejectAllChanges(filePath)
                     },
                 )
             },
@@ -591,12 +624,38 @@ fun HomeScreen(
                             }
                         }
 
+                        // 处理文本修改并触发审查
+                        fun handleTextChange(newTextFieldValue: TextFieldValue) {
+                            val newText = newTextFieldValue.text
+                            editorContent[path] = newTextFieldValue
+
+                            // 获取原始内容（优先使用已保存的原始内容）
+                            val originalContent = originalContents[path] ?: readFileFromSource(path)
+
+                            // 如果内容发生变化且没有审查状态，创建新的审查状态
+                            if (newText != originalContent && !reviewStates.containsKey(path)) {
+                                val newReviewState = createCodeReviewState(path, originalContent, newText)
+                                if (newReviewState.totalCount > 0) {
+                                    reviewStates[path] = newReviewState
+                                    android.util.Log.d("HomeScreen", "Auto-created review state for $path with ${newReviewState.totalCount} change blocks")
+                                }
+                            }
+                            // 如果已有审查状态，更新新内容
+                            else if (reviewStates.containsKey(path)) {
+                                val currentState = reviewStates[path]!!
+                                // 重新计算diff
+                                val updatedState = createCodeReviewState(path, currentState.oldContent, newText)
+                                reviewStates[path] = updatedState.copy(
+                                    currentBlockIndex = currentState.currentBlockIndex.coerceIn(0, (updatedState.totalCount - 1).coerceAtLeast(0))
+                                )
+                            }
+                        }
+
                         CodeEditor(
                             text = TextFieldValue(displayText),
-                            onTextChange = { if (reviewState == null) editorContent[path] = it },
+                            onTextChange = { handleTextChange(it) },
                             modifier = Modifier.fillMaxSize(),
                             lineDiffs = lineDiffs,
-                            oldLineDiffs = oldDiffsFiltered,
                             originalContent = reviewState?.oldContent,
                             reviewState = reviewState,
                             pendingFilePath = if (reviewState != null) path else null,
@@ -628,12 +687,15 @@ fun HomeScreen(
                                     }
                                 }
                             },
-                            // 全部接受/拒绝（兼容旧接口）
+                            // 接受/拒绝全部
                             onAcceptChanges = { acceptAllChanges(path) },
                             onRejectChanges = { rejectAllChanges(path) },
-                            currentChangeIndex = currentIndex,
-                            totalChanges = totalBlocks,
-                            onCursorChange = { line -> chatViewModel.setActiveFileContext(path, line) },
+                            // 长按菜单回调
+                            onAddToChat = { selectedText ->
+                                val currentText = chatViewModel.state.value.inputText
+                                val newText = if (currentText.isBlank()) selectedText else "$currentText\n\n$selectedText"
+                                chatViewModel.setInputText(newText)
+                            },
                         )
                     },
                 )
@@ -802,8 +864,12 @@ private fun LeftPanelContent(
     files: List<FileItem>,
     viewModel: HomeViewModel,
     chatViewModel: ChatViewModel,
+    chatState: com.template.jh.core.ai.ChatUiState,
     onFileClick: (FileItem) -> Unit = {},
     onAddToConversation: (FileItem) -> Unit = {},
+    onOpenFileTab: (String) -> Unit = {},
+    onAcceptAllChanges: (String) -> Unit = {},
+    onRejectAllChanges: (String) -> Unit = {},
 ) {
     when (selectedTab) {
         SidebarTab.Explorer -> {
@@ -818,6 +884,22 @@ private fun LeftPanelContent(
                 onRename = { uri, newName -> viewModel.renameFile(uri, newName) },
                 onDelete = { uri -> viewModel.deleteFile(uri) },
                 onCreate = { uri, name, isDir -> viewModel.createFile(uri, name, isDir) },
+            )
+        }
+        SidebarTab.Tasks -> {
+            TaskListPanel(
+                tasks = chatState.taskList,
+                fileChanges = chatState.fileChanges,
+                isExpanded = chatState.isTaskListOpen,
+                onToggleExpand = { chatViewModel.toggleTaskList() },
+                onTaskClick = { task ->
+                    // 任务点击处理
+                },
+                onFileClick = { filePath ->
+                    onOpenFileTab(filePath)
+                },
+                onAcceptAllChanges = onAcceptAllChanges,
+                onRejectAllChanges = onRejectAllChanges
             )
         }
         SidebarTab.Search -> { SearchPanel() }

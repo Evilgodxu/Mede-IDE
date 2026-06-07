@@ -284,43 +284,149 @@ data class BlockReplaceOp(
 fun replaceInFile(originalText: String, operations: List<BlockReplaceOp>): Pair<String, String> {
     var result = originalText
     val messages = mutableListOf<String>()
+    var allSuccess = true
     
     for ((index, op) in operations.withIndex()) {
-        val trimmedOld = op.oldString
-        val trimmedNew = op.newString
+        val oldStr = op.oldString
+        val newStr = op.newString
         
-        // 验证旧字符串是否存在
-        if (!result.contains(trimmedOld)) {
-            // 尝试规范化空白字符后匹配
-            val normalizedResult = normalizeWhitespace(result)
-            val normalizedOld = normalizeWhitespace(trimmedOld)
-            
-            if (!normalizedResult.contains(normalizedOld)) {
-                messages.add("替换 #${index + 1} 失败: 找不到指定的代码块")
+        // 1. 精确匹配
+        if (result.contains(oldStr)) {
+            val occurrenceCount = countOccurrences(result, oldStr)
+            if (occurrenceCount == 1) {
+                result = result.replaceFirst(oldStr, newStr)
+                messages.add("✓ 替换 #${index + 1} 成功")
                 continue
             }
-        }
-        
-        // 统计出现次数（确保唯一性）
-        val occurrenceCount = countOccurrences(result, trimmedOld)
-        if (occurrenceCount > 1) {
-            // 尝试扩展上下文以获得唯一匹配
-            val expandedResult = tryExpandAndReplace(result, trimmedOld, trimmedNew)
+            // 多处匹配，尝试扩展上下文
+            val expandedResult = tryExpandAndReplace(result, oldStr, newStr)
             if (expandedResult != null) {
                 result = expandedResult
-                messages.add("替换 #${index + 1} 成功")
+                messages.add("✓ 替换 #${index + 1} 成功（通过上下文扩展）")
                 continue
             }
-            messages.add("替换 #${index + 1} 失败: 找到 $occurrenceCount 处匹配，请提供更长的唯一代码块")
+            messages.add("✗ 替换 #${index + 1} 失败: 找到 $occurrenceCount 处匹配，请提供更长的唯一代码块")
+            allSuccess = false
             continue
         }
         
-        // 执行替换
-        result = result.replaceFirst(trimmedOld, trimmedNew)
-        messages.add("替换 #${index + 1} 成功")
+        // 2. 尝试去除首尾空白后匹配
+        val trimmedOld = oldStr.trim()
+        if (result.contains(trimmedOld)) {
+            val occurrenceCount = countOccurrences(result, trimmedOld)
+            if (occurrenceCount == 1) {
+                result = result.replaceFirst(trimmedOld, newStr)
+                messages.add("✓ 替换 #${index + 1} 成功（自动去除首尾空白）")
+                continue
+            }
+        }
+        
+        // 3. 尝试逐行匹配（忽略行尾空白差异）
+        val lineMatchResult = tryLineBasedMatch(result, oldStr, newStr)
+        if (lineMatchResult != null) {
+            result = lineMatchResult
+            messages.add("✓ 替换 #${index + 1} 成功（忽略行尾空白差异）")
+            continue
+        }
+        
+        // 4. 生成详细的错误信息
+        val errorMsg = buildMatchErrorMessage(result, oldStr, index + 1)
+        messages.add(errorMsg)
+        allSuccess = false
     }
     
-    return result to messages.joinToString("\n")
+    val summary = if (allSuccess) "[成功] 所有替换已完成" else "[部分失败] 部分替换未能完成"
+    return result to "$summary\n${messages.joinToString("\n")}"
+}
+
+/**
+ * 尝试基于行的匹配（忽略行尾空白）
+ */
+private fun tryLineBasedMatch(text: String, oldStr: String, newStr: String): String? {
+    val textLines = text.lines()
+    val oldLines = oldStr.lines()
+    
+    if (oldLines.isEmpty()) return null
+    
+    // 找到所有可能的匹配位置
+    val matches = mutableListOf<Int>()
+    for (i in 0..textLines.size - oldLines.size) {
+        if (linesMatchLoose(textLines, i, oldLines)) {
+            matches.add(i)
+        }
+    }
+    
+    if (matches.size != 1) return null
+    
+    // 执行替换
+    val result = textLines.toMutableList()
+    val startIdx = matches[0]
+    val endIdx = startIdx + oldLines.size
+    
+    result.subList(startIdx, endIdx).clear()
+    result.addAll(startIdx, newStr.lines())
+    
+    return result.joinToString("\n")
+}
+
+/**
+ * 宽松行匹配（忽略行尾空白）
+ */
+private fun linesMatchLoose(lines: List<String>, startIdx: Int, oldLines: List<String>): Boolean {
+    if (startIdx + oldLines.size > lines.size) return false
+    for (i in oldLines.indices) {
+        if (lines[startIdx + i].trimEnd() != oldLines[i].trimEnd()) {
+            return false
+        }
+    }
+    return true
+}
+
+/**
+ * 构建详细的匹配错误信息
+ */
+private fun buildMatchErrorMessage(text: String, oldStr: String, index: Int): String {
+    val oldLines = oldStr.lines()
+    val firstLine = oldLines.firstOrNull()?.trim()?.take(30) ?: ""
+    val lastLine = oldLines.lastOrNull()?.trim()?.take(30) ?: ""
+    
+    // 尝试找到相似内容
+    val suggestions = findSimilarContent(text, oldStr)
+    
+    val sb = StringBuilder()
+    sb.appendLine("✗ 替换 #$index 失败: 找不到指定的代码块")
+    sb.appendLine("  查找内容: \"${firstLine}...${lastLine}\"")
+    sb.appendLine("  行数: ${oldLines.size} 行")
+    
+    if (suggestions.isNotEmpty()) {
+        sb.appendLine("  可能的匹配位置:")
+        suggestions.take(3).forEach { (lineNum, content) ->
+            sb.appendLine("    第 $lineNum 行: \"${content.take(40)}...\"")
+        }
+    }
+    
+    return sb.toString().trimEnd()
+}
+
+/**
+ * 查找文件中可能相似的内容
+ */
+private fun findSimilarContent(text: String, pattern: String): List<Pair<Int, String>> {
+    val patternLines = pattern.lines()
+    val textLines = text.lines()
+    val results = mutableListOf<Pair<Int, String>>()
+    
+    if (patternLines.isEmpty()) return results
+    
+    val firstPatternLine = patternLines[0].trim().take(20)
+    
+    for (i in textLines.indices) {
+        if (textLines[i].contains(firstPatternLine, ignoreCase = true)) {
+            results.add(i + 1 to textLines[i].trim())
+        }
+    }
+    
+    return results
 }
 
 /**

@@ -1,5 +1,9 @@
 package com.template.jh.screens.home.components
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +33,9 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.NetworkCheck
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -46,6 +53,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -377,15 +385,38 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?, onBrowseModelFil
     }
 }
 
+// 云端模型厂商预设数据类
+private data class CloudVendorPreset(
+    val name: String,
+    val apiEndpoint: String,
+    val defaultModels: List<String>,
+    val icon: @Composable () -> Unit = { Icon(Icons.Default.SmartToy, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) }
+)
+
 @Composable
 private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template.jh.core.ai.ChatUiState) {
     var editingProfile by remember { mutableStateOf<com.template.jh.core.ai.CloudModelProfile?>(null) }
     var showEditDialog by remember { mutableStateOf(false) }
+    var showVendorSelector by remember { mutableStateOf(false) }
+    var editStep by remember { mutableIntStateOf(0) } // 0=选择厂商, 1=填写详情
     var editName by remember { mutableStateOf("") }
     var editEndpoint by remember { mutableStateOf("") }
     var editKey by remember { mutableStateOf("") }
     var editModel by remember { mutableStateOf("") }
     var showKey by remember { mutableStateOf(false) }
+    var isTesting by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf<String?>(null) }
+    var isFetchingModels by remember { mutableStateOf(false) }
+    var availableModels by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    val vendorPresets = listOf(
+        CloudVendorPreset("OpenAI", "https://api.openai.com/v1", listOf("gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo")),
+        CloudVendorPreset("DeepSeek", "https://api.deepseek.com/v1", listOf("deepseek-chat", "deepseek-reasoner")),
+        CloudVendorPreset("智谱AI", "https://open.bigmodel.cn/api/paas/v4", listOf("glm-4-flash", "glm-4-plus")),
+        CloudVendorPreset("通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1", listOf("qwen-plus", "qwen-turbo")),
+        CloudVendorPreset("Moonshot", "https://api.moonshot.cn/v1", listOf("moonshot-v1-8k", "moonshot-v1-32k")),
+        CloudVendorPreset("自定义", "", listOf()),
+    )
 
     val verifyMsg = when {
         chatState.engineStatus == EngineStatus.Idle && chatState.engineErrorMessage.startsWith("验证") -> chatState.engineErrorMessage
@@ -400,16 +431,19 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                 Switch(checked = chatState.cloudModelEnabled, onCheckedChange = { chatViewModel.setCloudModelEnabled(it) })
             }
 
-            Text("接入 OpenAI 兼容 API（DeepSeek、OpenAI、Claude 等），可添加多个配置并自由切换。",
+            Text("接入 OpenAI 兼容 API（DeepSeek、OpenAI、智谱AI 等），可添加多个配置并自由切换。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             // 添加配置按钮
             OutlinedButton(onClick = {
                 editName = ""
-                editEndpoint = "https://api.deepseek.com"
+                editEndpoint = ""
                 editKey = ""
-                editModel = "deepseek-chat"
+                editModel = ""
                 editingProfile = null
+                editStep = 0
+                testResult = null
+                availableModels = emptyList()
                 showEditDialog = true
             }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Add, null, Modifier.size(16.dp))
@@ -446,7 +480,10 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                             OutlinedButton(onClick = {
                                 editName = profile.name; editEndpoint = profile.apiEndpoint
                                 editKey = profile.apiKey; editModel = profile.modelName
-                                editingProfile = profile; showEditDialog = true
+                                editingProfile = profile; editStep = 1
+                                testResult = null
+                                availableModels = emptyList()
+                                showEditDialog = true
                             }, modifier = Modifier.height(28.dp)) {
                                 Text("编辑", style = MaterialTheme.typography.labelSmall)
                             }
@@ -479,68 +516,231 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
     if (showEditDialog) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showEditDialog = false },
-            title = { Text(if (editingProfile != null) "编辑云端配置" else "添加云端配置") },
+            title = { 
+                Text(when {
+                    editingProfile != null -> "编辑云端配置"
+                    editStep == 0 -> "选择厂商"
+                    else -> "添加云端配置"
+                }) 
+            },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = editName,
-                        onValueChange = { editName = it },
-                        label = { Text("配置名称") },
-                        placeholder = { Text("例如: DeepSeek V4") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = editEndpoint,
-                        onValueChange = { editEndpoint = it },
-                        label = { Text("API 端点") },
-                        placeholder = { Text("https://api.deepseek.com") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = editKey,
-                        onValueChange = { editKey = it },
-                        label = { Text("API Key") },
-                        placeholder = { Text("sk-...") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None
-                            else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { showKey = !showKey }) {
-                                Icon(
-                                    if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    contentDescription = if (showKey) "隐藏" else "显示",
-                                )
+                    // 步骤0: 选择厂商
+                    if (editStep == 0 && editingProfile == null) {
+                        vendorPresets.forEach { vendor ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    if (vendor.name == "自定义") {
+                                        editEndpoint = ""
+                                        editModel = ""
+                                    } else {
+                                        editName = vendor.name
+                                        editEndpoint = vendor.apiEndpoint
+                                        editModel = vendor.defaultModels.firstOrNull() ?: ""
+                                    }
+                                    editStep = 1
+                                },
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    vendor.icon()
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(vendor.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                        if (vendor.apiEndpoint.isNotEmpty()) {
+                                            Text(vendor.apiEndpoint, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
                             }
-                        },
-                    )
-                    OutlinedTextField(
-                        value = editModel,
-                        onValueChange = { editModel = it },
-                        label = { Text("模型名称") },
-                        placeholder = { Text("deepseek-chat") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
+                        }
+                    } else {
+                        // 步骤1: 填写详情
+                        OutlinedTextField(
+                            value = editName,
+                            onValueChange = { editName = it },
+                            label = { Text("配置名称") },
+                            placeholder = { Text("例如: DeepSeek V4") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                        )
+                        OutlinedTextField(
+                            value = editEndpoint,
+                            onValueChange = { editEndpoint = it; availableModels = emptyList() },
+                            label = { Text("API 端点") },
+                            placeholder = { Text("https://api.deepseek.com") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = editModel,
+                                onValueChange = { editModel = it },
+                                label = { Text("模型名称") },
+                                placeholder = { Text("deepseek-chat") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                            )
+                            // 获取模型列表按钮
+                            if (availableModels.isNotEmpty()) {
+                                Box {
+                                    var showModelDropdown by remember { mutableStateOf(false) }
+                                    IconButton(onClick = { showModelDropdown = true }) {
+                                        Icon(Icons.Default.ArrowDropDown, "选择模型", tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                    DropdownMenu(
+                                        expanded = showModelDropdown,
+                                        onDismissRequest = { showModelDropdown = false }
+                                    ) {
+                                        availableModels.forEach { model ->
+                                            DropdownMenuItem(
+                                                text = { Text(model, style = MaterialTheme.typography.bodySmall) },
+                                                onClick = {
+                                                    editModel = model
+                                                    showModelDropdown = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        OutlinedTextField(
+                            value = editKey,
+                            onValueChange = { editKey = it },
+                            label = { Text("API Key") },
+                            placeholder = { Text("sk-...") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None
+                                else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { showKey = !showKey }) {
+                                    Icon(
+                                        if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (showKey) "隐藏" else "显示",
+                                    )
+                                }
+                            },
+                        )
+                        
+                        // 测试连接和获取模型按钮
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    isTesting = true
+                                    testResult = null
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        try {
+                                            val client = com.template.jh.core.ai.CloudLLMClient(context)
+                                            val config = com.template.jh.core.ai.CloudModelConfig(
+                                                enabled = true,
+                                                apiEndpoint = editEndpoint,
+                                                apiKey = editKey,
+                                                modelName = editModel.ifEmpty { "gpt-3.5-turbo" }
+                                            )
+                                            val result = client.verifyConnection(config)
+                                            isTesting = false
+                                            testResult = result
+                                        } catch (e: Exception) {
+                                            isTesting = false
+                                            testResult = "测试失败: ${e.message}"
+                                            Log.e("CloudModelCard", "Test connection error", e)
+                                            // 复制崩溃信息到剪贴板
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("CloudModel Test Error", "Test connection error: ${e.message}\n${e.stackTraceToString()}"))
+                                        }
+                                    }
+                                },
+                                enabled = editEndpoint.isNotBlank() && !isTesting,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (isTesting) {
+                                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(4.dp))
+                                } else {
+                                    Icon(Icons.Default.NetworkCheck, null, Modifier.size(14.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                                Text("测试连接", style = MaterialTheme.typography.labelSmall)
+                            }
+                            
+                            OutlinedButton(
+                                onClick = {
+                                    isFetchingModels = true
+                                    availableModels = emptyList()
+                                    CoroutineScope(Dispatchers.IO).launch {
+                                        try {
+                                            val client = com.template.jh.core.ai.CloudLLMClient(context)
+                                            val models = client.fetchModels(editEndpoint, editKey)
+                                            isFetchingModels = false
+                                            availableModels = models
+                                        } catch (e: Exception) {
+                                            isFetchingModels = false
+                                            availableModels = emptyList()
+                                            Log.e("CloudModelCard", "Fetch models error", e)
+                                            // 复制崩溃信息到剪贴板
+                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("CloudModel Fetch Error", "Fetch models error: ${e.message}\n${e.stackTraceToString()}"))
+                                        }
+                                    }
+                                },
+                                enabled = editEndpoint.isNotBlank() && !isFetchingModels,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (isFetchingModels) {
+                                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(4.dp))
+                                } else {
+                                    Icon(Icons.Default.Refresh, null, Modifier.size(14.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                                Text("获取模型", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        
+                        // 显示测试结果
+                        testResult?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (it == "ok") Color(0xFF4CAF50) else MaterialTheme.colorScheme.error
+                            )
+                        }
+                        
+                        // 返回厂商选择
+                        if (editingProfile == null) {
+                            TextButton(onClick = { editStep = 0 }) {
+                                Text("← 返回选择厂商")
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    if (editEndpoint.isNotBlank() && editModel.isNotBlank()) {
-                        if (editingProfile != null) {
-                            val updated = editingProfile!!.copy(
-                                name = editName, apiEndpoint = editEndpoint,
-                                apiKey = editKey, modelName = editModel,
-                            )
-                            chatViewModel.updateCloudProfile(updated)
-                        } else {
-                            chatViewModel.addCloudProfile(editName, editEndpoint, editKey, editModel)
-                        }
-                        showEditDialog = false
-                    }
-                }) { Text("保存") }
+                if (editStep == 1 || editingProfile != null) {
+                    Button(
+                        onClick = {
+                            if (editEndpoint.isNotBlank() && editModel.isNotBlank()) {
+                                if (editingProfile != null) {
+                                    val updated = editingProfile!!.copy(
+                                        name = editName, apiEndpoint = editEndpoint,
+                                        apiKey = editKey, modelName = editModel,
+                                    )
+                                    chatViewModel.updateCloudProfile(updated)
+                                } else {
+                                    chatViewModel.addCloudProfile(editName, editEndpoint, editKey, editModel)
+                                }
+                                showEditDialog = false
+                            }
+                        },
+                        enabled = editEndpoint.isNotBlank() && editModel.isNotBlank()
+                    ) { Text("保存") }
+                }
             },
             dismissButton = { OutlinedButton(onClick = { showEditDialog = false }) { Text("取消") } },
         )

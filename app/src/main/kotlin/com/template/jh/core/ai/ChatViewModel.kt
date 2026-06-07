@@ -12,6 +12,7 @@ import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.tool
 import com.template.jh.data.model.NotificationEventType
+import com.template.jh.data.model.ParsedTaskList
 import com.template.jh.data.model.Rule
 import com.template.jh.data.model.RuleType
 import com.template.jh.data.model.TaskItem
@@ -276,6 +277,16 @@ class ChatViewModel(
 
     fun requestOpenFile(path: String) { _openFileRequests.tryEmit(path) }
 
+    // 接受文件的所有修改
+    fun acceptAllChanges(filePath: String) {
+        FileOperationEvents.notifyAcceptAll(filePath)
+    }
+
+    // 拒绝文件的所有修改
+    fun rejectAllChanges(filePath: String) {
+        FileOperationEvents.notifyRejectAll(filePath)
+    }
+
     fun toggleTaskList() { _state.update { it.copy(isTaskListOpen = !it.isTaskListOpen) } }
 
     fun clearCompletedTasks() {
@@ -352,18 +363,42 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val conv = liteRTManager.createConversation(ConversationConfig(
-                    systemInstruction = Contents.of("修正错别字，优化表达简洁专业，只返回优化后文本"),
-                    samplerConfig = liteRTManager.modelParams.toSamplerConfig(), tools = emptyList(),
+                    systemInstruction = Contents.of(buildOptimizePrompt()),
+                    samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
+                    tools = emptyList(),
                 ))
                 var optimized = ""
                 conv.use { c ->
-                    c.sendMessageAsync("修正优化：\n\n$text").catch { }.collect { optimized += it.toString() }
+                    c.sendMessageAsync(text).catch { }.collect { optimized += it.toString() }
                     val result = optimized.trim()
                     if (result.isNotEmpty()) _state.update { it.copy(inputText = result, isOptimizing = false) }
                     else _state.update { it.copy(isOptimizing = false) }
                 }
             } catch (_: Exception) { _state.update { it.copy(isOptimizing = false) } }
         }
+    }
+
+    private fun buildOptimizePrompt(): String {
+        return """你是一个专业的编程助手，负责优化用户的输入内容。
+
+优化目标：
+1. 修正错别字和语法错误
+2. 使表达更简洁、专业
+3. 保持原意不变
+4. 如果是代码相关问题，确保术语准确
+
+重要规则：
+- 只返回优化后的文本内容
+- 不要添加解释、前缀或后缀
+- 不要改变用户的原始意图
+- 如果是代码片段，保持代码格式和缩进
+
+示例：
+输入："帮我写一个登陆页面，要有用户名密码输入框"
+输出："创建一个登录页面，包含用户名和密码输入框"
+
+输入："这个函数有bug，需要修复一下"
+输出："该函数存在缺陷，需要进行修复""".trimIndent()
     }
 
     private fun ensureConversation(): Conversation {
@@ -389,7 +424,8 @@ class ChatViewModel(
         sb.append("## 核心规则\n")
         sb.append("- 用户要求修改/创建文件时，立即执行，不要请求确认。\n")
         sb.append("- 不要只提供代码建议——使用工具实际写入文件。\n")
-        sb.append("- 不要解释你将要做什么——直接做。\n\n")
+        sb.append("- 不要解释你将要做什么——直接做。\n")
+        sb.append("- 复杂任务需要先输出任务清单，使用 [tasks]...[/tasks] 标签\n\n")
         sb.append("## 编辑器上下文\n")
         sb.append("每次用户消息前会注入 [当前编辑器上下文] 块，包含：\n")
         sb.append("- 活动文件路径（相对于项目根目录）和光标行号\n")
@@ -410,38 +446,43 @@ class ChatViewModel(
         sb.append("## 可用工具\n")
         sb.append("- listFiles: 列出项目目录内容\n")
         sb.append("- readFile: 读取文件内容（带行号）\n")
-        sb.append("- writeFile: 创建或覆盖文件\n")
-        sb.append("- replaceInFile: **推荐** 代码块级精确替换（比 applyPatch 更易用），参数: path, replacements(JSON数组，每项含 old_string/new_string)\n")
-        sb.append("- applyPatch: 行级编辑（基于行号），适用于需要精确控制行号的场景\n")
-        sb.append("- searchInFiles: 在项目文件中搜索文本内容（不区分大小写），返回匹配的文件路径+行号。参数: query(搜索词), extension(可选文件扩展名过滤如'kt')\n")
-        sb.append("  **当用户没有打开文件时说『找XX文件』『搜索XX』『在XX文件添加XX』时，优先使用此工具定位文件**\n")
+        sb.append("- writeFile: 创建新文件（仅当文件不存在时使用）\n")
+        sb.append("- replaceInFile: **编辑文件的唯一方式**。参数: path, old_string, new_string\n")
+        sb.append("- searchInFiles: 在项目文件中搜索文本内容，返回匹配的文件路径+行号\n")
         sb.append("- runCommand: 执行 shell 命令\n")
         sb.append("- searchWeb: 搜索互联网\n")
-        sb.append("- gitStatus: 查看 git 状态\n")
-        sb.append("- gitAdd: 暂存文件（参数 paths，用 '.' 暂存全部）\n")
-        sb.append("- gitCommit: 提交暂存（参数 message）\n")
-        sb.append("- gitPush: 推送到远程（参数 remote, branch）\n")
-        sb.append("- gitBranch: 查看分支\n")
-        sb.append("- gitDiff: 查看差异\n")
-        sb.append("- readLints: 读取项目的编译/Lint 错误，修复代码后调用此工具检查是否已解决\n\n")
+        sb.append("- gitStatus/gitAdd/gitCommit/gitPush: Git 操作\n")
+        sb.append("- readLints: 读取编译/Lint 错误\n\n")
         sb.append("## 修改文件策略（重要）\n")
-        sb.append("- **首选 replaceInFile**，提供 old_string（文件中存在的代码块）和 new_string（新代码块）\n")
-        sb.append("- replaceInFile 示例: 要修改函数体，提供包含函数签名的完整代码块作为 old_string\n")
-        sb.append("- **只有当文件不存在或需要完全重写（超过80%内容变更）时才用 writeFile**\n")
-        sb.append("- applyPatch 格式（备用）: [{\"type\":\"replace\"|\"insert\"|\"delete\", \"startLine\":行号, \"endLine\":结束行, \"content\":\"新内容\"}]\n")
-        sb.append("- **重要**: replaceInFile/applyPatch 不会立即修改文件，而是生成待审阅的修改，用户确认后才会生效\n")
-        sb.append("- 修改后调用 readLints 检查是否引入新错误，如有则修复\n\n")
+        sb.append("- **唯一方式**: 使用 replaceInFile，提供 old_string（文件中存在的代码块）和 new_string（新代码块）\n")
+        sb.append("- **关键**: old_string 必须足够唯一，通常需要包含函数签名或类定义\n")
+        sb.append("- **禁止**: 不要生成整个文件内容去覆盖，只修改需要改变的部分\n")
+        sb.append("- **流程**: 1) readFile 读取文件 → 2) replaceInFile 替换指定代码块 → 3) readLints 检查错误\n\n")
+        sb.append("## replaceInFile 使用示例\n")
+        sb.append("假设要修改函数体，必须包含函数签名确保唯一性：\n\n")
+        sb.append("{\"tool_name\": \"replaceInFile\", \"arguments\": {\n")
+        sb.append("  \"path\": \"src/main/kotlin/com/example/MyClass.kt\",\n")
+        sb.append("  \"old_string\": \"fun calculateSum(a: Int, b: Int): Int {\\n    return a + b\\n}\",\n")
+        sb.append("  \"new_string\": \"fun calculateSum(a: Int, b: Int): Int {\\n    val result = a + b\\n    return result\\n}\"\n")
+        sb.append("}}\n\n")
+        sb.append("注意：\n")
+        sb.append("- old_string 必须完全匹配文件中的内容（包括缩进）\n")
+        sb.append("- 如果 old_string 在文件中有多处匹配，会失败，需要提供更多上下文\n")
+        sb.append("- 修改不会立即生效，会生成待审阅的修改，用户确认后才会保存\n\n")
         sb.append("## 工具调用格式\n")
         sb.append("调用工具时，只输出这个 JSON（不要有其他文本）：\n")
         sb.append("{\"tool_name\": \"FUNCTION_NAME\", \"arguments\": {\"key\": \"value\"}}\n\n")
+        sb.append("总是在执行修改前先 readFile 获取文件当前内容。\n\n")
+        sb.append("## 任务清单格式\n")
+        sb.append("对于复杂任务（涉及多文件修改或需要多步骤），先输出任务清单：\n")
+        sb.append("[tasks]\n")
+        sb.append("1. [ ] 第一步任务描述\n")
+        sb.append("2. [ ] 第二步任务描述\n")
+        sb.append("3. [ ] 第三步任务描述\n")
+        sb.append("[/tasks]\n")
+        sb.append("每完成一个子任务，更新对应项为 [x]。所有子任务完成后输出 [task_complete] 标签。\n")
         sb.append("示例:\n")
-        sb.append("{\"tool_name\": \"listFiles\", \"arguments\": {}}\n")
-        sb.append("{\"tool_name\": \"readFile\", \"arguments\": {\"path\": \"src/main.kt\"}}\n")
-        sb.append("{\"tool_name\": \"replaceInFile\", \"arguments\": {\"path\": \"src/main.kt\", \"replacements\": \"[{\\\"old_string\\\":\\\"fun old() {\\n    return 1\\n}\", \\\"new_string\\\":\\\"fun old() {\\n    return 2\\n}\"}]\"}}\n")
-        sb.append("{\"tool_name\": \"applyPatch\", \"arguments\": {\"path\": \"src/main.kt\", \"patches\": \"[{\\\"type\\\":\\\"replace\\\",\\\"startLine\\\":2,\\\"endLine\\\":4,\\\"content\\\":\\\"new\\\"}]\"}}\n")
-        sb.append("{\"tool_name\": \"gitStatus\", \"arguments\": {}}\n")
-        sb.append("{\"tool_name\": \"readLints\", \"arguments\": {}}\n\n")
-        sb.append("总是在执行修改前先 readFile 获取文件当前内容。\n")
+        sb.append("[tasks]\n1. [ ] 读取当前文件结构\n2. [ ] 修改 HomeScreen.kt 添加新功能\n3. [ ] 验证修改无误\n[/tasks]\n\n")
         val userName = runBlocking { preferencesRepo.userName.first() }
         if (userName.isNotBlank()) sb.append("\n用户: $userName")
         val rules = runBlocking { preferencesRepo.rules.first() }
@@ -482,8 +523,7 @@ class ChatViewModel(
             "listFiles" -> aiToolSet.listFiles(args["subPath"] ?: args["path"] ?: "")
             "readFile" -> aiToolSet.readFile(args["path"] ?: "")
             "writeFile" -> aiToolSet.writeFile(args["path"] ?: "", args["content"] ?: "")
-            "replaceInFile" -> aiToolSet.replaceInFile(args["path"] ?: "", args["replacements"] ?: "")
-            "applyPatch" -> aiToolSet.applyPatch(args["path"] ?: "", args["patches"] ?: "")
+            "replaceInFile" -> aiToolSet.replaceInFile(args["path"] ?: "", args["old_string"] ?: "", args["new_string"] ?: "")
             "searchInFiles" -> aiToolSet.searchInFiles(args["query"] ?: "", args["extension"] ?: "")
             "runCommand" -> aiToolSet.runCommand(args["command"] ?: "")
             "searchWeb" -> aiToolSet.searchWeb(args["query"] ?: "")
@@ -833,17 +873,85 @@ class ChatViewModel(
 
     private fun updateModelMessage(msgId: String, chunk: String, append: Boolean) {
         _state.update { state ->
-            state.copy(messages = state.messages.map { msg ->
-                if (msg.id == msgId) msg.copy(content = if (append) msg.content + chunk else chunk, isStreaming = true) else msg
-            })
+            val updatedMessages = state.messages.map { msg ->
+                if (msg.id == msgId) {
+                    val newContent = if (append) msg.content + chunk else chunk
+                    // 解析任务清单并更新子任务
+                    val updatedMsg = msg.copy(content = newContent, isStreaming = true)
+                    parseAndUpdateTaskList(newContent, state)
+                    updatedMsg
+                } else msg
+            }
+            state.copy(messages = updatedMessages)
         }
     }
 
     private fun finalizeModelMessage(msgId: String) {
         _state.update { state ->
-            state.copy(messages = state.messages.map { msg -> if (msg.id == msgId) msg.copy(isStreaming = false) else msg }, isLoading = false)
+            val updatedMessages = state.messages.map { msg ->
+                if (msg.id == msgId) {
+                    // 检查是否包含任务完成标记
+                    if (ParsedTaskList.hasCompleteMarker(msg.content)) {
+                        markAllSubTasksCompleted()
+                    }
+                    msg.copy(isStreaming = false)
+                } else msg
+            }
+            state.copy(messages = updatedMessages, isLoading = false)
         }
         saveCurrentToHistory()
+    }
+
+    // 解析任务清单并更新子任务状态
+    private fun parseAndUpdateTaskList(content: String, state: ChatUiState) {
+        val parsed = ParsedTaskList.parse(content) ?: return
+
+        // 找到当前正在运行的主任务
+        val activeTask = state.taskList.find { it.status == TaskStatus.Running && !it.isSubTask }
+            ?: state.taskList.lastOrNull { !it.isSubTask }
+
+        if (activeTask != null) {
+            val existingSubTasks = state.taskList.filter { it.parentTaskId == activeTask.id }
+
+            // 如果子任务数量不同，需要重新创建
+            if (existingSubTasks.size != parsed.tasks.size) {
+                val newSubTasks = parsed.tasks.mapIndexed { index, taskDesc ->
+                    TaskItem(
+                        title = taskDesc,
+                        status = if (index < parsed.completedCount) TaskStatus.Completed else TaskStatus.Pending,
+                        isSubTask = true,
+                        parentTaskId = activeTask.id,
+                        order = index
+                    )
+                }
+                _state.update { s ->
+                    s.copy(taskList = s.taskList.filter { it.parentTaskId != activeTask.id } + newSubTasks)
+                }
+            } else {
+                // 更新现有子任务的完成状态
+                val updatedSubTasks = existingSubTasks.mapIndexed { index, task ->
+                    val shouldBeCompleted = index < parsed.completedCount
+                    if (shouldBeCompleted && task.status != TaskStatus.Completed) {
+                        task.copy(status = TaskStatus.Completed)
+                    } else task
+                }
+                _state.update { s ->
+                    s.copy(taskList = s.taskList.filter { it.parentTaskId != activeTask.id } + updatedSubTasks)
+                }
+            }
+        }
+    }
+
+    // 标记所有子任务为已完成
+    private fun markAllSubTasksCompleted() {
+        _state.update { state ->
+            val updatedTasks = state.taskList.map { task ->
+                if (task.isSubTask && task.status != TaskStatus.Completed) {
+                    task.copy(status = TaskStatus.Completed)
+                } else task
+            }
+            state.copy(taskList = updatedTasks)
+        }
     }
 
     private fun saveCurrentToHistory() {
