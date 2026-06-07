@@ -2,6 +2,7 @@ package com.template.jh.core.storage
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 
 /**
@@ -237,8 +238,8 @@ class FileManager(private val context: Context) {
                 }.trimEnd()
             }
         } catch (e: Exception) {
-            copyErrorToClipboard(e)
-            "Search failed (error copied to clipboard): ${e.message}"
+            Log.e("FileManager", "searchInFiles failed", e)
+            "Search failed: ${e.message}"
         }
     }
 
@@ -352,14 +353,6 @@ class FileManager(private val context: Context) {
         else -> "${"%.1f".format(bytes.toDouble() / (1024 * 1024))} MB"
     }
 
-    private fun copyErrorToClipboard(e: Exception) {
-        try {
-            val sw = java.io.StringWriter()
-            e.printStackTrace(java.io.PrintWriter(sw))
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("error", sw.toString()))
-        } catch (_: Exception) { }
-    }
 }
 
 /**

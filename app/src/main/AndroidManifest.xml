@@ -13,6 +13,8 @@
         tools:ignore="ScopedStorage" />
     <!-- 网络权限（模型下载） -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 日志权限 -->
+    <uses-permission android:name="android.permission.READ_LOGS" />
 
     <application
         android:name=".MyApplication"
@@ -35,6 +37,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
     <!-- 成功实现访问子目录中的文件 -->

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -54,6 +55,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -65,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.template.jh.R
 import com.template.jh.core.ai.ChatViewModel
+import com.template.jh.core.utils.LogCollector
 import com.template.jh.core.ai.DownloadStatus
 import com.template.jh.core.ai.EngineStatus
 import com.template.jh.core.ai.LiteRTManager
@@ -605,6 +610,39 @@ private fun GeneralSettingsCard(
                         unfocusedContainerColor = Color.Transparent,
                     ),
                 )
+            }
+
+            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+            // 发送日志按钮
+            val context = androidx.compose.ui.platform.LocalContext.current
+            var isSharing by remember { mutableStateOf(false) }
+            androidx.compose.material3.Button(
+                onClick = {
+                    isSharing = true
+                    CoroutineScope(Dispatchers.Main).launch {
+                        LogCollector.collectAndShareLogs(context)
+                        isSharing = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isSharing,
+            ) {
+                if (isSharing) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(if (isSharing) "正在收集日志…" else "发送日志")
             }
         }
     }

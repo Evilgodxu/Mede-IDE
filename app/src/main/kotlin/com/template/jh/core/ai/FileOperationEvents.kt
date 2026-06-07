@@ -10,7 +10,9 @@ object FileOperationEvents {
     val events: SharedFlow<FileEvent> = _events.asSharedFlow()
 
     fun notify(path: String, operation: String, lineChanges: Int = 0, originalContent: String = "", newContent: String = "") {
-        _events.tryEmit(FileEvent(path, operation, lineChanges, originalContent, newContent))
+        val event = FileEvent(path, operation, lineChanges, originalContent, newContent)
+        val sent = _events.tryEmit(event)
+        android.util.Log.d("FileOperationEvents", "notify: path=$path, operation=$operation, sent=$sent, originalContent=${originalContent.length}, newContent=${newContent.length}")
     }
 }
 

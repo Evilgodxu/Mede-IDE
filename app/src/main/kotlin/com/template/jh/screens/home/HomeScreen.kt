@@ -235,14 +235,17 @@ fun HomeScreen(
     // 自动打开 AI 操作的文件 + 追踪待审阅修改
     LaunchedEffect(Unit) {
         FileOperationEvents.events.collect { event ->
+            android.util.Log.d("HomeScreen", "FileOperationEvents: path=${event.path}, operation=${event.operation}, original=${event.originalContent.length}, new=${event.newContent.length}")
             editorContent.remove(event.path)
             // pending操作：需要用户审阅后确认才写入
             if (event.operation == "pending" && event.originalContent.isNotEmpty() && event.newContent.isNotEmpty()) {
                 pendingEdits[event.path] = PendingFileEdit(event.path, event.originalContent, event.newContent)
+                android.util.Log.d("HomeScreen", "Created pending edit for ${event.path}")
             }
             // modify操作：已写入文件（如writeFile），只需要显示diff
             else if (event.operation == "modify" && event.originalContent.isNotEmpty() && event.newContent.isNotEmpty()) {
                 pendingEdits[event.path] = PendingFileEdit(event.path, event.originalContent, event.newContent)
+                android.util.Log.d("HomeScreen", "Created modify edit for ${event.path}")
             }
             if (event.operation != "delete") {
                 openFileTab(event.path)

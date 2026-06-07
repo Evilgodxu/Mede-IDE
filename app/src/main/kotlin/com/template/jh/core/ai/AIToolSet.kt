@@ -3,6 +3,7 @@ package com.template.jh.core.ai
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
@@ -82,8 +83,12 @@ class AIToolSet(
     // 读取原始内容（无行号，供 applyPatch 内部使用）
     private fun readFileRaw(path: String): String? {
         // 优先使用 FileManager
-        fileManager?.let { return it.readFileRaw(path) }
+        fileManager?.let {
+            android.util.Log.d("AIToolSet", "readFileRaw using FileManager for path=$path")
+            return it.readFileRaw(path)
+        }
         // 兼容回退：纯 DocumentFile API
+        android.util.Log.d("AIToolSet", "readFileRaw using native fallback for path=$path")
         return readFileNativeRaw(path)
     }
 
@@ -177,10 +182,13 @@ class AIToolSet(
         val uri = projectUri
         if (uri == null) return "No project folder is open."
         return try {
+            android.util.Log.d("AIToolSet", "applyPatch called: path=$path, projectUri=$uri")
             val original = readFileRaw(path)
             if (original == null) {
+                android.util.Log.w("AIToolSet", "applyPatch: file not found: $path")
                 return "Cannot patch: file not found or not open. Use writeFile to create first."
             }
+            android.util.Log.d("AIToolSet", "applyPatch: original content length=${original.length}")
             val patches = org.json.JSONArray(patchesJson)
             val patchOps = (0 until patches.length()).map { i ->
                 val obj = patches.getJSONObject(i)
@@ -192,11 +200,14 @@ class AIToolSet(
                 )
             }
             val newContent = applyPatches(original, patchOps)
+            android.util.Log.d("AIToolSet", "applyPatch: new content length=${newContent.length}, patchOps=${patchOps.size}")
 
             // 不直接写入文件，发送pending事件等待用户审阅
             FileOperationEvents.notify(path, "pending", computeChangedLines(original, newContent), original, newContent)
+            android.util.Log.d("AIToolSet", "applyPatch: FileOperationEvents.notify called")
             "Patch prepared for review: $path (${patchOps.size} ops). Click the checkmark in editor to apply."
         } catch (e: Exception) {
+            android.util.Log.e("AIToolSet", "applyPatch failed: ${e.message}", e)
             "Patch failed: ${e.message}"
         }
     }
@@ -470,8 +481,8 @@ class AIToolSet(
                 }.trimEnd()
             }
         } catch (e: Exception) {
-            copyErrorToClipboard(e)
-            "Search failed (error copied to clipboard): ${e.message}"
+            Log.e("AIToolSet", "searchInFiles failed", e)
+            "Search failed: ${e.message}"
         }
     }
 
@@ -581,12 +592,4 @@ class AIToolSet(
         else -> "${"%.1f".format(bytes.toDouble() / (1024 * 1024))} MB"
     }
 
-    private fun copyErrorToClipboard(e: Exception) {
-        try {
-            val sw = java.io.StringWriter()
-            e.printStackTrace(java.io.PrintWriter(sw))
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("error", sw.toString()))
-        } catch (_: Exception) { }
-    }
 }

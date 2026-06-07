@@ -1,8 +1,7 @@
 package com.template.jh.screens.home.components
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -126,7 +125,7 @@ fun MainTopBar(
                                 text = { Text(stringResource(R.string.file_menu_close_folder)) },
                                 onClick = {
                                     try { fileMenuExpanded = false; onCloseFolder() }
-                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                    catch (e: Exception) { Log.e("MainTopBar", "close folder failed", e) }
                                 }
                             )
                             HorizontalDivider()
@@ -135,7 +134,7 @@ fun MainTopBar(
                                 text = { Text(stringResource(R.string.file_menu_new_file)) },
                                 onClick = {
                                     try { fileMenuExpanded = false; onNewFile() }
-                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                    catch (e: Exception) { Log.e("MainTopBar", "new file failed", e) }
                                 }
                             )
                             // 新建文件夹
@@ -143,7 +142,7 @@ fun MainTopBar(
                                 text = { Text(stringResource(R.string.file_menu_new_folder)) },
                                 onClick = {
                                     try { fileMenuExpanded = false; onNewFolder() }
-                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                    catch (e: Exception) { Log.e("MainTopBar", "new folder failed", e) }
                                 }
                             )
                             // 打开文件
@@ -151,7 +150,7 @@ fun MainTopBar(
                                 text = { Text(stringResource(R.string.file_menu_open_file)) },
                                 onClick = {
                                     try { fileMenuExpanded = false; onOpenFile() }
-                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                    catch (e: Exception) { Log.e("MainTopBar", "open file failed", e) }
                                 }
                             )
                             // 打开文件夹
@@ -159,7 +158,7 @@ fun MainTopBar(
                                 text = { Text(stringResource(R.string.file_menu_open_folder_btn)) },
                                 onClick = {
                                     try { fileMenuExpanded = false; onOpenFolder() }
-                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                    catch (e: Exception) { Log.e("MainTopBar", "open folder failed", e) }
                                 }
                             )
                             // 最近文件
@@ -167,7 +166,7 @@ fun MainTopBar(
                                 text = { Text(stringResource(R.string.file_menu_recent_files)) },
                                 onClick = {
                                     try { fileMenuExpanded = false; onRecentFiles() }
-                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                    catch (e: Exception) { Log.e("MainTopBar", "recent files failed", e) }
                                 }
                             )
                             HorizontalDivider()
@@ -176,7 +175,7 @@ fun MainTopBar(
                                 text = { Text(stringResource(R.string.file_menu_save)) },
                                 onClick = {
                                     try { fileMenuExpanded = false; onSaveFile() }
-                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                    catch (e: Exception) { Log.e("MainTopBar", "save file failed", e) }
                                 }
                             )
                             // 另存为
@@ -184,7 +183,7 @@ fun MainTopBar(
                                 text = { Text(stringResource(R.string.file_menu_save_as)) },
                                 onClick = {
                                     try { fileMenuExpanded = false; onSaveAs() }
-                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                    catch (e: Exception) { Log.e("MainTopBar", "save as failed", e) }
                                 }
                             )
                             // 全部保存
@@ -192,7 +191,7 @@ fun MainTopBar(
                                 text = { Text(stringResource(R.string.file_menu_save_all)) },
                                 onClick = {
                                     try { fileMenuExpanded = false; onSaveAll() }
-                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                    catch (e: Exception) { Log.e("MainTopBar", "save all failed", e) }
                                 }
                             )
                             // 自动保存
@@ -211,7 +210,7 @@ fun MainTopBar(
                                     try {
                                         autoSaveEnabled = !autoSaveEnabled
                                     } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
+                                        Log.e("MainTopBar", "auto save toggle failed", e)
                                     }
                                 }
                             )
@@ -248,7 +247,7 @@ fun MainTopBar(
                                         // 撤销逻辑
                                         editMenuExpanded = false
                                     } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
+                                        Log.e("MainTopBar", "undo failed", e)
                                     }
                                 }
                             )
@@ -260,7 +259,7 @@ fun MainTopBar(
                                         // 恢复逻辑
                                         editMenuExpanded = false
                                     } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
+                                        Log.e("MainTopBar", "redo failed", e)
                                     }
                                 }
                             )
@@ -273,7 +272,7 @@ fun MainTopBar(
                                         // 剪切逻辑
                                         editMenuExpanded = false
                                     } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
+                                        Log.e("MainTopBar", "cut failed", e)
                                     }
                                 }
                             )
@@ -285,7 +284,7 @@ fun MainTopBar(
                                         // 复制逻辑
                                         editMenuExpanded = false
                                     } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
+                                        Log.e("MainTopBar", "copy failed", e)
                                     }
                                 }
                             )
@@ -297,7 +296,7 @@ fun MainTopBar(
                                         // 粘贴逻辑
                                         editMenuExpanded = false
                                     } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
+                                        Log.e("MainTopBar", "paste failed", e)
                                     }
                                 }
                             )
@@ -310,7 +309,7 @@ fun MainTopBar(
                                         // 查找逻辑
                                         editMenuExpanded = false
                                     } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
+                                        Log.e("MainTopBar", "find failed", e)
                                     }
                                 }
                             )
@@ -322,7 +321,7 @@ fun MainTopBar(
                                         // 替换逻辑
                                         editMenuExpanded = false
                                     } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
+                                        Log.e("MainTopBar", "replace failed", e)
                                     }
                                 }
                             )
@@ -335,7 +334,7 @@ fun MainTopBar(
                                         // 在文件中查找逻辑
                                         editMenuExpanded = false
                                     } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
+                                        Log.e("MainTopBar", "find in files failed", e)
                                     }
                                 }
                             )
@@ -347,7 +346,7 @@ fun MainTopBar(
                                         // 在文件中替换逻辑
                                         editMenuExpanded = false
                                     } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
+                                        Log.e("MainTopBar", "replace in files failed", e)
                                     }
                                 }
                             )
@@ -591,14 +590,6 @@ fun MainTopBar(
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         )
     }
-}
-
-// 崩溃异常捕获并复制到剪贴板
-private fun copyCrashToClipboard(context: Context, e: Exception) {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    val crashInfo = "${e.javaClass.simpleName}: ${e.message}\n${e.stackTraceToString()}"
-    val clip = ClipData.newPlainText("崩溃信息", crashInfo)
-    clipboard.setPrimaryClip(clip)
 }
 
 // 模型状态文字

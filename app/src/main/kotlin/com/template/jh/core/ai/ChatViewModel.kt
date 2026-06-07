@@ -2,6 +2,7 @@ package com.template.jh.core.ai
 
 import android.app.Application
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.ai.edge.litertlm.Content
@@ -32,10 +33,11 @@ class ChatViewModel(
     application: Application,
     private val conversationRepo: ConversationRepository,
     private val preferencesRepo: UserPreferencesRepository,
+    private val fileManager: com.template.jh.core.storage.FileManager,
 ) : AndroidViewModel(application) {
 
     private val liteRTManager = LiteRTManager(application)
-    private val aiToolSet = AIToolSet(application)
+    private val aiToolSet = AIToolSet(application, fileManager)
     private val cloudLLMClient = CloudLLMClient(application)
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -259,7 +261,7 @@ class ChatViewModel(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                copyCrashToClipboard("sendMessage", e)
+                Log.e("ChatViewModel", "sendMessage failed", e)
                 updateModelMessage(modelMsgId, "\n\n[错误: ${e.message}]", false)
                 finalizeModelMessage(modelMsgId)
                 updateTaskStatus(taskId, TaskStatus.Failed)
@@ -297,7 +299,10 @@ class ChatViewModel(
 
     fun clearNotification() { _state.update { it.copy(lastNotification = null) } }
 
-    fun setProjectRoot(uri: Uri?) { aiToolSet.projectUri = uri }
+    fun setProjectRoot(uri: Uri?) {
+        aiToolSet.projectUri = uri
+        uri?.let { fileManager.setProjectUri(it) } ?: fileManager.clearProjectUri()
+    }
 
     // 接收 HomeScreen 的打开文件列表，供 UI 徽章展示
     fun setOpenedFilePaths(paths: List<String>) {
@@ -490,15 +495,6 @@ class ChatViewModel(
         }
     } catch (e: Exception) { "Tool error: ${e.message}" }
 
-    private fun copyCrashToClipboard(action: String, t: Throwable) {
-        try {
-            val info = "[ChatViewModel]\n操作: $action\n异常: ${t.javaClass.simpleName}\n消息: ${t.message}\n堆栈: ${t.stackTraceToString()}"
-            val ctx = getApplication<Application>()
-            (ctx.getSystemService(android.content.ClipboardManager::class.java))
-                ?.setPrimaryClip(android.content.ClipData.newPlainText("崩溃信息", info))
-        } catch (_: Exception) {}
-    }
-
     private suspend fun processWithJsonTools(
         text: String, msgId: String, taskId: String,
         ctx: Application, notif: com.template.jh.data.model.NotificationSettings,
@@ -526,7 +522,7 @@ class ChatViewModel(
             }
 
             conv.sendMessageAsync(nextInput.toString()).catch { t ->
-                copyCrashToClipboard("sendMessageAsync(round=$rounds)", t)
+                Log.e("ChatViewModel", "sendMessageAsync(round=$rounds) failed", t)
                 updateModelMessage(currentMsgId, "\n\n[错误: ${t.message}]", false)
                 updateTaskStatus(taskId, TaskStatus.Failed)
                 ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "异常: ${t.message}", notif)
@@ -627,7 +623,7 @@ class ChatViewModel(
                     },
                 )
             } catch (e: Exception) {
-                copyCrashToClipboard("cloudSendMessage", e)
+                Log.e("ChatViewModel", "cloudSendMessage failed", e)
                 updateModelMessage(currentMsgId, "\n\n[云端模型错误: ${e.message}]", false)
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Failed)

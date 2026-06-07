@@ -1,8 +1,7 @@
 package com.template.jh.screens.home.components
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -77,7 +76,7 @@ fun SearchPanel() {
                         try {
                             // 刷新搜索结果逻辑
                         } catch (e: Exception) {
-                            copyCrashToClipboard(context, e)
+                            Log.e("SearchPanel", "Refresh failed", e)
                         }
                     }
                 ) {
@@ -97,7 +96,7 @@ fun SearchPanel() {
                             searchQuery = ""
                             // 清除搜索结果逻辑
                         } catch (e: Exception) {
-                            copyCrashToClipboard(context, e)
+                            Log.e("SearchPanel", "Clear failed", e)
                         }
                     }
                 ) {
@@ -116,7 +115,7 @@ fun SearchPanel() {
                         try {
                             // 全部替换逻辑
                         } catch (e: Exception) {
-                            copyCrashToClipboard(context, e)
+                            Log.e("SearchPanel", "Replace all failed", e)
                         }
                     }
                 ) {
@@ -187,12 +186,4 @@ fun SearchPanel() {
 
         Spacer(modifier = Modifier.height(8.dp))
     }
-}
-
-// 崩溃异常捕获并复制到剪贴板
-private fun copyCrashToClipboard(context: Context, e: Exception) {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    val crashInfo = "${e.javaClass.simpleName}: ${e.message}\n${e.stackTraceToString()}"
-    val clip = ClipData.newPlainText("崩溃信息", crashInfo)
-    clipboard.setPrimaryClip(clip)
 }

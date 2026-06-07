@@ -1,8 +1,7 @@
 package com.template.jh.core.ai
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
+import android.util.Log
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
@@ -125,7 +124,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
             }
             _downloadState.value = DownloadState(status = DownloadStatus.Completed, fileName = fileName, progress = 1f)
         } catch (e: Exception) {
-            copyCrashToClipboard("downloadModel", e)
+            Log.e("LiteRTManager", "downloadModel failed", e)
             _downloadState.value = DownloadState(status = DownloadStatus.Error, fileName = fileName,
                 progress = 0f, errorMessage = e.message ?: "下载失败")
         }
@@ -157,7 +156,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
             }
             loadModel(destFile.absolutePath)
         } catch (e: Exception) {
-            copyCrashToClipboard("loadModelFromUri", e)
+            Log.e("LiteRTManager", "loadModelFromUri failed", e)
             _state.value = EngineState(status = EngineStatus.Error, modelPath = destFile.absolutePath, modelName = fileName, errorMessage = e.message ?: "文件复制失败")
         }
     }
@@ -198,7 +197,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
             }
             _state.value = EngineState(status = EngineStatus.Ready, modelPath = modelPath, modelName = file.name, progress = 1f)
         } catch (e: Exception) {
-            copyCrashToClipboard("loadModel", e)
+            Log.e("LiteRTManager", "loadModel failed", e)
             engine = null; isInitialized = false
             _state.value = EngineState(status = EngineStatus.Error, modelPath = modelPath, modelName = file.name, errorMessage = e.message ?: "未知错误")
         }
@@ -310,13 +309,6 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
             if (stream.read(magic) != 8) false else String(magic) == "LITERTLM"
         }
     } catch (_: Exception) { false }
-
-    private fun copyCrashToClipboard(action: String, e: Exception) {
-        try {
-            val info = "[LiteRTManager 崩溃]\n操作: $action\n异常: ${e.javaClass.simpleName}\n消息: ${e.message}\n堆栈: ${e.stackTraceToString()}"
-            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("崩溃信息", info))
-        } catch (_: Exception) {}
-    }
 
     companion object {
         val RECOMMENDED_MODELS = listOf(

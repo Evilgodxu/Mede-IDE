@@ -423,6 +423,9 @@ private fun FileOperationCard(
     }
     val linePrefix = if (op.lineChanges > 0) "+" else ""
 
+    // 提取文件名（不带路径）
+    val fileName = op.filePath.substringAfterLast("/")
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -431,46 +434,58 @@ private fun FileOperationCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
         shape = RoundedCornerShape(8.dp),
     ) {
-        Column(
+        Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 文件路径 + 操作标签
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // 左侧：操作标签
+            Text(
+                text = opLabel,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = opColor,
+                modifier = Modifier
+                    .background(opColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+
+            Spacer(Modifier.width(10.dp))
+
+            // 中间：文件名称 + 路径
+            Column(
+                modifier = Modifier.weight(1f),
+            ) {
+                // 文件名
                 Text(
-                    text = op.filePath,
+                    text = fileName,
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = opLabel,
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = opColor,
-                    modifier = Modifier
-                        .background(opColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
-            }
-
-            // 行数变化信息（居中）
-            if (!isDelete && op.lineChanges != 0) {
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // 路径（灰色小字）
+                val dirPath = op.filePath.substringBeforeLast("/", "")
+                if (dirPath.isNotEmpty()) {
                     Text(
-                        text = "${linePrefix}${op.lineChanges}",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-                        color = lineColor,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "行",
+                        text = dirPath,
                         style = MaterialTheme.typography.labelSmall,
-                        color = lineColor,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+
+            // 末尾：行数变化
+            if (!isDelete && op.lineChanges != 0) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "${linePrefix}${op.lineChanges}",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                    ),
+                    color = lineColor,
+                )
             }
         }
     }
