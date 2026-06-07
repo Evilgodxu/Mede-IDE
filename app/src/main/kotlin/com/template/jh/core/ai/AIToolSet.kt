@@ -3,24 +3,31 @@ package com.template.jh.core.ai
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
-import android.provider.DocumentsContract
+import androidx.documentfile.provider.DocumentFile
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 import com.template.jh.core.editor.applyPatches
 import com.template.jh.core.editor.PatchOp
-import androidx.documentfile.provider.DocumentFile
+import com.template.jh.core.storage.FileManager
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-// 严格遵循 LiteRT-LM 官方示例 ToolMain.kt 模式：
 //   单一 ToolSet 类 → @Tool 方法 → @ToolParam 参数 → 返回简单类型
-class AIToolSet(private val context: Context) : ToolSet {
+class AIToolSet(
+    private val context: Context,
+    private val fileManager: FileManager? = null
+) : ToolSet {
 
     // SAF 项目根 URI（用户通过文件夹选择器打开的目录）
+    // 优先使用外部传入的 fileManager，否则使用内部 projectUri
     @Volatile var projectUri: Uri? = null
+        set(value) {
+            field = value
+            value?.let { fileManager?.setProjectUri(it) }
+        }
 
     // ---- 文件操作 ----
 
@@ -28,33 +35,85 @@ class AIToolSet(private val context: Context) : ToolSet {
     fun listFiles(
         @ToolParam(description = "Subdirectory path relative to project root. Leave empty to list root.") subPath: String = "",
     ): String {
-        val uri = projectUri
-        if (uri != null) return listViaSaf(uri, subPath)
-        return "No project folder is open. Please open a folder first."
+        // 优先使用外部传入的 FileManager（原生 DocumentFile API 实现）
+        fileManager?.let { return it.listFiles(subPath) }
+        // 兼容回退：使用纯 DocumentFile API
+        return listFilesNative(subPath)
+    }
+
+    // 纯 DocumentFile API 实现，无需 DocumentsContract
+    private fun listFilesNative(subPath: String): String {
+        val uri = projectUri ?: return "No project folder is open. Please open a folder first."
+        val rootDoc = DocumentFile.fromTreeUri(context, uri) ?: return "Failed to access project folder."
+
+        val targetDoc = if (subPath.isBlank()) {
+            rootDoc
+        } else {
+            navigatePath(rootDoc, subPath.trim('/')) ?: return "Directory not found: $subPath"
+        }
+
+        if (!targetDoc.isDirectory) return "Not a directory: $subPath"
+
+        return try {
+            val children = targetDoc.listFiles() ?: return "Empty directory."
+            if (children.isEmpty()) return "Empty directory."
+
+            val sorted = children.sortedWith(
+                compareByDescending<DocumentFile> { it.isDirectory }
+                    .thenBy { it.name?.lowercase() ?: "" }
+            )
+
+            val displayPath = if (subPath.isBlank()) "project root" else subPath.trim('/')
+            buildString {
+                appendLine("Path: $displayPath")
+                appendLine("---")
+                sorted.forEach { doc ->
+                    val name = doc.name ?: return@forEach
+                    val tag = if (doc.isDirectory) "[DIR]" else "[FILE]"
+                    val sizeStr = if (!doc.isDirectory && doc.length() > 0) " (${formatSize(doc.length())})" else ""
+                    appendLine("$tag $name$sizeStr")
+                }
+            }.trimEnd()
+        } catch (e: Exception) {
+            "Failed to list files: ${e.message}"
+        }
     }
 
     // 读取原始内容（无行号，供 applyPatch 内部使用）
     private fun readFileRaw(path: String): String? {
+        // 优先使用 FileManager
+        fileManager?.let { return it.readFileRaw(path) }
+        // 兼容回退：纯 DocumentFile API
+        return readFileNativeRaw(path)
+    }
+
+    private fun readFileNativeRaw(path: String): String? {
         val uri = projectUri ?: return null
-        val docUri = resolveSafChild(uri, path) ?: return null
+        val rootDoc = DocumentFile.fromTreeUri(context, uri) ?: return null
+        val doc = navigatePath(rootDoc, path.trim('/')) ?: return null
+        if (doc.isDirectory) return null
+
         return try {
-            context.contentResolver.openInputStream(docUri)?.bufferedReader()?.readText()
-        } catch (_: Exception) { null }
+            context.contentResolver.openInputStream(doc.uri)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     @Tool(description = "Read the content of a file in the project. Must be called before modifying a file. Returns content with line numbers.")
     fun readFile(
         @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
     ): String {
-        val uri = projectUri
-        if (uri != null) {
-            val text = readFileRaw(path) ?: return "File not found: $path"
-            val lineNumWidth = text.lines().size.toString().length
-            return text.lines().mapIndexed { i, line ->
-                "${(i + 1).toString().padStart(lineNumWidth)}: $line"
-            }.joinToString("\n")
-        }
-        return "No project folder is open."
+        // 优先使用 FileManager
+        fileManager?.let { return it.readFileWithLineNumbers(path) }
+        // 兼容回退
+        val text = readFileNativeRaw(path) ?: return "File not found: $path"
+        val lineNumWidth = text.lines().size.toString().length
+        return text.lines().mapIndexed { i, line ->
+            "${(i + 1).toString().padStart(lineNumWidth)}: $line"
+        }.joinToString("\n")
     }
 
     @Tool(description = "Create a new file or overwrite an existing file with the given content.")
@@ -62,27 +121,50 @@ class AIToolSet(private val context: Context) : ToolSet {
         @ToolParam(description = "File path relative to project root, e.g. 'src/App.kt'") path: String,
         @ToolParam(description = "The complete text content to write to the file") content: String,
     ): String {
-        val uri = projectUri
-        if (uri != null) {
-            try {
-                val parentPath = path.substringBeforeLast('/')
-                if (parentPath.isNotEmpty() && parentPath != path) ensureSafDir(uri, parentPath)
-                val existing = resolveSafChild(uri, path)
-                val isOverwrite = existing != null
-                val targetUri = if (isOverwrite) existing
-                    else createSafFile(uri, path)
-                if (targetUri == null) return "Failed to create file: $path"
-                context.contentResolver.openOutputStream(targetUri, "wt")?.use { out ->
-                    out.write(content.toByteArray(Charsets.UTF_8))
-                } ?: return "Failed to write file: $path"
-                val opName = if (isOverwrite) "overwrite" else "create"
-                FileOperationEvents.notify(path, opName, content.lines().size, newContent = content)
-                return "File written: $path (${content.lines().size} lines)"
-            } catch (e: Exception) {
-                return "Failed to write file: ${e.message}"
+        // 优先使用 FileManager
+        fileManager?.let {
+            val result = it.writeFile(path, content)
+            if (!result.startsWith("Failed") && !result.startsWith("No project")) {
+                FileOperationEvents.notify(path, if (it.exists(path)) "overwrite" else "create", content.lines().size, newContent = content)
             }
+            return result
         }
-        return "No project folder is open."
+        // 兼容回退：纯 DocumentFile API
+        return writeFileNative(path, content)
+    }
+
+    private fun writeFileNative(path: String, content: String): String {
+        val uri = projectUri ?: return "No project folder is open."
+        val rootDoc = DocumentFile.fromTreeUri(context, uri) ?: return "Failed to access project folder."
+
+        return try {
+            val trimmedPath = path.trim('/')
+            val fileName = trimmedPath.substringAfterLast('/')
+            val parentPath = trimmedPath.substringBeforeLast('/', "")
+
+            // 确保父目录存在
+            val parentDoc = if (parentPath.isEmpty()) {
+                rootDoc
+            } else {
+                ensureDirectoryNative(rootDoc, parentPath) ?: return "Failed to create parent directory: $parentPath"
+            }
+
+            // 查找或创建文件
+            val existingFile = parentDoc.findFile(fileName)
+            val targetDoc = existingFile ?: parentDoc.createFile("application/octet-stream", fileName)
+            ?: return "Failed to create file: $path"
+
+            // 写入内容
+            context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
+                out.write(content.toByteArray(Charsets.UTF_8))
+            } ?: return "Failed to write file: $path"
+
+            val opName = if (existingFile != null) "overwrite" else "create"
+            FileOperationEvents.notify(path, opName, content.lines().size, newContent = content)
+            "File written: $path (${content.lines().size} lines, $opName)"
+        } catch (e: Exception) {
+            "Failed to write file: ${e.message}"
+        }
     }
 
     // 行级差异编辑：对大模型友好的 patch 格式
@@ -90,7 +172,7 @@ class AIToolSet(private val context: Context) : ToolSet {
     @Tool(description = "Apply line-level changes to an existing file. Use this instead of writeFile when only parts need modification. Returns summary of changes.")
     fun applyPatch(
         @ToolParam(description = "File path relative to project root") path: String,
-        @ToolParam(description = "JSON array of patches. Each: {\"type\":\"replace\"|\"insert\"|\"delete\", \"startLine\":int (1-based), \"endLine\":int (exclusive), \"content\":\"new text\"}") patchesJson: String,
+        @ToolParam(description = """JSON array of patches. Each: {"type":"replace"|"insert"|"delete", "startLine":int (1-based), "endLine":int (exclusive), "content":"new text"}""") patchesJson: String,
     ): String {
         val uri = projectUri
         if (uri == null) return "No project folder is open."
@@ -110,14 +192,13 @@ class AIToolSet(private val context: Context) : ToolSet {
                 )
             }
             val newContent = applyPatches(original, patchOps)
-            val parentPath = path.substringBeforeLast('/')
-            if (parentPath.isNotEmpty() && parentPath != path) ensureSafDir(uri, parentPath)
-            val existing = resolveSafChild(uri, path)
-            val targetUri = if (existing != null) existing else createSafFile(uri, path)
-            if (targetUri == null) return "Failed to create file: $path"
-            context.contentResolver.openOutputStream(targetUri, "wt")?.use { out ->
-                out.write(newContent.toByteArray(Charsets.UTF_8))
-            } ?: return "Failed to write file: $path"
+
+            // 使用 FileManager 或原生方法写入
+            val result = fileManager?.writeFile(path, newContent) ?: writeFileNative(path, newContent)
+            if (result.startsWith("Failed") || result.startsWith("No project")) {
+                return "Patch failed: $result"
+            }
+
             FileOperationEvents.notify(path, "modify", computeChangedLines(original, newContent), original, newContent)
             "Patched $path (${patchOps.size} ops applied)"
         } catch (e: Exception) {
@@ -351,237 +432,166 @@ class AIToolSet(private val context: Context) : ToolSet {
 
     // ---- 文件搜索 ----
 
-    // 可搜索的源文件扩展名
-    private val searchableExtensions = setOf(
-        "kt", "kts", "java", "xml", "json", "yml", "yaml", "properties",
-        "txt", "md", "gradle", "toml", "cfg", "conf", "ini",
-        "html", "css", "js", "ts", "sql", "sh", "bat", "py",
-    )
-
     @Tool(description = "Search file contents in the project for a query string. Returns matching files with line numbers. Use when you need to find where something is defined or used.")
     fun searchInFiles(
         @ToolParam(description = "Search query, case-insensitive. Supports plain text only (no regex).") query: String,
         @ToolParam(description = "File extension filter, e.g. 'kt' for Kotlin files only. Leave empty for all text files.") extension: String = "",
     ): String {
-        val uri = projectUri
-        if (uri == null) return "No project folder is open. Please open a folder first."
+        // 优先使用 FileManager
+        fileManager?.let { return it.searchInFiles(query, extension) }
+        // 兼容回退：纯 DocumentFile API
+        return searchInFilesNative(query, extension)
+    }
+
+    private fun searchInFilesNative(query: String, extension: String): String {
+        val uri = projectUri ?: return "No project folder is open. Please open a folder first."
         if (query.isBlank()) return "Search query is empty."
+
+        val rootDoc = DocumentFile.fromTreeUri(context, uri) ?: return "Failed to access project folder."
+
         return try {
-            val rootDocId = DocumentsContract.getTreeDocumentId(uri)
             val results = mutableListOf<String>()
-            val seen = mutableSetOf<String>()
+            val searchedFiles = mutableListOf<String>()
             val queryLower = query.lowercase()
-            searchSafRecursive(uri, rootDocId, queryLower, extension, results, seen, depth = 0)
-            if (results.isEmpty()) "No matches found for \"$query\"${if (extension.isNotBlank()) " in *.$extension files" else ""}."
-            else {
-                val sb = StringBuilder()
-                sb.appendLine("Found ${results.size} match${if (results.size != 1) "es" else ""} for \"$query\":")
-                sb.appendLine("---")
-                results.take(50).forEach { sb.appendLine(it) }
-                if (results.size > 50) sb.appendLine("... 及另外 ${results.size - 50} 个匹配")
-                sb.toString().trimEnd()
-            }
-        } catch (e: Exception) {
-            "Search failed: ${e.message}"
-        }
-    }
+            val extLower = extension.lowercase().trimStart('.')
 
-    private fun searchSafRecursive(
-        treeUri: Uri, parentDocId: String, queryLower: String, extension: String,
-        results: MutableList<String>, seen: MutableSet<String>, depth: Int,
-    ) {
-        if (depth > 8 || results.size >= 100) return
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
-        val projection = arrayOf(
-            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            DocumentsContract.Document.COLUMN_MIME_TYPE,
-            DocumentsContract.Document.COLUMN_SIZE,
-        )
-        context.contentResolver.query(childrenUri, projection, null, null, null)?.use { c ->
-            val idCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-            val nameCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-            val mimeCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
-            val sizeCol = c.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+            searchRecursiveNative(rootDoc, "", queryLower, extLower, results, searchedFiles)
 
-            val dirs = mutableListOf<Pair<String, String>>()
-            while (c.moveToNext()) {
-                val docId = c.getString(idCol)
-                val name = c.getString(nameCol) ?: continue
-                val mime = c.getString(mimeCol) ?: ""
-                val isDir = mime == DocumentsContract.Document.MIME_TYPE_DIR
-                if (name.startsWith(".")) continue // 跳过隐藏文件/目录
-                if (isDir) {
-                    dirs.add(docId to name)
-                } else {
-                    if (extension.isNotBlank() && !name.endsWith(".$extension", ignoreCase = true)) continue
-                    val ext = name.substringAfterLast('.', "").lowercase()
-                    if (ext.isNotEmpty() && ext !in searchableExtensions) continue
-                    val size = if (sizeCol >= 0) c.getLong(sizeCol) else 0L
-                    if (size > 512 * 1024) continue // 跳过 >512KB 的文件
-                    val pathKey = extractRelativePath(treeUri, docId) ?: name
-                    if (pathKey in seen) continue
-                    seen.add(pathKey)
-                    val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-                    try {
-                        val text = context.contentResolver.openInputStream(fileUri)
-                            ?.bufferedReader()?.use { it.readText() } ?: continue
-                        text.lines().forEachIndexed { idx, line ->
-                            if (line.contains(queryLower, ignoreCase = true)) {
-                                val trimmed = line.trim().take(120)
-                                results.add("$pathKey:${idx + 1}:  $trimmed")
-                            }
-                        }
-                    } catch (_: Exception) { /* 跳过无法读取的文件 */ }
+            if (results.isEmpty()) {
+                buildString {
+                    appendLine("No matches found for \"$query\"${if (extension.isNotBlank()) " in *.$extension files" else ""}.")
+                    appendLine("Searched ${searchedFiles.size} files.")
+                    if (searchedFiles.isNotEmpty()) {
+                        appendLine("Sample files searched:")
+                        searchedFiles.take(10).forEach { appendLine("  - $it") }
+                    }
                 }
-            }
-            // 递归遍历子目录
-            for ((dirId, _) in dirs) {
-                searchSafRecursive(treeUri, dirId, queryLower, extension, results, seen, depth + 1)
-            }
-        }
-    }
-
-    private fun extractRelativePath(treeUri: Uri, docId: String): String? {
-        return try {
-            val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-            val prefix = rootDocId.trimEnd('/') + "/"
-            if (docId.startsWith(prefix)) docId.removePrefix(prefix) else docId
-        } catch (_: Exception) { null }
-    }
-
-    // ---- SAF 辅助方法 ----
-
-    private fun listViaSaf(treeUri: Uri, subPath: String): String {
-        return try {
-            val items = mutableListOf<String>()
-            if (subPath.isBlank()) {
-                val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-                queryChildrenForList(treeUri, rootDocId, items)
             } else {
-                val doc = navigateToDocFile(subPath.trimStart('/'))
-                    ?: return "Directory not found: $subPath"
-                val children = doc.listFiles() ?: return "Empty directory."
-                for (child in children) {
-                    val name = child.name ?: continue
-                    val tag = if (child.isDirectory) "[DIR]" else "[FILE]"
-                    val sizeStr = if (!child.isDirectory && child.length() > 0) " (${formatSize(child.length())})" else ""
-                    items.add("$tag $name$sizeStr")
-                }
+                buildString {
+                    appendLine("Found ${results.size} match${if (results.size != 1) "es" else ""} for \"$query\":")
+                    appendLine("---")
+                    results.take(50).forEach { appendLine(it) }
+                    if (results.size > 50) appendLine("... and ${results.size - 50} more matches")
+                }.trimEnd()
             }
-            if (items.isEmpty()) return "Empty directory."
-            val displayName = try { DocumentsContract.getTreeDocumentId(treeUri) } catch (_: Exception) { "project" }
-            buildString {
-                appendLine("Project root: $displayName")
-                appendLine("---")
-                items.sorted().forEach { appendLine(it) }
-            }.trimEnd()
         } catch (e: Exception) {
-            "Failed to list files: ${e.message}"
+            copyErrorToClipboard(e)
+            "Search failed (error copied to clipboard): ${e.message}"
         }
     }
 
-    private fun queryChildrenForList(treeUri: Uri, parentDocId: String, items: MutableList<String>) {
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
-        val projection = arrayOf(
-            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            DocumentsContract.Document.COLUMN_MIME_TYPE,
-            DocumentsContract.Document.COLUMN_SIZE,
-        )
-        context.contentResolver.query(childrenUri, projection, null, null, null)?.use { c ->
-            val nameCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-            val mimeCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
-            val sizeCol = c.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
-            while (c.moveToNext()) {
-                val name = c.getString(nameCol) ?: continue
-                val isDir = c.getString(mimeCol) == DocumentsContract.Document.MIME_TYPE_DIR
-                val size = if (sizeCol >= 0) c.getLong(sizeCol) else 0L
-                val tag = if (isDir) "[DIR]" else "[FILE]"
-                val sizeStr = if (!isDir && size > 0) " (${formatSize(size)})" else ""
-                items.add("$tag $name$sizeStr")
-            }
-        }
-    }
+    // ---- 纯 DocumentFile API 辅助方法 ----
 
-    private fun navigateToDocFile(path: String): DocumentFile? {
-        val treeUri = projectUri ?: return null
-        if (path.isBlank()) return DocumentFile.fromTreeUri(context, treeUri)
-
-        val docFileResult = try {
-            var doc = DocumentFile.fromTreeUri(context, treeUri) ?: null
-            if (doc != null) {
-                var current: DocumentFile = doc
-                for (segment in path.trimStart('/').split('/')) {
-                    if (segment.isEmpty()) continue
-                    current = current.findFile(segment) ?: break
-                }
-                doc = current
-            }
-            doc
-        } catch (_: Exception) { null }
-        if (docFileResult != null) return docFileResult
-
+    // 逐级导航路径，返回目标 DocumentFile
+    private fun navigatePath(root: DocumentFile, relativePath: String): DocumentFile? {
+        if (relativePath.isBlank()) return root
         return try {
-            val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
-            val segments = path.trimStart('/').split('/')
-            var current = rootDocId
-            for (seg in segments) {
-                if (seg.isEmpty()) continue
-                current = findChildDocId(treeUri, current, seg) ?: return null
+            var current = root
+            for (segment in relativePath.split('/')) {
+                if (segment.isEmpty()) continue
+                current = current.findFile(segment) ?: return null
             }
-            val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, current)
-            DocumentFile.fromSingleUri(context, docUri)
-        } catch (_: Exception) { null }
-    }
-
-    private fun findChildDocId(treeUri: Uri, parentDocId: String, childName: String): String? {
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
-        return context.contentResolver.query(childrenUri,
-            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
-            null, null, null
-        )?.use { c ->
-            val idCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-            val nameCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-            while (c.moveToNext()) {
-                if (childName == c.getString(nameCol)) return@use c.getString(idCol)
-            }
+            current
+        } catch (_: Exception) {
             null
         }
     }
 
-    private fun resolveSafChild(treeUri: Uri, path: String): Uri? {
-        return navigateToDocFile(path.trimStart('/'))?.uri
-    }
-
-    private fun ensureSafDir(treeUri: Uri, path: String) {
-        var doc = DocumentFile.fromTreeUri(context, treeUri) ?: return
-        for (part in path.trimStart('/').split('/')) {
-            if (part.isEmpty()) continue
-            val child = doc.findFile(part)
-            if (child != null) {
-                doc = child
-            } else {
-                doc = doc.createDirectory(part) ?: return
+    // 确保目录存在，不存在则创建
+    private fun ensureDirectoryNative(root: DocumentFile, relativePath: String): DocumentFile? {
+        if (relativePath.isBlank()) return root
+        return try {
+            var current = root
+            for (part in relativePath.split('/')) {
+                if (part.isEmpty()) continue
+                val child = current.findFile(part)
+                current = if (child != null) {
+                    child
+                } else {
+                    current.createDirectory(part) ?: return null
+                }
             }
+            current
+        } catch (_: Exception) {
+            null
         }
     }
 
-    private fun createSafFile(treeUri: Uri, path: String): Uri? {
-        return try {
-            val fileName = path.substringAfterLast('/')
-            val parentPath = path.substringBeforeLast('/')
-            if (parentPath.isNotEmpty() && parentPath != path) {
-                val parentDoc = navigateToDocFile(parentPath.trimStart('/')) ?: return null
-                parentDoc.createFile("application/octet-stream", fileName)?.uri
+    // 递归搜索文件内容
+    private fun searchRecursiveNative(
+        dirDoc: DocumentFile,
+        relativePath: String,
+        queryLower: String,
+        extLower: String,
+        results: MutableList<String>,
+        searchedFiles: MutableList<String>,
+    ) {
+        if (results.size >= 100) return
+
+        val children = dirDoc.listFiles() ?: return
+        val searchableExtensions = setOf(
+            "kt", "kts", "java", "xml", "json", "yml", "yaml", "properties",
+            "txt", "md", "gradle", "toml", "cfg", "conf", "ini",
+            "html", "css", "js", "ts", "sql", "sh", "bat", "py",
+        )
+
+        for (doc in children) {
+            val name = doc.name ?: continue
+            if (name.startsWith(".")) continue
+
+            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+
+            if (doc.isDirectory) {
+                // 限制递归深度
+                if (currentPath.count { it == '/' } < 10) {
+                    searchRecursiveNative(doc, currentPath, queryLower, extLower, results, searchedFiles)
+                }
             } else {
-                DocumentFile.fromTreeUri(context, treeUri)?.createFile("application/octet-stream", fileName)?.uri
+                // 检查扩展名
+                val fileExt = name.substringAfterLast('.', "").lowercase()
+                if (extLower.isNotBlank()) {
+                    if (fileExt != extLower) continue
+                } else {
+                    if (fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
+                }
+
+                // 跳过大文件
+                if (doc.length() > 512 * 1024) continue
+
+                searchedFiles.add(currentPath)
+
+                // 读取并搜索
+                try {
+                    val text = context.contentResolver.openInputStream(doc.uri)
+                        ?.bufferedReader()
+                        ?.use { it.readText() }
+                        ?: continue
+
+                    text.lines().forEachIndexed { idx, line ->
+                        if (line.contains(queryLower, ignoreCase = true)) {
+                            val trimmed = line.trim().take(120)
+                            results.add("$currentPath:${idx + 1}:  $trimmed")
+                        }
+                    }
+                } catch (_: Exception) { }
+
+                if (results.size >= 100) return
             }
-        } catch (_: Exception) { null }
+        }
     }
 
     private fun formatSize(bytes: Long): String = when {
         bytes < 1024 -> "$bytes B"
         bytes < 1024 * 1024 -> "${bytes / 1024} KB"
         else -> "${"%.1f".format(bytes.toDouble() / (1024 * 1024))} MB"
+    }
+
+    private fun copyErrorToClipboard(e: Exception) {
+        try {
+            val sw = java.io.StringWriter()
+            e.printStackTrace(java.io.PrintWriter(sw))
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("error", sw.toString()))
+        } catch (_: Exception) { }
     }
 }

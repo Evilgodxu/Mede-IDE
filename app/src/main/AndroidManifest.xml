@@ -37,4 +37,6 @@
         </activity>
     </application>
 
+    <!-- 成功实现访问子目录中的文件 -->
+
 </manifest>
