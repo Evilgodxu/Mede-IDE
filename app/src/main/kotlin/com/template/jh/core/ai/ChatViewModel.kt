@@ -158,7 +158,7 @@ class ChatViewModel(
     fun toggleModelPicker() { _state.update { it.copy(isModelPickerOpen = !it.isModelPickerOpen) } }
     fun closeModelPicker() { _state.update { it.copy(isModelPickerOpen = false) } }
 
-    // 发送消息
+    // 发送消息（手动 JSON 工具调用: automaticToolCalling=false + 解析 JSON tool_name）
     fun sendMessage() {
         val text = _state.value.inputText.trim()
         if (text.isEmpty()) return
@@ -166,24 +166,21 @@ class ChatViewModel(
             _state.update { it.copy(engineErrorMessage = "请先加载模型") }
             return
         }
-
         val userMsg = ChatMessage(role = ChatRole.User, content = text)
         val taskId = java.util.UUID.randomUUID().toString()
         val task = TaskItem(id = taskId, title = text.take(50), status = TaskStatus.Running, description = text)
         _state.update { it.copy(messages = it.messages + userMsg, inputText = "", isLoading = true, taskList = it.taskList + task) }
-
         val modelMsgId = java.util.UUID.randomUUID().toString()
         val placeholderMsg = ChatMessage(id = modelMsgId, role = ChatRole.Model, content = "", isStreaming = true)
         _state.update { it.copy(messages = it.messages + placeholderMsg) }
-
         val ctx = getApplication<Application>()
         val notifSettings = runBlocking { preferencesRepo.notificationSettings.first() }
-
         sendJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val conv = ensureConversation()
-                processConversationWithTools(conv, text, modelMsgId, taskId, ctx, notifSettings)
+                processWithJsonTools(text, modelMsgId, taskId, ctx, notifSettings)
             } catch (e: Exception) {
+                copyCrashToClipboard("sendMessage", e)
                 updateModelMessage(modelMsgId, "\n\n[错误: ${e.message}]", false)
                 finalizeModelMessage(modelMsgId)
                 updateTaskStatus(taskId, TaskStatus.Failed)
@@ -259,7 +256,7 @@ class ChatViewModel(
                 initialMessages = initialMessages ?: emptyList(),
                 samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
                 tools = listOf(tool(aiToolSet)),
-                automaticToolCalling = true,
+                automaticToolCalling = false,
             )
         )
         activeConversation = conv
@@ -275,16 +272,15 @@ class ChatViewModel(
         sb.append("- writeFile: Create or overwrite a file\n")
         sb.append("- runCommand: Execute shell commands (git, gradle, etc.)\n")
         sb.append("- searchWeb: Search the internet\n\n")
-        sb.append("To use a tool, output EXACTLY in this format (one tool per response):\n")
-        sb.append("<tool_call>call:FUNCTION_NAME{KEY: \"VALUE\", ...}<tool_call>\n\n")
+        sb.append("To call a tool, respond with EXACTLY this JSON format (no other text):\n")
+        sb.append("{\"tool_name\": \"FUNCTION_NAME\", \"arguments\": {\"key\": \"value\"}}\n\n")
         sb.append("Examples:\n")
-        sb.append("<tool_call>call:listFiles{}<tool_call>\n")
-        sb.append("<tool_call>call:readFile{path: \"src/main.kt\"}<tool_call>\n")
-        sb.append("<tool_call>call:writeFile{path: \"test.txt\", content: \"hello\"}<tool_call>\n")
-        sb.append("<tool_call>call:runCommand{command: \"ls -la\"}<tool_call>\n")
-        sb.append("<tool_call>call:searchWeb{query: \"android jetpack compose\"}<tool_call>\n\n")
+        sb.append("{\"tool_name\": \"listFiles\", \"arguments\": {}}\n")
+        sb.append("{\"tool_name\": \"readFile\", \"arguments\": {\"path\": \"src/main.kt\"}}\n")
+        sb.append("{\"tool_name\": \"writeFile\", \"arguments\": {\"path\": \"test.txt\", \"content\": \"hello\"}}\n")
+        sb.append("{\"tool_name\": \"runCommand\", \"arguments\": {\"command\": \"ls -la\"}}\n")
+        sb.append("{\"tool_name\": \"searchWeb\", \"arguments\": {\"query\": \"android jetpack compose\"}}\n\n")
         sb.append("Always call listFiles first to see project structure, and readFile before modifying any file.\n")
-        sb.append("Each user message creates a task. File operations are tracked automatically.\n")
 
         val userName = runBlocking { preferencesRepo.userName.first() }
         if (userName.isNotBlank()) sb.append("\nUser: $userName")
@@ -298,20 +294,28 @@ class ChatViewModel(
         return sb.toString()
     }
 
-    // ---- 手动工具调用解析与调度 ----
+    // ---- JSON 工具调用解析与调度（手动模式，适配 gemma-4 JSON 格式） ----
 
-    private val toolCallRegex = Regex("<tool_call>call:(\\w+)(\\{[^}]*\\})?<tool_call>")
-
-    private fun parseToolCall(text: String): Pair<String, Map<String, String>>? {
-        val match = toolCallRegex.find(text) ?: return null
-        val funcName = match.groupValues[1]
-        val argsJson = match.groupValues.getOrElse(2) { "{}" }
-        val args = mutableMapOf<String, String>()
-        try {
-            val json = org.json.JSONObject(argsJson)
-            for (key in json.keys()) { args[key] = json.optString(key, "") }
-        } catch (_: Exception) {}
-        return funcName to args
+    private fun extractJsonToolCall(text: String): Triple<String?, String, Map<String, String>>? {
+        val trimmed = text.trim()
+        val start = trimmed.indexOf("{\"tool_name\"")
+        if (start < 0) return null
+        var depth = 0
+        var end = -1
+        for (i in start until trimmed.length) {
+            when (trimmed[i]) { '{' -> depth++; '}' -> { depth--; if (depth == 0) { end = i; break } } }
+        }
+        if (end < 0) return null
+        return try {
+            val json = org.json.JSONObject(trimmed.substring(start, end + 1))
+            val toolName = json.optString("tool_name", "")
+            if (toolName.isEmpty()) return null
+            val argsJson = json.optJSONObject("arguments") ?: org.json.JSONObject()
+            val args = mutableMapOf<String, String>()
+            for (k in argsJson.keys()) args[k] = argsJson.optString(k, "")
+            val prefix = trimmed.substring(0, start).trim().ifEmpty { null }
+            Triple(prefix, toolName, args)
+        } catch (_: Exception) { null }
     }
 
     private fun executeAiTool(name: String, args: Map<String, String>): String = try {
@@ -325,36 +329,51 @@ class ChatViewModel(
         }
     } catch (e: Exception) { "Tool error: ${e.message}" }
 
-    // 带工具调用循环的对话处理（手动解析 <tool_call> 格式）
-    private suspend fun processConversationWithTools(
-        conv: Conversation, userText: String, msgId: String,
-        taskId: String, ctx: Application, notif: com.template.jh.data.model.NotificationSettings,
+    private fun copyCrashToClipboard(action: String, t: Throwable) {
+        try {
+            val info = "[ChatViewModel]\n操作: $action\n异常: ${t.javaClass.simpleName}\n消息: ${t.message}\n堆栈: ${t.stackTraceToString()}"
+            val ctx = getApplication<Application>()
+            (ctx.getSystemService(android.content.ClipboardManager::class.java))
+                ?.setPrimaryClip(android.content.ClipData.newPlainText("崩溃信息", info))
+        } catch (_: Exception) {}
+    }
+
+    private suspend fun processWithJsonTools(
+        text: String, msgId: String, taskId: String,
+        ctx: Application, notif: com.template.jh.data.model.NotificationSettings,
     ) {
         var currentMsgId = msgId
-        var nextInput: Any = userText
+        var nextInput: Any = text
         var rounds = 0
         val maxRounds = 10
 
         while (rounds < maxRounds) {
             rounds++
             val fullResponse = StringBuilder()
+            val conv = activeConversation ?: return
 
-            val flow = when (nextInput) {
-                is Message -> conv.sendMessageAsync(nextInput as Message)
-                else -> conv.sendMessageAsync(nextInput.toString())
-            }
-            flow.catch { e ->
-                updateModelMessage(currentMsgId, "\n\n[错误: ${e.message}]", false)
+            conv.sendMessageAsync(nextInput.toString()).catch { t ->
+                copyCrashToClipboard("sendMessageAsync(round=$rounds)", t)
+                updateModelMessage(currentMsgId, "\n\n[错误: ${t.message}]", false)
                 updateTaskStatus(taskId, TaskStatus.Failed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "异常: ${e.message}", notif)
-                emitNotification(NotificationEventType.TaskFailed, "异常: ${e.message}")
-            }.collect { msg ->
-                val chunk = msg.toString()
-                fullResponse.append(chunk)
-                updateModelMessage(currentMsgId, chunk, true)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "异常: ${t.message}", notif)
+                emitNotification(NotificationEventType.TaskFailed, "异常: ${t.message}")
+            }.collect { chunk ->
+                val c = chunk.toString()
+                fullResponse.append(c)
+                updateModelMessage(currentMsgId, c, true)
             }
 
-            val toolCall = parseToolCall(fullResponse.toString())
+            val response = fullResponse.toString().trim()
+            if (response.isBlank()) {
+                finalizeModelMessage(currentMsgId)
+                updateTaskStatus(taskId, TaskStatus.Completed)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成（空响应）", notif)
+                emitNotification(NotificationEventType.TaskCompleted, "任务完成")
+                return
+            }
+
+            val toolCall = extractJsonToolCall(response)
             if (toolCall == null) {
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Completed)
@@ -363,27 +382,27 @@ class ChatViewModel(
                 return
             }
 
-            val (funcName, funcArgs) = toolCall
+            val (prefixText, funcName, funcArgs) = toolCall
             val toolResult = executeAiTool(funcName, funcArgs)
+            val toolDisplay = "\n\n── ⚡ $funcName ──\n$toolResult"
 
-            // 显示完整工具结果，替换模型消息
-            updateModelMessage(currentMsgId, "\n\n⚡ $funcName →\n$toolResult", false)
+            if (prefixText != null) updateModelMessage(currentMsgId, toolDisplay, true)
+            else updateModelMessage(currentMsgId, toolDisplay, false)
             finalizeModelMessage(currentMsgId)
 
-            // tool response 作为下一轮输入
             nextInput = Message.tool(Contents.of(listOf(Content.ToolResponse(funcName, toolResult))))
-
-            // 新占位消息
             currentMsgId = java.util.UUID.randomUUID().toString()
             _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true)) }
         }
 
-        updateModelMessage(currentMsgId, "\n\n[工具次数超限]", false)
+        updateModelMessage(currentMsgId, "\n\n[工具调用超限，已终止]", false)
         finalizeModelMessage(currentMsgId)
         updateTaskStatus(taskId, TaskStatus.Failed)
-        ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "工具超限", notif)
-        emitNotification(NotificationEventType.TaskFailed, "工具超限")
+        ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "工具调用超过10次上限", notif)
+        emitNotification(NotificationEventType.TaskFailed, "工具调用超过10次上限")
     }
+
+    // 关闭对话
 
     private fun closeConversation() {
         try { activeConversation?.close() } catch (_: Exception) {}

@@ -1,0 +1,249 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.5.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Configuration on demand is an incubating feature.
+
+> Configure project :app
+WARNING: The option setting 'android.enableJetifier=true' is deprecated.
+The current default is 'false'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :app:mergeReleaseNativeLibs UP-TO-DATE
+> Task :app:stripReleaseDebugSymbols UP-TO-DATE
+> Task :app:extractReleaseNativeSymbolTables UP-TO-DATE
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:checkReleaseDuplicateClasses UP-TO-DATE
+> Task :app:generateReleaseResources UP-TO-DATE
+> Task :app:packageReleaseResources UP-TO-DATE
+> Task :app:processReleaseNavigationResources UP-TO-DATE
+> Task :app:parseReleaseLocalResources UP-TO-DATE
+> Task :app:generateReleaseRFile UP-TO-DATE
+> Task :app:javaPreCompileRelease UP-TO-DATE
+> Task :app:mergeReleaseArtProfile UP-TO-DATE
+> Task :app:checkReleaseAarMetadata UP-TO-DATE
+> Task :app:mapReleaseSourceSetPaths UP-TO-DATE
+> Task :app:compileReleaseNavigationResources UP-TO-DATE
+> Task :app:mergeReleaseResources UP-TO-DATE
+> Task :app:createReleaseCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksRelease UP-TO-DATE
+> Task :app:processReleaseMainManifest UP-TO-DATE
+> Task :app:processReleaseManifest UP-TO-DATE
+> Task :app:processReleaseManifestForPackage UP-TO-DATE
+> Task :app:processReleaseResources UP-TO-DATE
+> Task :app:extractProguardFiles UP-TO-DATE
+> Task :app:mergeReleaseStartupProfile UP-TO-DATE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets UP-TO-DATE
+> Task :app:compressReleaseAssets UP-TO-DATE
+> Task :app:extractReleaseVersionControlInfo UP-TO-DATE
+> Task :app:collectReleaseDependencies UP-TO-DATE
+> Task :app:sdkReleaseDependencyData UP-TO-DATE
+> Task :app:validateSigningRelease UP-TO-DATE
+> Task :app:writeReleaseAppMetadata UP-TO-DATE
+> Task :app:writeReleaseSigningConfigVersions UP-TO-DATE
+
+> Task :app:compileReleaseKotlin
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:9 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:12 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:13 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:21 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:22 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:32 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:33 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:34 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:36 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:38 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:39 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:45 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:46 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:47 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:49 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:55 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:56 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:64 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:387:65 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:390:9 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:390:12 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:390:13 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:390:18 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:390:19 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:390:29 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:390:30 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:390:31 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:390:33 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:390:33 Function declaration must have a name.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:391:13 Unresolved reference 'sb'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:392:34 Unresolved reference 'sb'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:393:13 Unresolved reference 'sb'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:395:9 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:395:16 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:395:18 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:395:19 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:395:27 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:395:28 Syntax error: Expecting member declaration.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:401:15 Unresolved reference 'activeConversation'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:402:9 Unresolved reference 'activeConversation'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:403:9 Unresolved reference 'pendingInitialMessages'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:407:9 Unresolved reference 'sendJob'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:9 Unresolved reference '_state'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:16 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:23 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:28 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:28 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:28 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:33 No parameter with name 'messages' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:44 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:57 No parameter with name 'inputText' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:73 No parameter with name 'taskList' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:84 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:97 No parameter with name 'fileChanges' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:409:111 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:413:9 Unresolved reference 'sendJob'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:415:9 Unresolved reference '_state'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:415:16 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:415:25 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:416:50 Unresolved reference 'messages'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:417:35 Unresolved reference 'messages'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:417:58 Unresolved reference 'it'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:417:86 Unresolved reference 'content'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:419:32 Unresolved reference 'activeConversationId'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:420:53 Unresolved reference 'messages'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:422:36 Unresolved reference 'conversations'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:422:56 Unresolved reference 'it'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:423:35 Unresolved reference 'conversations'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:423:59 Unresolved reference 'it'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:423:89 Unresolved reference 'it'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:424:44 Unresolved reference 'conversations'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:425:26 Unresolved reference 'conversations'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:19 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:19 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:19 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:24 No parameter with name 'messages' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:35 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:48 No parameter with name 'inputText' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:64 No parameter with name 'isLoading' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:83 No parameter with name 'conversations' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:121 No parameter with name 'activeConversationId' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:150 No parameter with name 'taskList' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:161 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:174 No parameter with name 'fileChanges' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:427:188 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:432:9 Unresolved reference 'sendJob'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:434:9 Unresolved reference 'pendingInitialMessages'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:441:9 Unresolved reference '_state'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:441:16 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:441:23 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:441:28 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:441:28 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:441:28 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:441:33 No parameter with name 'messages' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:441:60 No parameter with name 'inputText' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:441:76 No parameter with name 'isLoading' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:441:95 No parameter with name 'activeConversationId' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:441:128 No parameter with name 'isHistoryOpen' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:445:9 Unresolved reference '_state'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:445:16 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:445:25 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:446:33 Unresolved reference 'conversations'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:446:56 Unresolved reference 'it'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:448:23 Unresolved reference 'activeConversationId'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:450:23 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:450:23 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:450:23 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:450:28 No parameter with name 'conversations' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:450:53 No parameter with name 'messages' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:450:64 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:450:77 No parameter with name 'activeConversationId' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:451:26 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:451:26 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:451:26 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:451:31 No parameter with name 'conversations' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:455:27 Unresolved reference '_state'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:455:34 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:455:41 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:455:46 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:455:46 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:455:46 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:455:51 No parameter with name 'isHistoryOpen' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:455:71 Unresolved reference 'isHistoryOpen'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:456:26 Unresolved reference '_state'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:456:33 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:456:40 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:456:45 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:456:45 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:456:45 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:456:50 No parameter with name 'isHistoryOpen' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:459:9 Unresolved reference '_state'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:459:16 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:459:25 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:460:19 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:460:19 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:460:19 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:460:24 No parameter with name 'messages' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:460:41 Unresolved reference 'messages'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:460:56 Cannot infer type for value parameter 'msg'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:461:25 Unresolved reference 'id'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:461:42 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:461:42 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:461:42 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:461:47 No parameter with name 'content' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:461:73 Unresolved reference 'content'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:461:101 No parameter with name 'isStreaming' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:467:9 Unresolved reference '_state'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:467:16 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:467:25 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:19 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:19 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:19 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:24 No parameter with name 'messages' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:41 Unresolved reference 'messages'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:56 Cannot infer type for value parameter 'msg'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:71 Unresolved reference 'id'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:88 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:88 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:88 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:93 No parameter with name 'isStreaming' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:468:126 No parameter with name 'isLoading' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:474:17 Unresolved reference '_state'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:476:46 Unresolved reference 'it'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:476:74 Unresolved reference 'content'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:478:49 Unresolved reference 'it'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:478:96 Unresolved reference 'it'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:478:126 Unresolved reference 'it'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:480:9 Unresolved reference '_state'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:480:16 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:480:23 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:480:28 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:480:28 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:480:28 This declaration needs opt-in. Its usage must be marked with '@kotlin.ExperimentalStdlibApi' or '@OptIn(kotlin.ExperimentalStdlibApi::class)'
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:480:33 No parameter with name 'conversations' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:480:58 No parameter with name 'activeConversationId' found.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:485:9 Unresolved reference 'viewModelScope'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:485:49 Unresolved reference 'conversationRepo'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:488:5 Modifier 'override' is not applicable to 'top level function'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:489:9 No supertypes are accessible in this context.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:490:9 Unresolved reference 'sendJob'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:493:9 Unresolved reference 'liteRTManager'.
+e: file:///C:/1Project/Android%20AI%20IDE/app/src/main/kotlin/com/template/jh/core/ai/ChatViewModel.kt:495:1 Syntax error: Expecting a top level declaration.
+
+> Task :app:compileReleaseKotlin FAILED
+
+[Incubating] Problems report is available at: file:///C:/1Project/Android%20AI%20IDE/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileReleaseKotlin' (registered by plugin 'com.android.internal.application').
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.btapi.BuildToolsApiCompilationWork
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 19s
+33 actionable tasks: 1 executed, 32 up-to-date
