@@ -236,7 +236,12 @@ fun HomeScreen(
     LaunchedEffect(Unit) {
         FileOperationEvents.events.collect { event ->
             editorContent.remove(event.path)
-            if (event.operation == "modify" && event.originalContent.isNotEmpty() && event.newContent.isNotEmpty()) {
+            // pending操作：需要用户审阅后确认才写入
+            if (event.operation == "pending" && event.originalContent.isNotEmpty() && event.newContent.isNotEmpty()) {
+                pendingEdits[event.path] = PendingFileEdit(event.path, event.originalContent, event.newContent)
+            }
+            // modify操作：已写入文件（如writeFile），只需要显示diff
+            else if (event.operation == "modify" && event.originalContent.isNotEmpty() && event.newContent.isNotEmpty()) {
                 pendingEdits[event.path] = PendingFileEdit(event.path, event.originalContent, event.newContent)
             }
             if (event.operation != "delete") {
@@ -247,7 +252,23 @@ fun HomeScreen(
 
     // 确认/拒绝修改
     fun acceptEdit(path: String) {
+        val edit = pendingEdits[path] ?: return
         pendingEdits.remove(path)
+        // 将新内容写入文件
+        val projectUriStr = homeState.openedFolderUri
+        if (projectUriStr != null) {
+            runCatching {
+                val treeUri = Uri.parse(projectUriStr)
+                var doc = DocumentFile.fromTreeUri(context, treeUri) ?: return@runCatching
+                for (segment in edit.filePath.trimStart('/').split('/')) {
+                    if (segment.isEmpty()) continue
+                    doc = doc.findFile(segment) ?: return@runCatching
+                }
+                context.contentResolver.openOutputStream(doc.uri, "wt")?.use { out ->
+                    out.write(edit.newContent.toByteArray(Charsets.UTF_8))
+                }
+            }
+        }
         editorContent.remove(path) // 强制刷新
     }
     fun rejectEdit(path: String) {
@@ -507,14 +528,39 @@ fun HomeScreen(
                                 .filter { it.type != LineChangeType.Unchanged }
                                 .associate { it.lineIndex to it.type }
                         } else emptyMap()
+                        // 计算修改位置列表（按行号排序）
+                        val changeLines = remember(lineDiffs) {
+                            lineDiffs.keys.sorted()
+                        }
+                        // 当前修改索引状态（每个文件独立）
+                        var currentChangeIndex by remember(path, pending) { mutableIntStateOf(0) }
+                        // 确保索引在有效范围内
+                        LaunchedEffect(changeLines.size) {
+                            if (currentChangeIndex >= changeLines.size) {
+                                currentChangeIndex = 0
+                            }
+                        }
                         CodeEditor(
-                            text = tfv,
-                            onTextChange = { editorContent[path] = it },
+                            text = if (pending != null) TextFieldValue(pending.newContent) else tfv,
+                            onTextChange = { if (pending == null) editorContent[path] = it },
                             modifier = Modifier.fillMaxSize(),
                             lineDiffs = lineDiffs,
+                            originalContent = pending?.originalContent,
                             pendingFilePath = if (pending != null) path else null,
                             onAcceptChanges = { acceptEdit(path) },
                             onRejectChanges = { rejectEdit(path) },
+                            onJumpToPrevChange = {
+                                if (changeLines.isNotEmpty()) {
+                                    currentChangeIndex = if (currentChangeIndex > 0) currentChangeIndex - 1 else changeLines.size - 1
+                                }
+                            },
+                            onJumpToNextChange = {
+                                if (changeLines.isNotEmpty()) {
+                                    currentChangeIndex = if (currentChangeIndex < changeLines.size - 1) currentChangeIndex + 1 else 0
+                                }
+                            },
+                            currentChangeIndex = currentChangeIndex,
+                            totalChanges = changeLines.size,
                             onCursorChange = { line -> chatViewModel.setActiveFileContext(path, line) },
                         )
                     },

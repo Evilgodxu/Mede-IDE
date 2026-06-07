@@ -41,6 +41,9 @@ class UserPreferencesRepository(private val context: Context) {
         val THINKING_ROUNDS = intPreferencesKey("thinking_rounds")
         val LAST_OPENED_FOLDER_URI = stringPreferencesKey("last_opened_folder_uri")
         val OPENED_FILE_TABS = stringPreferencesKey("opened_file_tabs")
+        // 模型自动加载
+        val LAST_MODEL_PATH = stringPreferencesKey("last_model_path")
+        val AUTO_LOAD_LAST_MODEL = booleanPreferencesKey("auto_load_last_model")
         // 云端模型
         val CLOUD_MODEL_ENABLED = booleanPreferencesKey("cloud_model_enabled")
         val CLOUD_PROFILES_JSON = stringPreferencesKey("cloud_profiles_json")
@@ -277,6 +280,22 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit {
             it[PreferencesKeys.OPENED_FILE_TABS] = org.json.JSONArray(paths).toString()
         }
+    }
+
+    // 上次加载的模型路径
+    val lastModelPath: Flow<String?> = context.dataStore.data
+        .map { it[PreferencesKeys.LAST_MODEL_PATH] }
+
+    suspend fun setLastModelPath(path: String) {
+        context.dataStore.edit { it[PreferencesKeys.LAST_MODEL_PATH] = path }
+    }
+
+    // 是否自动加载上次模型
+    val autoLoadLastModel: Flow<Boolean> = context.dataStore.data
+        .map { it[PreferencesKeys.AUTO_LOAD_LAST_MODEL] ?: true }
+
+    suspend fun setAutoLoadLastModel(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.AUTO_LOAD_LAST_MODEL] = enabled }
     }
 
     suspend fun setNotificationSettings(settings: NotificationSettings) {

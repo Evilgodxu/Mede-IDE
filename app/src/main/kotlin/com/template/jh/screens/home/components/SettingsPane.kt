@@ -188,12 +188,37 @@ private fun SettingsCategoryContent(
 private fun ModelSettingsContent(chatViewModel: ChatViewModel?, onBrowseModelFile: () -> Unit) {
     if (chatViewModel == null) { CategoryPlaceholder("模型管理不可用"); return }
     val chatState by chatViewModel.state.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val preferencesRepo = remember { com.template.jh.data.repository.UserPreferencesRepository(context) }
+    val autoLoad by preferencesRepo.autoLoadLastModel.collectAsState(initial = true)
     var topK by remember(chatState.modelParams) { mutableIntStateOf(chatState.modelParams.topK) }
     var topP by remember(chatState.modelParams) { mutableFloatStateOf(chatState.modelParams.topP.toFloat()) }
     var temperature by remember(chatState.modelParams) { mutableFloatStateOf(chatState.modelParams.temperature.toFloat()) }
     var seed by remember(chatState.modelParams) { mutableIntStateOf(chatState.modelParams.seed) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // 启动时自动加载上次模型
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("启动时自动加载模型", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Text("IDE启动时自动加载上次使用的本地模型", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(
+                    checked = autoLoad,
+                    onCheckedChange = {
+                        kotlinx.coroutines.runBlocking {
+                            preferencesRepo.setAutoLoadLastModel(it)
+                        }
+                    },
+                )
+            }
+        }
+
         // 当前状态
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

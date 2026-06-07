@@ -60,7 +60,26 @@ class ChatViewModel(
                         modelName = engineState.modelName,
                     )
                 }
+                // 模型加载成功时保存路径
+                if (engineState.status == EngineStatus.Ready && engineState.modelPath.isNotEmpty()) {
+                    preferencesRepo.setLastModelPath(engineState.modelPath)
+                }
             }
+        }
+        // 启动时自动加载上次模型
+        viewModelScope.launch {
+            try {
+                val autoLoad = preferencesRepo.autoLoadLastModel.first()
+                val lastPath = preferencesRepo.lastModelPath.first()
+                if (autoLoad && !lastPath.isNullOrEmpty()) {
+                    val file = java.io.File(lastPath)
+                    if (file.exists()) {
+                        liteRTManager.loadModel(lastPath)
+                        preferencesRepo.setCloudModelEnabled(false)
+                        _state.update { it.copy(cloudModelEnabled = false) }
+                    }
+                }
+            } catch (_: Exception) {}
         }
         viewModelScope.launch {
             liteRTManager.downloadState.collect { ds ->
@@ -399,9 +418,12 @@ class ChatViewModel(
         sb.append("- gitBranch: 查看分支\n")
         sb.append("- gitDiff: 查看差异\n")
         sb.append("- readLints: 读取项目的编译/Lint 错误，修复代码后调用此工具检查是否已解决\n\n")
-        sb.append("## 修改文件时的策略\n")
-        sb.append("- 修改文件**优先使用 applyPatch**（只替换特定行），只有当文件需要完全重写时才用 writeFile\n")
+        sb.append("## 修改文件时的策略（重要）\n")
+        sb.append("- **默认使用 applyPatch**，只有当文件不存在或需要完全重写（超过80%内容变更）时才用 writeFile\n")
+        sb.append("- **禁止**对现有文件使用 writeFile 进行小幅度修改，这会丢失文件历史信息\n")
         sb.append("- applyPatch 的 patches 参数格式: [{\"type\":\"replace\"|\"insert\"|\"delete\", \"startLine\":行号(从1开始), \"endLine\":结束行(不包含), \"content\":\"新内容\"}]\n")
+        sb.append("- 行内修改场景（如改几行代码、改函数实现）：必须用 applyPatch\n")
+        sb.append("- **重要**: applyPatch 不会立即修改文件，而是生成待审阅的修改，用户确认后才会生效\n")
         sb.append("- 修改后调用 readLints 检查是否引入新错误，如有则修复\n\n")
         sb.append("## 工具调用格式\n")
         sb.append("调用工具时，只输出这个 JSON（不要有其他文本）：\n")

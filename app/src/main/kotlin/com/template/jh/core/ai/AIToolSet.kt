@@ -116,7 +116,7 @@ class AIToolSet(
         }.joinToString("\n")
     }
 
-    @Tool(description = "Create a new file or overwrite an existing file with the given content.")
+    @Tool(description = "Create a new file. WARNING: For existing files, use applyPatch instead. Only use this when creating new files or completely rewriting (>80% changed).")
     fun writeFile(
         @ToolParam(description = "File path relative to project root, e.g. 'src/App.kt'") path: String,
         @ToolParam(description = "The complete text content to write to the file") content: String,
@@ -169,7 +169,7 @@ class AIToolSet(
 
     // 行级差异编辑：对大模型友好的 patch 格式
     // patches 是 JSON 数组，每个元素: {"type":"replace"|"insert"|"delete", "startLine":int, "endLine":int, "content":"..."}
-    @Tool(description = "Apply line-level changes to an existing file. Use this instead of writeFile when only parts need modification. Returns summary of changes.")
+    @Tool(description = "DEFAULT choice for modifying existing files. Apply line-level changes to edit specific lines without rewriting the entire file. Use for any modifications to existing files.")
     fun applyPatch(
         @ToolParam(description = "File path relative to project root") path: String,
         @ToolParam(description = """JSON array of patches. Each: {"type":"replace"|"insert"|"delete", "startLine":int (1-based), "endLine":int (exclusive), "content":"new text"}""") patchesJson: String,
@@ -193,14 +193,9 @@ class AIToolSet(
             }
             val newContent = applyPatches(original, patchOps)
 
-            // 使用 FileManager 或原生方法写入
-            val result = fileManager?.writeFile(path, newContent) ?: writeFileNative(path, newContent)
-            if (result.startsWith("Failed") || result.startsWith("No project")) {
-                return "Patch failed: $result"
-            }
-
-            FileOperationEvents.notify(path, "modify", computeChangedLines(original, newContent), original, newContent)
-            "Patched $path (${patchOps.size} ops applied)"
+            // 不直接写入文件，发送pending事件等待用户审阅
+            FileOperationEvents.notify(path, "pending", computeChangedLines(original, newContent), original, newContent)
+            "Patch prepared for review: $path (${patchOps.size} ops). Click the checkmark in editor to apply."
         } catch (e: Exception) {
             "Patch failed: ${e.message}"
         }

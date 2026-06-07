@@ -26,6 +26,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -86,16 +88,33 @@ fun AIChatPanel(
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
 
-    // 自动滚动到最新消息（仅当用户未手动上滚时）
-    val lastMessageContent = state.messages.lastOrNull()?.content ?: ""
-    LaunchedEffect(state.messages.size, state.isLoading, lastMessageContent) {
+    // 自动滚动到最新消息（仅在消息数量变化或加载状态变化时触发，避免内容变化时频繁滚动）
+    LaunchedEffect(state.messages.size, state.isLoading) {
         if (state.messages.isEmpty()) return@LaunchedEffect
-        // 获取当前可见的最后一项索引
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
         val lastIndex = state.messages.size - 1
+        // 延迟检查可见项，避免在重组过程中读取 layoutInfo
+        delay(50)
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
         // 如果用户正在靠近底部（最后可见项在倒数第3以内）或正在生成中，自动滚到底
         if (lastVisible >= lastIndex - 2 || state.isLoading) {
-            try { listState.scrollToItem(lastIndex) } catch (_: Exception) {}
+            try { listState.animateScrollToItem(lastIndex) } catch (_: Exception) {}
+        }
+    }
+
+    // 流式生成时的平滑滚动（使用防抖，避免频繁触发）
+    LaunchedEffect(state.messages.lastOrNull()?.isStreaming) {
+        val lastMsg = state.messages.lastOrNull()
+        if (lastMsg?.isStreaming == true) {
+            // 使用 snapshotFlow 监听内容变化，带防抖
+            snapshotFlow { lastMsg.content }
+                .collect { _ ->
+                    delay(300) // 防抖 300ms
+                    val lastIndex = state.messages.size - 1
+                    val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                    if (lastVisible >= lastIndex - 1) {
+                        try { listState.animateScrollToItem(lastIndex) } catch (_: Exception) {}
+                    }
+                }
         }
     }
 
