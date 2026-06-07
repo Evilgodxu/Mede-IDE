@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,16 +18,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.window.core.layout.WindowSizeClass
 import com.template.jh.R
-import com.template.jh.ui.adaptive.rememberWindowSizeClass
 import com.template.jh.core.ai.ChatViewModel
-import com.template.jh.screens.home.components.ThreeColumnLayout
+import com.template.jh.ui.adaptive.rememberWindowSizeClass
+import com.template.jh.screens.home.components.AIChatPanel
+import com.template.jh.screens.home.components.MainContentArea
+import com.template.jh.screens.home.components.MainTopBar
+import com.template.jh.screens.home.components.ResourcePanel
+import com.template.jh.screens.home.components.SearchPanel
 import com.template.jh.screens.home.components.Sidebar
 import com.template.jh.screens.home.components.SidebarTab
-import com.template.jh.screens.home.components.ResourcePanel
-import com.template.jh.screens.home.components.MainContentArea
-import com.template.jh.screens.home.components.AIChatPanel
-import com.template.jh.screens.home.components.MainTopBar
-import com.template.jh.screens.home.components.SearchPanel
+import com.template.jh.screens.home.components.ThreeColumnLayout
 import org.koin.androidx.compose.koinViewModel
 
 // 主屏幕，三列布局：侧边栏+可展开面板、中间主内容、右侧AI协作
@@ -38,12 +39,24 @@ fun HomeScreen(
     val windowSizeClass = rememberWindowSizeClass()
     var selectedTab by remember { mutableStateOf<SidebarTab?>(null) }
     var isSettingsOpen by remember { mutableStateOf(false) }
+    val homeState by viewModel.state.collectAsState()
+    val files by viewModel.files.collectAsState()
 
-    // SAF 文件选择器（必须放在可直接访问 Activity 的 Composable 层级）
+    // SAF 文件选择器（模型加载）
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { chatViewModel.loadModelFromUri(it) }
+    }
+
+    // SAF 文件夹选择器
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        uri?.let {
+            viewModel.openFolder(it)
+            selectedTab = SidebarTab.Explorer
+        }
     }
 
     Scaffold(
@@ -65,7 +78,10 @@ fun HomeScreen(
             },
             leftPanel = {
                 LeftPanelContent(
-                    selectedTab = selectedTab
+                    selectedTab = selectedTab,
+                    homeState = homeState,
+                    files = files,
+                    viewModel = viewModel,
                 )
             },
             isLeftPanelVisible = selectedTab != null,
@@ -73,13 +89,14 @@ fun HomeScreen(
                 MainContentArea(
                     isSettingsOpen = isSettingsOpen,
                     onCloseSettings = { isSettingsOpen = false },
-                    onOpenFolder = {},
+                    onOpenFolder = { folderPickerLauncher.launch(null) },
                     onNewProject = {},
                     onCloneGit = {},
                     chatViewModel = chatViewModel,
                     onBrowseModelFile = {
                         filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*"))
                     },
+                    openedFolderName = homeState.openedFolderName,
                 )
             },
             rightPanel = {
@@ -98,12 +115,19 @@ fun HomeScreen(
 
 @Composable
 private fun LeftPanelContent(
-    selectedTab: SidebarTab?
+    selectedTab: SidebarTab?,
+    homeState: HomeUiState,
+    files: List<FileItem>,
+    viewModel: HomeViewModel,
 ) {
     when (selectedTab) {
         SidebarTab.Explorer -> {
             ResourcePanel(
-                onOpenFolder = {}
+                openedFolderName = homeState.openedFolderName,
+                files = files,
+                onListChildren = { uri, callback ->
+                    viewModel.listChildren(uri, callback)
+                },
             )
         }
         SidebarTab.Search -> {
@@ -118,16 +142,14 @@ private fun LeftPanelContent(
         SidebarTab.Extensions -> {
             ExtensionsPanel()
         }
-        null -> {
-            // 不显示任何内容
-        }
+        null -> { /* 不显示 */ }
     }
 }
 
 @Composable
 private fun SourceControlPanel() {
     androidx.compose.foundation.layout.Box(
-        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = androidx.compose.ui.Alignment.Center
     ) {
         androidx.compose.material3.Text(
@@ -141,7 +163,7 @@ private fun SourceControlPanel() {
 @Composable
 private fun PreviewPanel() {
     androidx.compose.foundation.layout.Box(
-        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = androidx.compose.ui.Alignment.Center
     ) {
         androidx.compose.material3.Text(
@@ -155,7 +177,7 @@ private fun PreviewPanel() {
 @Composable
 private fun ExtensionsPanel() {
     androidx.compose.foundation.layout.Box(
-        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = androidx.compose.ui.Alignment.Center
     ) {
         androidx.compose.material3.Text(

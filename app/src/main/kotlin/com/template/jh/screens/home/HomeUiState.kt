@@ -5,4 +5,6 @@ data class HomeUiState(
     val isLoading: Boolean = true,
     val themeMode: String = "system",
     val language: String = "system",
+    val openedFolderName: String? = null,
+    val openedFolderUri: String? = null,
 )

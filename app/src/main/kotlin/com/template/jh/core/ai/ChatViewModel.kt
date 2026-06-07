@@ -4,8 +4,11 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.tool
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,11 +23,14 @@ class ChatViewModel(
 ) : AndroidViewModel(application) {
 
     private val liteRTManager = LiteRTManager(application)
+    private val webSearchTool = WebSearchTool(application)
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
 
     private var sendJob: Job? = null
+    @Volatile private var activeConversation: Conversation? = null
+    private var pendingInitialMessages: List<Message>? = null
 
     init {
         scanModels()
@@ -142,24 +148,15 @@ class ChatViewModel(
 
         sendJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val conversation = liteRTManager.createConversation(
-                    ConversationConfig(
-                        systemInstruction = Contents.of("You are a helpful AI assistant."),
-                        samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
-                    )
-                )
-
-                conversation.use { conv ->
-                    conv.sendMessageAsync(text)
-                        .catch { e ->
-                            updateModelMessage(modelMsgId, "\n\n[错误: ${e.message}]", false)
-                        }
-                        .collect { message ->
-                            val chunk = message.toString()
-                            updateModelMessage(modelMsgId, chunk, true)
-                        }
-                }
-                // 流结束，标记完成
+                val conv = ensureConversation()
+                conv.sendMessageAsync(text)
+                    .catch { e ->
+                        updateModelMessage(modelMsgId, "\n\n[错误: ${e.message}]", false)
+                    }
+                    .collect { message ->
+                        val chunk = message.toString()
+                        updateModelMessage(modelMsgId, chunk, true)
+                    }
                 finalizeModelMessage(modelMsgId)
             } catch (e: Exception) {
                 updateModelMessage(modelMsgId, "\n\n[错误: ${e.message}]", false)
@@ -178,15 +175,87 @@ class ChatViewModel(
         }
     }
 
+    // 由大模型优化输入内容：简洁、专业、无歧义
+    fun optimizeInput() {
+        val text = _state.value.inputText.trim()
+        if (text.isEmpty()) return
+        if (!liteRTManager.isInitialized) {
+            _state.update { it.copy(engineErrorMessage = "请先加载模型") }
+            return
+        }
+
+        _state.update { it.copy(isOptimizing = true) }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val conv = liteRTManager.createConversation(
+                    ConversationConfig(
+                        systemInstruction = Contents.of(
+                            "你是一个专业的文本优化助手。优化目标：简洁、专业、无歧义。" +
+                            "只返回优化后的文本，不添加任何解释、说明或标记。" +
+                            "如果遇到高度专业或陌生的术语/概念，请联网搜索相关资料以确保优化的准确性。"
+                        ),
+                        samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
+                        tools = listOf(tool(webSearchTool)),
+                    )
+                )
+
+                val prompt = "请优化以下内容，要求：简洁、专业、无歧义。如涉及专业术语请确保用法准确，必要时联网搜索确认。只返回优化后的文本：\n\n$text"
+
+                conv.use { c ->
+                    var optimized = ""
+                    c.sendMessageAsync(prompt)
+                        .catch { e ->
+                            _state.update { it.copy(isOptimizing = false) }
+                        }
+                        .collect { message ->
+                            optimized += message.toString()
+                        }
+                    val result = optimized.trim()
+                    _state.update {
+                        if (result.isNotEmpty()) it.copy(inputText = result, isOptimizing = false)
+                        else it.copy(isOptimizing = false)
+                    }
+                }
+            } catch (e: Exception) {
+                _state.update { it.copy(isOptimizing = false) }
+            }
+        }
+    }
+
+    private fun ensureConversation(): Conversation {
+        activeConversation?.let { return it }
+        val initialMessages = pendingInitialMessages
+        pendingInitialMessages = null
+        val conv = liteRTManager.createConversation(
+            ConversationConfig(
+                systemInstruction = Contents.of("You are a helpful AI assistant."),
+                initialMessages = initialMessages ?: emptyList(),
+                samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
+                tools = listOf(tool(webSearchTool)),
+            )
+        )
+        activeConversation = conv
+        return conv
+    }
+
+    private fun closeConversation() {
+        try { activeConversation?.close() } catch (_: Exception) {}
+        activeConversation = null
+        pendingInitialMessages = null
+    }
+
     // 清空对话
     fun clearMessages() {
         sendJob?.cancel()
+        closeConversation()
         _state.update { it.copy(messages = emptyList(), inputText = "") }
     }
 
     // 创建新对话（保存当前对话到历史）
     fun newConversation() {
         sendJob?.cancel()
+        closeConversation()
         _state.update { state ->
             val updatedConversations = if (state.messages.isNotEmpty()) {
                 val title = state.messages.firstOrNull { it.role == ChatRole.User }?.content?.take(30) ?: "新对话"
@@ -204,9 +273,17 @@ class ChatViewModel(
         }
     }
 
-    // 切换到历史对话
+    // 切换到历史对话（注入完整上下文到大模型，首次发消息时懒初始化 Conversation）
     fun switchConversation(entry: ConversationEntry) {
         sendJob?.cancel()
+        closeConversation()
+        pendingInitialMessages = entry.messages.mapNotNull { msg ->
+            when (msg.role) {
+                ChatRole.User -> Message.user(msg.content)
+                ChatRole.Model -> Message.model(msg.content)
+                ChatRole.System -> Message.system(msg.content)
+            }
+        }
         _state.update {
             it.copy(
                 messages = entry.messages,
@@ -224,6 +301,7 @@ class ChatViewModel(
             val updated = state.conversations.filter { it.id != entryId }
             persistConversations(updated)
             if (state.activeConversationId == entryId) {
+                closeConversation()
                 state.copy(conversations = updated, messages = emptyList(), activeConversationId = null)
             } else {
                 state.copy(conversations = updated)
@@ -296,6 +374,7 @@ class ChatViewModel(
     override fun onCleared() {
         super.onCleared()
         sendJob?.cancel()
+        closeConversation()
         saveCurrentToHistory()
         liteRTManager.close()
     }

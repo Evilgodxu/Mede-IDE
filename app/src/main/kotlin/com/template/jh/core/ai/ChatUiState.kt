@@ -42,4 +42,5 @@ data class ChatUiState(
     val conversations: List<ConversationEntry> = emptyList(),
     val activeConversationId: String? = null,
     val isHistoryOpen: Boolean = false,
+    val isOptimizing: Boolean = false,
 )

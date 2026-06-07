@@ -22,11 +22,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -73,7 +73,6 @@ fun AIChatPanel(
     Column(modifier = Modifier.fillMaxSize()) {
         ChatTopBar(
             engineStatus = state.engineStatus,
-            modelName = state.modelName,
             conversations = state.conversations,
             isHistoryOpen = state.isHistoryOpen,
             onNewTaskClick = { viewModel.newConversation(); onNewTaskClick() },
@@ -113,16 +112,17 @@ fun AIChatPanel(
             onInputChange = { viewModel.setInputText(it) },
             onSend = { viewModel.sendMessage() },
             isLoading = state.isLoading,
+            isOptimizing = state.isOptimizing,
             engineStatus = state.engineStatus,
             onCancel = { viewModel.cancelGeneration() },
-            onClear = { viewModel.clearMessages() },
+            onOptimize = { viewModel.optimizeInput() },
         )
     }
 }
 
 @Composable
 private fun ChatTopBar(
-    engineStatus: EngineStatus, modelName: String,
+    engineStatus: EngineStatus,
     conversations: List<ConversationEntry>, isHistoryOpen: Boolean,
     onNewTaskClick: () -> Unit, onHistoryClick: () -> Unit, onSettingsClick: () -> Unit,
     onSwitchConversation: (ConversationEntry) -> Unit, onDeleteConversation: (String) -> Unit,
@@ -133,23 +133,15 @@ private fun ChatTopBar(
             when (engineStatus) {
                 EngineStatus.Ready -> {
                     Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF4CAF50)))
-                    Spacer(Modifier.width(6.dp))
-                    Text(modelName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 EngineStatus.Loading -> {
                     CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
-                    Spacer(Modifier.width(6.dp))
-                    Text("加载中…", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 EngineStatus.Error -> {
                     Box(Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.error))
-                    Spacer(Modifier.width(6.dp))
-                    Text("模型错误", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 EngineStatus.Idle -> {
                     Box(Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant))
-                    Spacer(Modifier.width(6.dp))
-                    Text("未加载模型", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -220,8 +212,8 @@ private fun ChatBubble(message: ChatMessage) {
 @Composable
 private fun ChatInputBar(
     inputText: String, onInputChange: (String) -> Unit, onSend: () -> Unit,
-    isLoading: Boolean, engineStatus: EngineStatus,
-    onCancel: () -> Unit, onClear: () -> Unit,
+    isLoading: Boolean, isOptimizing: Boolean, engineStatus: EngineStatus,
+    onCancel: () -> Unit, onOptimize: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         OutlinedTextField(
@@ -234,16 +226,31 @@ private fun ChatInputBar(
 
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (engineStatus == EngineStatus.Ready) {
-                    IconButton(onClick = onCancel, Modifier.size(28.dp), enabled = isLoading) { Icon(Icons.Default.Stop, stringResource(R.string.chat_cancel), Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (engineStatus == EngineStatus.Ready && inputText.isNotBlank()) {
+                    if (isOptimizing) {
+                        IconButton(onClick = {}, Modifier.size(28.dp), enabled = false) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                        }
+                    } else {
+                        IconButton(onClick = onOptimize, Modifier.size(28.dp), enabled = !isLoading) {
+                            Icon(Icons.Default.AutoAwesome, stringResource(R.string.ai_optimize_input), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                        }
+                    }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (engineStatus == EngineStatus.Ready) {
-                    IconButton(onClick = onClear, Modifier.size(28.dp)) { Icon(Icons.Default.Close, stringResource(R.string.chat_clear), Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) }
-                }
-                IconButton(onClick = onSend, Modifier.size(32.dp), enabled = inputText.isNotBlank() && engineStatus == EngineStatus.Ready && !isLoading) {
-                    Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.ai_send_message), Modifier.size(20.dp), tint = if (inputText.isNotBlank() && engineStatus == EngineStatus.Ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                if (engineStatus == EngineStatus.Ready && isLoading) {
+                    // 生成中：暂停图标 + 加载动画
+                    IconButton(onClick = onCancel, Modifier.size(32.dp)) {
+                        Box(contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Pause, stringResource(R.string.chat_cancel), Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                } else {
+                    IconButton(onClick = onSend, Modifier.size(32.dp), enabled = inputText.isNotBlank() && engineStatus == EngineStatus.Ready) {
+                        Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.ai_send_message), Modifier.size(20.dp), tint = if (inputText.isNotBlank() && engineStatus == EngineStatus.Ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                    }
                 }
             }
         }

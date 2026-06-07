@@ -79,6 +79,10 @@
 -keep class com.google.ai.edge.litertlm.ToolSet { *; }
 -keep class com.google.ai.edge.litertlm.OpenApiTool { *; }
 -keep class com.google.ai.edge.litertlm.ToolCall { *; }
+-keep class com.google.ai.edge.litertlm.ToolProvider { *; }
+-keep class com.google.ai.edge.litertlm.Tool { *; }
+-keep class com.google.ai.edge.litertlm.ToolParam { *; }
+-keep class com.google.ai.edge.litertlm.ToolAnnotatedMethod { *; }
 -keep class com.google.ai.edge.litertlm.Channel { *; }
 -keep class com.google.ai.edge.litertlm.LoraConfig { *; }
 -keep class com.google.ai.edge.litertlm.Session { *; }
@@ -87,6 +91,12 @@
 -keep class com.google.ai.edge.litertlm.MessageCallback$* { *; }
 -keep class com.google.ai.edge.litertlm.BenchmarkInfo { *; }
 -keep class com.google.ai.edge.litertlm.Capabilities { *; }
+
+# 自定义 ToolSet（反射调用）
+-keep class com.template.jh.core.ai.WebSearchTool { *; }
+-keepclassmembers class com.template.jh.core.ai.WebSearchTool {
+    @com.google.ai.edge.litertlm.Tool <methods>;
+}
 
 # Gson (LiteRT-LM 依赖)
 -keep class com.google.gson.** { *; }

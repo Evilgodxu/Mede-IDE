@@ -60,6 +60,7 @@ fun MainContentArea(
     onCloneGit: () -> Unit = {},
     chatViewModel: ChatViewModel? = null,
     onBrowseModelFile: () -> Unit = {},
+    openedFolderName: String? = null,
 ) {
     Column(
         modifier = Modifier
@@ -95,7 +96,8 @@ fun MainContentArea(
                 WelcomeContent(
                     onOpenFolder = onOpenFolder,
                     onNewProject = onNewProject,
-                    onCloneGit = onCloneGit
+                    onCloneGit = onCloneGit,
+                    openedFolderName = openedFolderName,
                 )
             }
         }
@@ -208,7 +210,8 @@ private fun EditorTabBar(
 private fun WelcomeContent(
     onOpenFolder: () -> Unit,
     onNewProject: () -> Unit,
-    onCloneGit: () -> Unit
+    onCloneGit: () -> Unit,
+    openedFolderName: String? = null,
 ) {
     Column(
         modifier = Modifier
@@ -247,27 +250,22 @@ private fun WelcomeContent(
         Spacer(modifier = Modifier.height(32.dp))
 
         // 最近项目
-        Text(
-            text = stringResource(R.string.recent_projects),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
+        if (openedFolderName != null) {
+            Text(
+                text = stringResource(R.string.recent_projects),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
 
-        Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-        RecentProjectCard(
-            name = "Android AI IDE",
-            path = "C:/Project"
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        RecentProjectCard(
-            name = "Android-IDE",
-            path = "C:/Project"
-        )
+            RecentProjectCard(
+                name = openedFolderName,
+                path = openedFolderName,
+            )
+        }
     }
 }
 

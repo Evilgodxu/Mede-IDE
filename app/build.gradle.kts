@@ -132,6 +132,9 @@ dependencies {
     implementation(libs.litertlm.android)
     implementation(libs.gson)
 
+    // SAF DocumentFile 文件树遍历
+    implementation("androidx.documentfile:documentfile:1.0.1")
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))
