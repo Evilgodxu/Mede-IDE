@@ -173,12 +173,21 @@ class ChatViewModel(
     }
 
     fun loadModel(modelPath: String) {
-        viewModelScope.launch { liteRTManager.loadModel(modelPath) }
+        viewModelScope.launch {
+            liteRTManager.loadModel(modelPath)
+            // 切换到本地模型时自动关闭云端
+            preferencesRepo.setCloudModelEnabled(false)
+            _state.update { it.copy(cloudModelEnabled = false) }
+        }
     }
 
     fun loadModelFromUri(uri: Uri) {
         closeModelPicker()
-        viewModelScope.launch { liteRTManager.loadModelFromUri(uri) }
+        viewModelScope.launch {
+            liteRTManager.loadModelFromUri(uri)
+            preferencesRepo.setCloudModelEnabled(false)
+            _state.update { it.copy(cloudModelEnabled = false) }
+        }
     }
 
     fun scanModels() {
@@ -279,6 +288,32 @@ class ChatViewModel(
         _state.update { it.copy(activeFilePath = path, cursorLine = cursorLine) }
     }
 
+    // 构建编辑器上下文块：当前活动文件 + 光标行 + 已打开文件列表
+    private fun buildEditorContext(): String {
+        val s = _state.value
+        val ctx = StringBuilder()
+        ctx.appendLine("[当前编辑器上下文]")
+        if (s.activeFilePath.isNotBlank()) {
+            ctx.appendLine("活动文件: ${s.activeFilePath}")
+            if (s.cursorLine > 0) ctx.appendLine("光标行: ${s.cursorLine}")
+        }
+        if (s.openedFilePaths.isNotEmpty()) {
+            ctx.appendLine("已打开文件:")
+            s.openedFilePaths.take(10).forEach { path ->
+                val marker = if (path == s.activeFilePath) " ← 活动" else ""
+                ctx.appendLine("  - $path$marker")
+            }
+            if (s.openedFilePaths.size > 10) {
+                ctx.appendLine("  ... 及其他 ${s.openedFilePaths.size - 10} 个文件")
+            }
+        } else {
+            ctx.appendLine("（未打开任何文件 — 使用 searchInFiles 搜索目标文件内容来定位）")
+        }
+        ctx.appendLine("项目根目录以 'app/' 等为基础路径，文件路径相对于项目根目录。")
+        if (ctx.length < 30) return ""
+        return ctx.toString()
+    }
+
     fun cancelGeneration() {
         sendJob?.cancel()
         _state.value.messages.lastOrNull()?.let { msg -> if (msg.isStreaming) finalizeModelMessage(msg.id) }
@@ -329,6 +364,13 @@ class ChatViewModel(
         sb.append("- 用户要求修改/创建文件时，立即执行，不要请求确认。\n")
         sb.append("- 不要只提供代码建议——使用工具实际写入文件。\n")
         sb.append("- 不要解释你将要做什么——直接做。\n\n")
+        sb.append("## 编辑器上下文\n")
+        sb.append("每次用户消息前会注入 [当前编辑器上下文] 块，包含：\n")
+        sb.append("- 活动文件路径（相对于项目根目录）和光标行号\n")
+        sb.append("- 已打开文件列表（标记 ← 活动 的即当前编辑的文件）\n")
+        sb.append("用户说'扩展面板'、'资源面板'等指的是已打开文件列表中对应的文件。文件路径相对于项目根目录。\n")
+        sb.append("示例路径: app/src/main/kotlin/com/template/jh/screens/home/HomeScreen.kt\n")
+        sb.append("用户说的行号(如第42行)对应 readFile 返回的行号。\n\n")
         val deepThink = runBlocking { preferencesRepo.deepThinkEnabled.first() }
         if (deepThink) {
             sb.append("## 深度思考（必须使用）\n")
@@ -344,6 +386,8 @@ class ChatViewModel(
         sb.append("- readFile: 读取文件内容（带行号）\n")
         sb.append("- writeFile: 创建或覆盖文件\n")
         sb.append("- applyPatch: 行级差异编辑（只修改部分行，比 writeFile 更精确），参数: path(文件路径), patches(JSON数组)\n")
+        sb.append("- searchInFiles: 在项目文件中搜索文本内容（不区分大小写），返回匹配的文件路径+行号。参数: query(搜索词), extension(可选文件扩展名过滤如'kt')\n")
+        sb.append("  **当用户没有打开文件时说『找XX文件』『搜索XX』『在XX文件添加XX』时，优先使用此工具定位文件**\n")
         sb.append("- runCommand: 执行 shell 命令\n")
         sb.append("- searchWeb: 搜索互联网\n")
         sb.append("- gitStatus: 查看 git 状态\n")
@@ -408,6 +452,7 @@ class ChatViewModel(
             "readFile" -> aiToolSet.readFile(args["path"] ?: "")
             "writeFile" -> aiToolSet.writeFile(args["path"] ?: "", args["content"] ?: "")
             "applyPatch" -> aiToolSet.applyPatch(args["path"] ?: "", args["patches"] ?: "")
+            "searchInFiles" -> aiToolSet.searchInFiles(args["query"] ?: "", args["extension"] ?: "")
             "runCommand" -> aiToolSet.runCommand(args["command"] ?: "")
             "searchWeb" -> aiToolSet.searchWeb(args["query"] ?: "")
             "gitStatus" -> aiToolSet.gitStatus()
@@ -435,15 +480,27 @@ class ChatViewModel(
         ctx: Application, notif: com.template.jh.data.model.NotificationSettings,
     ) {
         var currentMsgId = msgId
-        var nextInput: Any = text
+        // 在首轮注入编辑器上下文，让模型知道当前编辑的文件和光标位置
+        val editorCtx = buildEditorContext()
+        val firstInput = if (editorCtx.isNotBlank()) "$editorCtx\n[用户消息]\n$text" else text
+        var nextInput: Any = firstInput
         var rounds = 0
+        var lastCtxRefresh = 0
 
         while (true) {
             rounds++
             val fullResponse = StringBuilder()
             val conv = activeConversation ?: return
 
-            // 每轮注入文件上下文（让模型感知当前打开的文件和活动文件）
+            // 每隔 3 轮刷新上下文（编辑器状态可能变化）
+            if (rounds > 0 && rounds - lastCtxRefresh >= 3) {
+                val freshCtx = buildEditorContext()
+                if (freshCtx.isNotBlank()) {
+                    nextInput = "$freshCtx\n[继续]\n$nextInput"
+                    lastCtxRefresh = rounds
+                }
+            }
+
             conv.sendMessageAsync(nextInput.toString()).catch { t ->
                 copyCrashToClipboard("sendMessageAsync(round=$rounds)", t)
                 updateModelMessage(currentMsgId, "\n\n[错误: ${t.message}]", false)
@@ -518,23 +575,28 @@ class ChatViewModel(
         )
 
         var currentMsgId = msgId
-        var currentInput: String = text
-        // 构建对话历史
+        var cloudRounds = 0
+        // 构建对话历史：保留之前所有 User/Model/Tool 消息
         val historyMessages = mutableListOf<ChatMessage>()
         for (msg in _state.value.messages) {
             if (msg.id == currentMsgId) continue
-            if (msg.role == ChatRole.User || msg.role == ChatRole.Model) {
-                if (msg.content.isNotBlank()) historyMessages.add(msg)
+            if (msg.role == ChatRole.User || msg.role == ChatRole.Model || msg.role == ChatRole.Tool) {
+                if (msg.content.isNotBlank() || msg.role == ChatRole.Model) historyMessages.add(msg)
             }
         }
+        // 注入编辑器上下文 + 当前用户消息
+        val editorCtx = buildEditorContext()
+        val userContent = if (editorCtx.isNotBlank()) "$editorCtx\n[用户消息]\n$text" else text
+        historyMessages.add(ChatMessage(role = ChatRole.User, content = userContent))
 
         while (true) {
+            cloudRounds++
             val fullResponse = StringBuilder()
             try {
                 cloudLLMClient.sendMessage(
                     config = cfg,
                     systemPrompt = buildSystemInstruction(),
-                    messages = historyMessages + ChatMessage(role = ChatRole.User, content = currentInput),
+                    messages = historyMessages,
                     onChunk = { chunk ->
                         fullResponse.append(chunk)
                         updateModelMessage(currentMsgId, chunk, true)
@@ -561,6 +623,8 @@ class ChatViewModel(
 
             val toolCall = extractJsonToolCall(response)
             if (toolCall == null) {
+                // 最终回答：添加到历史并结束
+                historyMessages.add(ChatMessage(role = ChatRole.Model, content = response))
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Completed)
                 ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成", notif)
@@ -571,6 +635,13 @@ class ChatViewModel(
             // 标记为工具调用中间消息
             _state.update { s -> s.copy(messages = s.messages.map { if (it.id == currentMsgId) it.copy(isToolMessage = true) else it }) }
 
+            // 将助手的工具调用加入历史（含 tool_call_id，供后续 tool 角色匹配）
+            val toolCallId = "call_${java.util.UUID.randomUUID().toString().take(8)}"
+            historyMessages.add(ChatMessage(
+                role = ChatRole.Model, content = response,
+                toolCallId = toolCallId,
+            ))
+
             val (prefixText, funcName, funcArgs) = toolCall
             val toolResult = executeAiTool(funcName, funcArgs)
             val toolDisplay = "\n\n$toolResult"
@@ -579,8 +650,22 @@ class ChatViewModel(
             else updateModelMessage(currentMsgId, toolDisplay, false)
             finalizeModelMessage(currentMsgId)
 
-            // 工具结果作为下一轮的用户输入
-            currentInput = toolResult
+            // 将工具执行结果加入历史（role: tool，与上面 tool_call_id 匹配）
+            historyMessages.add(ChatMessage(
+                role = ChatRole.Tool, content = toolResult,
+                toolCallId = toolCallId,
+            ))
+
+            // 每隔 3 轮刷新编辑器上下文
+            if (cloudRounds % 3 == 0) {
+                val freshCtx = buildEditorContext()
+                if (freshCtx.isNotBlank()) {
+                    historyMessages.add(ChatMessage(
+                        role = ChatRole.User, content = "[上下文更新]\n$freshCtx",
+                    ))
+                }
+            }
+
             currentMsgId = java.util.UUID.randomUUID().toString()
             _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true)) }
         }
@@ -692,6 +777,7 @@ class ChatViewModel(
                 ChatRole.User -> Message.user(msg.content)
                 ChatRole.Model -> Message.model(msg.content)
                 ChatRole.System -> Message.system(msg.content)
+                ChatRole.Tool -> null
             }
         }
         _state.update { it.copy(messages = entry.messages, inputText = "", isLoading = false, activeConversationId = entry.id, isHistoryOpen = false) }

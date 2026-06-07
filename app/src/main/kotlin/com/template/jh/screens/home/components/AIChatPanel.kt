@@ -508,12 +508,12 @@ private fun ChatInputBar(
                         trackColor = Color(0xFFE0E0E0),
                     )
                 }
-                if (engineStatus == EngineStatus.Ready && isLoading) {
-                    // 生成中：暂停图标 + 加载动画
-                    IconButton(onClick = onCancel, Modifier.size(32.dp)) {
+                if (isLoading) {
+                    // 生成中：暂停按钮 + 环绕加载动画（不依赖 engineStatus，兼容云端模型）
+                    IconButton(onClick = onCancel, Modifier.size(36.dp)) {
                         Box(contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
-                            Icon(Icons.Default.Pause, stringResource(R.string.chat_cancel), Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Pause, stringResource(R.string.chat_cancel), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                 } else {

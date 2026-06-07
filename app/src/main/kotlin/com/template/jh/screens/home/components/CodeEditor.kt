@@ -31,6 +31,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -73,6 +74,8 @@ fun CodeEditor(
     onAcceptChanges: (() -> Unit)? = null,
     onRejectChanges: (() -> Unit)? = null,
     onJumpToNextChange: (() -> Unit)? = null,
+    // 光标位置回调：返回行号（1-based）
+    onCursorChange: ((Int) -> Unit)? = null,
 ) {
     val clipboardManager = LocalClipboardManager.current
     val density = LocalDensity.current
@@ -88,6 +91,14 @@ fun CodeEditor(
     val lineHeightDp = with(density) { lineHeightSp.sp.toDp() }
     val verticalPadding = (fontSizeSp * 0.6f).dp
     val hasPending = pendingFilePath != null
+
+    // 光标位置跟踪：从 selection 计算行号回调
+    val cursorLine = remember(text.selection) {
+        text.text.substring(0, text.selection.start).count { it == '\n' } + 1
+    }
+    LaunchedEffect(cursorLine) {
+        onCursorChange?.invoke(cursorLine)
+    }
 
     Box(
         modifier = modifier

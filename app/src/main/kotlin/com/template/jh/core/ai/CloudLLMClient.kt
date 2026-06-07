@@ -49,15 +49,25 @@ class CloudLLMClient(private val context: Context) {
                 put("content", systemPrompt)
             })
             for (msg in messages) {
-                if (msg.content.isBlank()) continue
-                put(JSONObject().apply {
-                    put("role", when (msg.role) {
-                        ChatRole.User -> "user"
-                        ChatRole.Model -> "assistant"
-                        else -> return@apply
-                    })
-                    put("content", msg.content)
-                })
+                if (msg.content.isBlank() && msg.role != ChatRole.Model) continue
+                val obj = JSONObject()
+                when (msg.role) {
+                    ChatRole.User -> {
+                        obj.put("role", "user")
+                        obj.put("content", msg.content)
+                    }
+                    ChatRole.Model -> {
+                        obj.put("role", "assistant")
+                        obj.put("content", msg.content)
+                    }
+                    ChatRole.Tool -> {
+                        obj.put("role", "tool")
+                        obj.put("tool_call_id", msg.toolCallId ?: "call_${msg.id.take(8)}")
+                        obj.put("content", msg.content)
+                    }
+                    else -> continue
+                }
+                put(obj)
             }
         }
 

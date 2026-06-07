@@ -399,17 +399,30 @@ fun MainTopBar(
             actions = {
                 // 模型状态指示器 + 下拉
                 Box {
+                    // 计算当前活跃模型信息
+                    val isCloudActive = cloudModelEnabled && activeCloudProfileId.isNotBlank()
+                    val activeCloudProfile = if (isCloudActive) cloudProfiles.find { it.id == activeCloudProfileId } else null
+                    val activeModelLabel = when {
+                        isCloudActive && activeCloudProfile != null -> activeCloudProfile.name.ifEmpty { activeCloudProfile.modelName }
+                        modelName.isNotBlank() -> modelName.take(16)
+                        else -> stringResource(R.string.model_no_model)
+                    }
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .clickable { modelMenuExpanded = true; onScanModels() }
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        ModelStatusDot(engineStatus)
+                        if (isCloudActive) {
+                            // 云端模式：固定绿色圆点
+                            Box(Modifier.size(6.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Color(0xFF4CAF50)))
+                        } else {
+                            ModelStatusDot(engineStatus)
+                        }
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (modelName.isNotBlank()) modelName.take(16)
-                                else stringResource(R.string.model_no_model),
+                            text = activeModelLabel,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -428,22 +441,28 @@ fun MainTopBar(
                         onDismissRequest = { modelMenuExpanded = false },
                         modifier = Modifier.widthIn(min = 220.dp).heightIn(max = dropdownMaxHeight)
                     ) {
-                        // 头部：状态 + 模型名
+                        // 头部：当前模型状态
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                    ModelStatusDot(engineStatus)
+                                    if (isCloudActive) {
+                                        Box(Modifier.size(8.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Color(0xFF4CAF50)))
+                                    } else {
+                                        ModelStatusDot(engineStatus)
+                                    }
                                     Spacer(Modifier.width(8.dp))
                                     Column {
                                         Text(
-                                            text = if (modelName.isNotBlank()) modelName
-                                                else stringResource(R.string.model_no_model),
+                                            text = activeModelLabel,
                                             style = MaterialTheme.typography.labelMedium,
                                         )
                                         Text(
-                                            text = modelStatusText(engineStatus),
+                                            text = when {
+                                                isCloudActive -> "云端 · ${activeCloudProfile?.modelName ?: ""}"
+                                                else -> modelStatusText(engineStatus)
+                                            },
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = modelStatusColor(engineStatus),
+                                            color = if (isCloudActive) androidx.compose.ui.graphics.Color(0xFF4CAF50) else modelStatusColor(engineStatus),
                                         )
                                     }
                                 }
@@ -466,14 +485,14 @@ fun MainTopBar(
                                 onBrowseModelFile()
                             },
                         )
-                        // 可用模型列表
+                        // 可用本地模型列表
                         if (availableModels.isNotEmpty()) {
                             HorizontalDivider()
                             Text("本地模型", style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                             availableModels.forEach { model ->
-                                val isActive = modelName == model.name || (modelName.isBlank() && engineStatus == EngineStatus.Loading)
+                                val isActive = !isCloudActive && modelName == model.name
                                 DropdownMenuItem(
                                     text = {
                                         Text(
@@ -520,7 +539,7 @@ fun MainTopBar(
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                             cloudProfiles.forEach { profile ->
-                                val isActiveCloud = cloudModelEnabled && profile.id == activeCloudProfileId
+                                val isActiveCloudItem = isCloudActive && profile.id == activeCloudProfileId
                                 DropdownMenuItem(
                                     text = {
                                         Column {
@@ -544,7 +563,7 @@ fun MainTopBar(
                                         onSwitchCloudProfile(profile.id)
                                     },
                                     trailingIcon = {
-                                        if (isActiveCloud) {
+                                        if (isActiveCloudItem) {
                                             Icon(
                                                 imageVector = Icons.Default.Check,
                                                 contentDescription = null,

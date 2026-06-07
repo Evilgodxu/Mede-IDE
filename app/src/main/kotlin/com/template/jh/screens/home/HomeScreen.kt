@@ -515,6 +515,7 @@ fun HomeScreen(
                             pendingFilePath = if (pending != null) path else null,
                             onAcceptChanges = { acceptEdit(path) },
                             onRejectChanges = { rejectEdit(path) },
+                            onCursorChange = { line -> chatViewModel.setActiveFileContext(path, line) },
                         )
                     },
                 )

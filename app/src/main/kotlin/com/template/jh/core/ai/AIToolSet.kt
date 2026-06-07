@@ -285,6 +285,107 @@ class AIToolSet(private val context: Context) : ToolSet {
         } catch (e: Exception) { "读取诊断失败: ${e.message}" }
     }
 
+    // ---- 文件搜索 ----
+
+    // 可搜索的源文件扩展名
+    private val searchableExtensions = setOf(
+        "kt", "kts", "java", "xml", "json", "yml", "yaml", "properties",
+        "txt", "md", "gradle", "toml", "cfg", "conf", "ini",
+        "html", "css", "js", "ts", "sql", "sh", "bat", "py",
+    )
+
+    @Tool(description = "Search file contents in the project for a query string. Returns matching files with line numbers. Use when you need to find where something is defined or used.")
+    fun searchInFiles(
+        @ToolParam(description = "Search query, case-insensitive. Supports plain text only (no regex).") query: String,
+        @ToolParam(description = "File extension filter, e.g. 'kt' for Kotlin files only. Leave empty for all text files.") extension: String = "",
+    ): String {
+        val uri = projectUri
+        if (uri == null) return "No project folder is open. Please open a folder first."
+        if (query.isBlank()) return "Search query is empty."
+        return try {
+            val rootDocId = DocumentsContract.getTreeDocumentId(uri)
+            val results = mutableListOf<String>()
+            val seen = mutableSetOf<String>()
+            val queryLower = query.lowercase()
+            searchSafRecursive(uri, rootDocId, queryLower, extension, results, seen, depth = 0)
+            if (results.isEmpty()) "No matches found for \"$query\"${if (extension.isNotBlank()) " in *.$extension files" else ""}."
+            else {
+                val sb = StringBuilder()
+                sb.appendLine("Found ${results.size} match${if (results.size != 1) "es" else ""} for \"$query\":")
+                sb.appendLine("---")
+                results.take(50).forEach { sb.appendLine(it) }
+                if (results.size > 50) sb.appendLine("... 及另外 ${results.size - 50} 个匹配")
+                sb.toString().trimEnd()
+            }
+        } catch (e: Exception) {
+            "Search failed: ${e.message}"
+        }
+    }
+
+    private fun searchSafRecursive(
+        treeUri: Uri, parentDocId: String, queryLower: String, extension: String,
+        results: MutableList<String>, seen: MutableSet<String>, depth: Int,
+    ) {
+        if (depth > 8 || results.size >= 100) return
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+        )
+        context.contentResolver.query(childrenUri, projection, null, null, null)?.use { c ->
+            val idCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeCol = c.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val sizeCol = c.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+
+            val dirs = mutableListOf<Pair<String, String>>()
+            while (c.moveToNext()) {
+                val docId = c.getString(idCol)
+                val name = c.getString(nameCol) ?: continue
+                val mime = c.getString(mimeCol) ?: ""
+                val isDir = mime == DocumentsContract.Document.MIME_TYPE_DIR
+                if (name.startsWith(".")) continue // 跳过隐藏文件/目录
+                if (isDir) {
+                    dirs.add(docId to name)
+                } else {
+                    if (extension.isNotBlank() && !name.endsWith(".$extension", ignoreCase = true)) continue
+                    val ext = name.substringAfterLast('.', "").lowercase()
+                    if (ext.isNotEmpty() && ext !in searchableExtensions) continue
+                    val size = if (sizeCol >= 0) c.getLong(sizeCol) else 0L
+                    if (size > 512 * 1024) continue // 跳过 >512KB 的文件
+                    val pathKey = extractRelativePath(treeUri, docId) ?: name
+                    if (pathKey in seen) continue
+                    seen.add(pathKey)
+                    val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                    try {
+                        val text = context.contentResolver.openInputStream(fileUri)
+                            ?.bufferedReader()?.use { it.readText() } ?: continue
+                        text.lines().forEachIndexed { idx, line ->
+                            if (line.contains(queryLower, ignoreCase = true)) {
+                                val trimmed = line.trim().take(120)
+                                results.add("$pathKey:${idx + 1}:  $trimmed")
+                            }
+                        }
+                    } catch (_: Exception) { /* 跳过无法读取的文件 */ }
+                }
+            }
+            // 递归遍历子目录
+            for ((dirId, _) in dirs) {
+                searchSafRecursive(treeUri, dirId, queryLower, extension, results, seen, depth + 1)
+            }
+        }
+    }
+
+    private fun extractRelativePath(treeUri: Uri, docId: String): String? {
+        return try {
+            val rootDocId = DocumentsContract.getTreeDocumentId(treeUri)
+            val prefix = rootDocId.trimEnd('/') + "/"
+            if (docId.startsWith(prefix)) docId.removePrefix(prefix) else docId
+        } catch (_: Exception) { null }
+    }
+
     // ---- SAF 辅助方法 ----
 
     private fun listViaSaf(treeUri: Uri, subPath: String): String {

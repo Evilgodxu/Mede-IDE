@@ -31,9 +31,10 @@ data class ChatMessage(
     val timestamp: Long = System.currentTimeMillis(),
     val fileOp: FileOperationMeta? = null,
     val isToolMessage: Boolean = false, // 是否为工具调用中间消息（JSON+执行结果）
+    val toolCallId: String? = null,     // 工具调用 ID，用于 API role:tool 匹配
 )
 
-enum class ChatRole { User, Model, System }
+enum class ChatRole { User, Model, System, Tool }
 
 // 对话历史条目
 data class ConversationEntry(
