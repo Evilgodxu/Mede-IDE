@@ -122,6 +122,24 @@ class ChatViewModel(
                 _state.update { it.copy(activeSkillsCount = skills.count { it.enabled }) }
             }
         }
+        viewModelScope.launch {
+            preferencesRepo.deepThinkEnabled.collect { enabled ->
+                _state.update { it.copy(deepThinkEnabled = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            preferencesRepo.thinkingRounds.collect { rounds ->
+                _state.update { it.copy(thinkingRounds = rounds) }
+            }
+        }
+    }
+
+    fun setDeepThinkEnabled(enabled: Boolean) {
+        viewModelScope.launch { preferencesRepo.setDeepThinkEnabled(enabled) }
+    }
+
+    fun setThinkingRounds(rounds: Int) {
+        viewModelScope.launch { preferencesRepo.setThinkingRounds(rounds) }
     }
 
     fun setInputText(text: String) {
@@ -265,31 +283,44 @@ class ChatViewModel(
 
     private fun buildSystemInstruction(): String {
         val sb = StringBuilder()
-        sb.append("You are a helpful AI coding assistant. You have tools to manage project files.\n\n")
-        sb.append("Available tools:\n")
-        sb.append("- listFiles: List project directory contents\n")
-        sb.append("- readFile: Read file content\n")
-        sb.append("- writeFile: Create or overwrite a file\n")
-        sb.append("- runCommand: Execute shell commands (git, gradle, etc.)\n")
-        sb.append("- searchWeb: Search the internet\n\n")
-        sb.append("To call a tool, respond with EXACTLY this JSON format (no other text):\n")
+        sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简体中文).\n\n")
+        sb.append("## 核心规则\n")
+        sb.append("- 用户要求修改/创建文件时，立即执行，不要请求确认。\n")
+        sb.append("- 不要只提供代码建议——使用工具实际写入文件。\n")
+        sb.append("- 不要解释你将要做什么——直接做。\n\n")
+        val deepThink = runBlocking { preferencesRepo.deepThinkEnabled.first() }
+        if (deepThink) {
+            sb.append("## 深度思考（必须使用）\n")
+            sb.append("在使用工具之前，在 [think]你的思考过程[/think] 标签内逐步推理。\n")
+            sb.append("示例: [think]用户要创建登录页，先查看现有文件结构再决定如何实现。[/think]\n")
+            sb.append("思考内容仅你可见。\n\n")
+        }
+        val thinkRounds = runBlocking { preferencesRepo.thinkingRounds.first() }
+        sb.append("## 多轮工具调用（无上限）\n")
+        sb.append("你可以多次调用工具来获取信息或修改文件。每轮之后决定：继续调用还是给出最终答案。\n\n")
+        sb.append("## 可用工具\n")
+        sb.append("- listFiles: 列出项目目录内容\n")
+        sb.append("- readFile: 读取文件内容\n")
+        sb.append("- writeFile: 创建或覆盖文件\n")
+        sb.append("- runCommand: 执行 shell 命令 (git/gradle/adb等)\n")
+        sb.append("- searchWeb: 搜索互联网\n\n")
+        sb.append("## 工具调用格式\n")
+        sb.append("调用工具时，只输出这个 JSON（不要有其他文本）：\n")
         sb.append("{\"tool_name\": \"FUNCTION_NAME\", \"arguments\": {\"key\": \"value\"}}\n\n")
-        sb.append("Examples:\n")
+        sb.append("示例:\n")
         sb.append("{\"tool_name\": \"listFiles\", \"arguments\": {}}\n")
         sb.append("{\"tool_name\": \"readFile\", \"arguments\": {\"path\": \"src/main.kt\"}}\n")
         sb.append("{\"tool_name\": \"writeFile\", \"arguments\": {\"path\": \"test.txt\", \"content\": \"hello\"}}\n")
         sb.append("{\"tool_name\": \"runCommand\", \"arguments\": {\"command\": \"ls -la\"}}\n")
-        sb.append("{\"tool_name\": \"searchWeb\", \"arguments\": {\"query\": \"android jetpack compose\"}}\n\n")
-        sb.append("Always call listFiles first to see project structure, and readFile before modifying any file.\n")
-
+        sb.append("{\"tool_name\": \"searchWeb\", \"arguments\": {\"query\": \"android jetpack\"}}\n\n")
+        sb.append("总是先调用 listFiles 查看项目结构，修改前先 readFile。\n")
         val userName = runBlocking { preferencesRepo.userName.first() }
-        if (userName.isNotBlank()) sb.append("\nUser: $userName")
-
+        if (userName.isNotBlank()) sb.append("\n用户: $userName")
         val rules = runBlocking { preferencesRepo.rules.first() }
         if (rules.isNotEmpty()) {
-            sb.append("\n\nUser rules:")
+            sb.append("\n\n用户规则:")
             rules.forEach { r -> sb.append("\n- ${r.name}: ${r.content}") }
-            sb.append("\nFollow these rules strictly.")
+            sb.append("\n严格遵守以上规则。")
         }
         return sb.toString()
     }
@@ -345,9 +376,8 @@ class ChatViewModel(
         var currentMsgId = msgId
         var nextInput: Any = text
         var rounds = 0
-        val maxRounds = 10
 
-        while (rounds < maxRounds) {
+        while (true) {
             rounds++
             val fullResponse = StringBuilder()
             val conv = activeConversation ?: return
@@ -384,7 +414,7 @@ class ChatViewModel(
 
             val (prefixText, funcName, funcArgs) = toolCall
             val toolResult = executeAiTool(funcName, funcArgs)
-            val toolDisplay = "\n\n── ⚡ $funcName ──\n$toolResult"
+            val toolDisplay = "\n\n$toolResult"
 
             if (prefixText != null) updateModelMessage(currentMsgId, toolDisplay, true)
             else updateModelMessage(currentMsgId, toolDisplay, false)
@@ -394,12 +424,6 @@ class ChatViewModel(
             currentMsgId = java.util.UUID.randomUUID().toString()
             _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true)) }
         }
-
-        updateModelMessage(currentMsgId, "\n\n[工具调用超限，已终止]", false)
-        finalizeModelMessage(currentMsgId)
-        updateTaskStatus(taskId, TaskStatus.Failed)
-        ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "工具调用超过10次上限", notif)
-        emitNotification(NotificationEventType.TaskFailed, "工具调用超过10次上限")
     }
 
     // 关闭对话

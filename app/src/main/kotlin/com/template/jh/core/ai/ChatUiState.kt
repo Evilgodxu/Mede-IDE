@@ -82,4 +82,7 @@ data class ChatUiState(
     // 上下文参考计数
     val activeRulesCount: Int = 0,
     val activeSkillsCount: Int = 0,
+    // 深度思考
+    val deepThinkEnabled: Boolean = true,
+    val thinkingRounds: Int = 2,
 )

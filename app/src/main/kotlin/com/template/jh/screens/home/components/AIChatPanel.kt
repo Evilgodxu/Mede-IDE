@@ -63,6 +63,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.template.jh.R
 import com.template.jh.core.ai.ChatMessage
 import com.template.jh.core.ai.ChatRole
@@ -237,7 +238,7 @@ private fun ChatBubble(
 ) {
     // 文件操作卡片
     message.fileOp?.let { op ->
-        if (op.opType == com.template.jh.core.ai.FileOpType.Delete && deleteCardEnabled) return // 开关开启时隐藏删除卡片
+        if (op.opType == com.template.jh.core.ai.FileOpType.Delete && deleteCardEnabled) return
         FileOperationCard(op, onFileCardClick)
         return
     }
@@ -246,8 +247,13 @@ private fun ChatBubble(
     val bgColor = if (isUser) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     val shape = RoundedCornerShape(topStart = if (isUser) 12.dp else 4.dp, topEnd = 12.dp, bottomStart = 12.dp, bottomEnd = if (isUser) 4.dp else 12.dp)
     val context = LocalContext.current
+
+    // 提取 [think]...[/think] 块
+    val thinkRegex = remember { Regex("""\[think\](.*?)\[/think\]""", RegexOption.DOT_MATCHES_ALL) }
+    val thinks = remember(message.content) { thinkRegex.findAll(message.content).map { it.groupValues[1].trim() }.toList() }
+    val displayContent = remember(message.content) { message.content.replace(thinkRegex, "").trim() }
+
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
-        // 上下文参考标签（AI回答上方常驻）
         if (showContextBadge) {
             val parts = mutableListOf<String>()
             if (activeRulesCount > 0) parts.add("参考${activeRulesCount}条规则")
@@ -257,21 +263,53 @@ private fun ChatBubble(
             }
         }
         Text(if (isUser) "You" else "AI", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
-        Box(
-            Modifier
-                .widthIn(max = 200.dp)
-                .clip(shape)
-                .background(bgColor)
-                .combinedClickable(
-                    onClick = {},
-                    onLongClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("消息内容", message.content))
-                    },
-                )
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-        ) {
-            Text(message.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+
+        // 可折叠思考块
+        thinks.forEach { thinkContent ->
+            var expanded by remember { mutableStateOf(false) }
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 200.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🧠 思考", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        if (expanded) "▼" else "▶",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (expanded) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(thinkContent, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+
+        // 内容气泡
+        if (displayContent.isNotEmpty()) {
+            Box(
+                Modifier
+                    .widthIn(max = 200.dp)
+                    .clip(shape)
+                    .background(bgColor)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("消息内容", message.content))
+                        },
+                    )
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(displayContent, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+            }
         }
     }
 }
@@ -302,27 +340,26 @@ private fun ContextBadge(text: String) {
     }
 }
 
-// 文件操作卡片
+// 文件操作卡片（精简单行 git-diff 风格）
 @Composable
 private fun FileOperationCard(
     op: com.template.jh.core.ai.FileOperationMeta,
     onFileCardClick: ((String) -> Unit)?,
 ) {
     val isDelete = op.opType == com.template.jh.core.ai.FileOpType.Delete
-    val fileName = op.filePath.substringAfterLast('/')
-    val icon = when (op.opType) {
-        com.template.jh.core.ai.FileOpType.Create -> Icons.Default.Add
-        com.template.jh.core.ai.FileOpType.Modify -> Icons.Default.Refresh
-        com.template.jh.core.ai.FileOpType.Delete -> Icons.Default.Delete
+    val prefix = when (op.opType) {
+        com.template.jh.core.ai.FileOpType.Create -> "+"
+        com.template.jh.core.ai.FileOpType.Modify -> "~"
+        com.template.jh.core.ai.FileOpType.Delete -> "-"
     }
-    val opLabel = when (op.opType) {
-        com.template.jh.core.ai.FileOpType.Create -> "创建"
-        com.template.jh.core.ai.FileOpType.Modify -> "修改"
-        com.template.jh.core.ai.FileOpType.Delete -> "删除"
+    val prefixColor = when (op.opType) {
+        com.template.jh.core.ai.FileOpType.Create -> Color(0xFF4CAF50)
+        com.template.jh.core.ai.FileOpType.Modify -> MaterialTheme.colorScheme.primary
+        com.template.jh.core.ai.FileOpType.Delete -> MaterialTheme.colorScheme.error
     }
-    val lineLabel = if (op.opType != com.template.jh.core.ai.FileOpType.Delete && op.lineChanges != 0) {
+    val lineInfo = if (!isDelete && op.lineChanges != 0) {
         val diff = if (op.lineChanges > 0) "+${op.lineChanges}" else "${op.lineChanges}"
-        " (${diff}\u884C)"
+        " ($diff)"
     } else ""
 
     Card(
@@ -338,34 +375,23 @@ private fun FileOperationCard(
         shape = RoundedCornerShape(8.dp),
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                icon, null, Modifier.size(16.dp),
-                tint = if (isDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            Text(
+                prefix,
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                color = prefixColor,
             )
-            Spacer(Modifier.width(8.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "$opLabel${if (isDelete) "" else "文件"}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    "$fileName$lineLabel",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            if (isDelete) {
-                Text(
-                    "点击删除",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
+            Spacer(Modifier.width(6.dp))
+            Text(
+                op.filePath + lineInfo,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }

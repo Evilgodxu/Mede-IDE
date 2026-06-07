@@ -1,9 +1,10 @@
 package com.template.jh.core.ai
 
 import android.content.Context
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
-import android.net.Uri
+import android.media.ToneGenerator
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
@@ -29,17 +30,23 @@ object ConversationNotifier {
 
     private fun playSound(context: Context, type: NotificationEventType) {
         try {
-            mediaPlayer?.release()
-            val soundUri: Uri = when (type) {
-                NotificationEventType.TaskCompleted -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                NotificationEventType.TaskFailed -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                NotificationEventType.WaitingUserAction -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            }
-            mediaPlayer = MediaPlayer().apply {
-                setDataSource(context, soundUri)
-                setOnCompletionListener { it.release() }
-                prepare()
-                start()
+            when (type) {
+                NotificationEventType.TaskFailed -> {
+                    // 短促错误蜂鸣音（非音乐）
+                    val tg = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
+                    tg.startTone(ToneGenerator.TONE_PROP_NACK, 300)
+                    handler.postDelayed({ try { tg.release() } catch (_: Exception) {} }, 400)
+                }
+                else -> {
+                    mediaPlayer?.release()
+                    val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                    mediaPlayer = MediaPlayer().apply {
+                        setDataSource(context, soundUri)
+                        setOnCompletionListener { it.release() }
+                        prepare()
+                        start()
+                    }
+                }
             }
         } catch (_: Exception) {}
     }

@@ -40,6 +40,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
@@ -71,6 +72,7 @@ import com.template.jh.data.model.SkillItem
 import com.template.jh.screens.home.HomeUiState
 import com.template.jh.screens.home.HomeViewModel
 import org.koin.androidx.compose.koinViewModel
+import kotlin.math.roundToInt
 
 // 设置分类枚举
 enum class SettingsCategory(val labelResId: Int) {
@@ -161,7 +163,11 @@ private fun SettingsCategoryContent(
             SettingsCategory.Model -> ModelSettingsContent(chatViewModel, onBrowseModelFile)
             SettingsCategory.Skill -> SkillsSettingsContent(state.skills, onSetSkills)
             SettingsCategory.MCP -> McpSettingsContent(state.mcpServers, onSetMcpServers)
-            SettingsCategory.Conversation -> NotificationSettingsContent(state.notificationSettings, onSetNotificationSettings)
+            SettingsCategory.Conversation -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ThinkingSettingsContent(chatViewModel)
+                HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                NotificationSettingsContent(state.notificationSettings, onSetNotificationSettings)
+            }
             SettingsCategory.Rules -> RulesSettingsContent(state.rules, onSetRules)
         }
     }
@@ -807,6 +813,25 @@ private fun McpSettingsContent(
             },
             dismissButton = { OutlinedButton(onClick = { showDialog = false }) { Text("取消") } },
         )
+    }
+}
+
+@Composable
+private fun ThinkingSettingsContent(chatViewModel: ChatViewModel?) {
+    val chatState = chatViewModel?.state?.collectAsState()
+    val deepThink = chatState?.value?.deepThinkEnabled ?: true
+
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("深度思考", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text("模型在调用工具前进行逐步推理，提升准确性。思考内容可折叠。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = deepThink, onCheckedChange = { chatViewModel?.setDeepThinkEnabled(it) })
+                Spacer(Modifier.width(8.dp))
+                Text(if (deepThink) "已启用" else "已禁用", style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 

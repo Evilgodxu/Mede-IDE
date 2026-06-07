@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.documentfile.provider.DocumentFile
 import androidx.window.core.layout.WindowSizeClass
 import com.template.jh.R
 import com.template.jh.core.ai.ChatViewModel
@@ -64,6 +65,12 @@ fun HomeScreen(
     val editorContent = remember { mutableStateMapOf<String, TextFieldValue>() }
     val workspaceRoot = remember { File(context.filesDir, "workspace") }
 
+    // 持久化文件 tabs
+    fun saveFileTabs() {
+        val paths = tabs.filter { it.type == TabType.File }.map { it.id }
+        if (paths.isNotEmpty()) viewModel.saveOpenedTabs(paths)
+    }
+
     // 打开/切换 Tab
     fun openTab(tab: TabItem) {
         val idx = tabs.indexOfFirst { it.id == tab.id }
@@ -73,6 +80,7 @@ fun HomeScreen(
             tabs.add(tab)
             activeTabIndex = tabs.size - 1
         }
+        saveFileTabs()
     }
 
     // 打开文件 Tab
@@ -100,19 +108,36 @@ fun HomeScreen(
         }
     }
 
-    // 读取文件内容
+    // 从实际存储读取文件（SAF projectUri → workspaceRoot 兜底）
+    fun readFileFromSource(path: String): String {
+        if (path.startsWith("content://")) {
+            return runCatching {
+                context.contentResolver.openInputStream(Uri.parse(path))
+                    ?.bufferedReader()?.readText()
+            }?.getOrDefault("无法读取文件") ?: "无法读取文件"
+        }
+        val projectUriStr = homeState.openedFolderUri
+        if (projectUriStr != null) {
+            return runCatching {
+                val treeUri = Uri.parse(projectUriStr)
+                var doc = DocumentFile.fromTreeUri(context, treeUri) ?: return@runCatching "无法读取文件"
+                for (segment in path.trimStart('/').split('/')) {
+                    if (segment.isEmpty()) continue
+                    doc = doc.findFile(segment) ?: return@runCatching "无法读取文件"
+                }
+                context.contentResolver.openInputStream(doc.uri)?.bufferedReader()?.readText()
+                    ?: "无法读取文件"
+            }.getOrDefault("无法读取文件")
+        }
+        return runCatching {
+            File(workspaceRoot, path.trimStart('/')).readText()
+        }.getOrDefault("无法读取文件")
+    }
+
+    // 读取文件内容（缓存优先 → readFileFromSource 兜底）
     fun loadFileContent(path: String): TextFieldValue {
         editorContent[path]?.let { return it }
-        val text = if (path.startsWith("content://")) {
-            runCatching {
-                context.contentResolver.openInputStream(Uri.parse(path))
-                    ?.bufferedReader()?.readText() ?: "无法读取文件"
-            }.getOrDefault("无法读取文件")
-        } else {
-            val file = File(workspaceRoot, path.trimStart('/'))
-            runCatching { file.readText() }.getOrDefault("无法读取文件")
-        }
-        val tfv = TextFieldValue(text)
+        val tfv = TextFieldValue(readFileFromSource(path))
         editorContent[path] = tfv
         return tfv
     }
@@ -131,9 +156,10 @@ fun HomeScreen(
         } catch (_: Exception) {}
     }
 
-    // 自动打开 AI 操作的文件
+    // 自动打开 AI 操作的文件（写文件后清除缓存刷新编辑器）
     LaunchedEffect(Unit) {
         FileOperationEvents.events.collect { event ->
+            editorContent.remove(event.path)
             if (event.operation != "delete") {
                 openFileTab(event.path)
             }
@@ -154,6 +180,24 @@ fun HomeScreen(
         uri?.let { chatViewModel.loadModelFromUri(it) }
     }
 
+    // 自动打开上次文件夹
+    val lastFolderUri by viewModel.lastOpenedFolderUri.collectAsState()
+    val savedTabs by viewModel.openedFileTabs.collectAsState()
+    var autoOpened by remember { mutableStateOf(false) }
+    LaunchedEffect(lastFolderUri) {
+        if (!autoOpened && lastFolderUri != null) {
+            autoOpened = true
+            val parsed = Uri.parse(lastFolderUri)
+            viewModel.openFolder(parsed)
+            chatViewModel.setProjectRoot(parsed)
+            selectedTab = SidebarTab.Explorer
+            // 恢复上次打开的文件 tabs
+            if (savedTabs.isNotEmpty()) {
+                savedTabs.forEach { path -> openFileTab(path) }
+            }
+        }
+    }
+
     // SAF 文件夹选择器
     val folderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -161,6 +205,7 @@ fun HomeScreen(
         uri?.let {
             viewModel.openFolder(it)
             chatViewModel.setProjectRoot(it)
+            viewModel.saveLastOpenedFolder(it.toString())
             selectedTab = SidebarTab.Explorer
         }
     }
@@ -198,6 +243,7 @@ fun HomeScreen(
                     viewModel = viewModel,
                     chatViewModel = chatViewModel,
                     onFileClick = { fileItem ->
+                        editorContent.remove(fileItem.uri.toString())
                         openFileTab(fileItem.uri.toString(), fileItem.name)
                     },
                 )
@@ -227,12 +273,14 @@ fun HomeScreen(
                                 activeTabIndex >= tabs.size -> tabs.size - 1
                                 else -> activeTabIndex.coerceIn(0, tabs.size - 1)
                             }
+                            saveFileTabs()
                         }
                     },
                     onCloseAllTabs = {
                         tabs.clear()
                         activeTabIndex = -1
                         isSettingsOpen = false
+                        viewModel.saveOpenedTabs(emptyList())
                     },
                     onSaveCurrent = {
                         val idx = activeTabIndex
@@ -245,7 +293,9 @@ fun HomeScreen(
                         }
                     },
                     tabContent = { path ->
-                        val tfv = loadFileContent(path)
+                        val content = readFileFromSource(path)
+                        val tfv = TextFieldValue(content)
+                        editorContent[path] = tfv
                         CodeEditor(
                             text = tfv,
                             onTextChange = { editorContent[path] = it },

@@ -143,6 +143,20 @@ class HomeViewModel(
         return sortDocFiles(children).map { toFileItem(it) }
     }
 
+    val lastOpenedFolderUri: StateFlow<String?> = userPreferencesRepository.lastOpenedFolderUri
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val openedFileTabs: StateFlow<List<String>> = userPreferencesRepository.openedFileTabs
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun saveLastOpenedFolder(uri: String) {
+        viewModelScope.launch { userPreferencesRepository.setLastOpenedFolderUri(uri) }
+    }
+
+    fun saveOpenedTabs(paths: List<String>) {
+        viewModelScope.launch { userPreferencesRepository.setOpenedFileTabs(paths) }
+    }
+
     // 关闭文件夹
     fun closeFolder() {
         _folderState.value = FolderState()
