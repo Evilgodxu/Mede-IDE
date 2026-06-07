@@ -8,6 +8,7 @@ import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.template.jh.core.ai.FileOperationEvents
 import com.template.jh.data.model.McpServer
 import com.template.jh.data.model.NotificationSettings
 import com.template.jh.data.model.Rule
@@ -17,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -60,6 +62,16 @@ class HomeViewModel(
                     openedFolderUri = (values[8] as? FolderState)?.folderUri?.toString(),
                 )
             }.collect { _state.value = it }
+        }
+        // 监听文件操作事件，自动刷新根目录
+        viewModelScope.launch {
+            FileOperationEvents.events.collect { event ->
+                android.util.Log.d("HomeViewModel", "FileOperationEvent: ${event.operation} ${event.path}")
+                // create / overwrite / delete 操作需要刷新根目录
+                if (event.operation in listOf("create", "overwrite", "delete")) {
+                    refreshRootFiles()
+                }
+            }
         }
     }
 
@@ -117,7 +129,7 @@ class HomeViewModel(
 
         // 根目录直接 listFiles
         if (parentUri == treeUri) {
-            val children = rootDocFile.listFiles() ?: return emptyList()
+            val children = rootDocFile.listFiles()
             return sortDocFiles(children).map { toFileItem(it) }
         }
 
@@ -129,7 +141,7 @@ class HomeViewModel(
 
         val relativePath = parentDocId.removePrefix(rootDocId).trimStart('/')
         if (relativePath.isEmpty()) {
-            val children = rootDocFile.listFiles() ?: return emptyList()
+            val children = rootDocFile.listFiles()
             return sortDocFiles(children).map { toFileItem(it) }
         }
 
@@ -139,7 +151,7 @@ class HomeViewModel(
             current = current.findFile(segment) ?: return emptyList()
         }
 
-        val children = current.listFiles() ?: return emptyList()
+        val children = current.listFiles()
         return sortDocFiles(children).map { toFileItem(it) }
     }
 

@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
@@ -29,8 +31,6 @@ import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -292,7 +292,7 @@ private fun FileTreeItem(
                     item.isDirectory -> Icons.Default.Folder
                     item.name.let { it.endsWith(".kt") || it.endsWith(".java") || it.endsWith(".xml") || it.endsWith(".gradle") } -> Icons.Default.Description
                     item.name.let { it.endsWith(".png") || it.endsWith(".jpg") || it.endsWith(".webp") || it.endsWith(".gif") } -> Icons.Default.Image
-                    else -> Icons.Default.InsertDriveFile
+                    else -> Icons.AutoMirrored.Filled.InsertDriveFile
                 },
                 contentDescription = null, modifier = Modifier.size(14.dp),
                 tint = when {
@@ -324,7 +324,7 @@ private fun FileTreeItem(
                         DropdownMenuItem(
                             text = { Text("打开文件") },
                             onClick = { showContextMenu = false; onFileClick(item) },
-                            leadingIcon = { Icon(Icons.Default.OpenInNew, null, Modifier.size(16.dp)) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, null, Modifier.size(16.dp)) },
                         )
                     }
                     DropdownMenuItem(
@@ -560,7 +560,7 @@ private fun DirTreeItem(
                     DropdownMenuItem(
                         text = { Text("打开文件夹") },
                         onClick = { showContextMenu = false; onFileClick(item) },
-                        leadingIcon = { Icon(Icons.Default.OpenInNew, null, Modifier.size(16.dp)) },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, null, Modifier.size(16.dp)) },
                     )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.add_to_conversation)) },

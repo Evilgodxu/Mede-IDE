@@ -10,6 +10,8 @@ import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 import com.template.jh.core.editor.applyPatches
 import com.template.jh.core.editor.PatchOp
+import com.template.jh.core.editor.replaceInFile
+import com.template.jh.core.editor.BlockReplaceOp
 import com.template.jh.core.storage.FileManager
 import java.io.File
 import java.net.HttpURLConnection
@@ -56,7 +58,8 @@ class AIToolSet(
         if (!targetDoc.isDirectory) return "Not a directory: $subPath"
 
         return try {
-            val children = targetDoc.listFiles() ?: return "Empty directory."
+            val children = targetDoc.listFiles()
+            if (children.isEmpty()) return "Empty directory."
             if (children.isEmpty()) return "Empty directory."
 
             val sorted = children.sortedWith(
@@ -174,7 +177,7 @@ class AIToolSet(
 
     // 行级差异编辑：对大模型友好的 patch 格式
     // patches 是 JSON 数组，每个元素: {"type":"replace"|"insert"|"delete", "startLine":int, "endLine":int, "content":"..."}
-    @Tool(description = "DEFAULT choice for modifying existing files. Apply line-level changes to edit specific lines without rewriting the entire file. Use for any modifications to existing files.")
+    @Tool(description = "Line-level editing with row numbers. Use when you need precise control over which lines to replace/insert/delete.")
     fun applyPatch(
         @ToolParam(description = "File path relative to project root") path: String,
         @ToolParam(description = """JSON array of patches. Each: {"type":"replace"|"insert"|"delete", "startLine":int (1-based), "endLine":int (exclusive), "content":"new text"}""") patchesJson: String,
@@ -212,6 +215,50 @@ class AIToolSet(
         }
     }
 
+    // 代码块级精确替换：基于唯一标识字符串的查找替换
+    // 这是推荐的编辑方式，因为大模型不需要计算行号，只需提供代码块内容
+    @Tool(description = "RECOMMENDED for editing existing files. Block-level find-and-replace. Provide the exact code block to find (old_string) and the new code (new_string). No need to calculate line numbers. The old_string must be unique in the file or long enough to be unambiguous.")
+    fun replaceInFile(
+        @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
+        @ToolParam(description = """JSON array of replacements. Each: {"old_string":"code to find", "new_string":"replacement code"}""") replacementsJson: String,
+    ): String {
+        val uri = projectUri
+        if (uri == null) return "No project folder is open."
+        return try {
+            android.util.Log.d("AIToolSet", "replaceInFile called: path=$path")
+            val original = readFileRaw(path)
+            if (original == null) {
+                android.util.Log.w("AIToolSet", "replaceInFile: file not found: $path")
+                return "Cannot replace: file not found or not open. Use writeFile to create first."
+            }
+            android.util.Log.d("AIToolSet", "replaceInFile: original content length=${original.length}")
+            
+            val replacements = org.json.JSONArray(replacementsJson)
+            val replaceOps = (0 until replacements.length()).map { i ->
+                val obj = replacements.getJSONObject(i)
+                BlockReplaceOp(
+                    oldString = obj.getString("old_string"),
+                    newString = obj.getString("new_string"),
+                )
+            }
+            
+            val (newContent, message) = replaceInFile(original, replaceOps)
+            android.util.Log.d("AIToolSet", "replaceInFile: new content length=${newContent.length}, message=$message")
+            
+            // 检查是否所有替换都成功
+            if (message.contains("失败")) {
+                return "Replace failed:\n$message"
+            }
+
+            // 不直接写入文件，发送pending事件等待用户审阅
+            FileOperationEvents.notify(path, "pending", computeChangedLines(original, newContent), original, newContent)
+            "Replace prepared for review: $path.\n$message\nClick the checkmark in editor to apply."
+        } catch (e: Exception) {
+            android.util.Log.e("AIToolSet", "replaceInFile failed: ${e.message}", e)
+            "Replace failed: ${e.message}"
+        }
+    }
+
     private fun computeChangedLines(old: String, new: String): Int {
         val o = old.lines(); val n = new.lines()
         return (maxOf(o.size, n.size) - (o.zip(n).count { it.first == it.second })).coerceAtLeast(1)
@@ -246,15 +293,90 @@ class AIToolSet(
     ): String {
         if (query.isBlank()) return "Search query is empty."
         return try {
+            // 优先使用聚合搜索引擎 SearXNG
+            val searxResult = searchViaSearxNG(query)
+            if (searxResult.isNotBlank() && !searxResult.contains("失败") && !searxResult.contains("无结果")) {
+                return searxResult
+            }
+            // 备选：使用 Bing
+            val bingResult = searchViaBing(query)
+            if (bingResult.isNotBlank() && !bingResult.contains("失败")) {
+                return bingResult
+            }
+            // 最后的备选：DuckDuckGo
             searchViaDuckDuckGo(query)
         } catch (e: Exception) {
             "Search failed: ${e.message}"
         }
     }
 
+    /**
+     * SearXNG 搜索 - 开源搜索引擎聚合器，稳定性更高
+     */
+    private fun searchViaSearxNG(query: String): String {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        // 多个公共 SearXNG 实例，按可靠性排序
+        val instances = listOf(
+            "https://search.sapti.me/search?q=$encoded&format=json&language=all",
+            "https://search.rhscz.eu/search?q=$encoded&format=json&language=all",
+            "https://searx.be/search?q=$encoded&format=json&language=all",
+            "https://search.bus-hit.me/search?q=$encoded&format=json&language=all",
+        )
+        
+        for (url in instances) {
+            try {
+                val json = fetchUrl(url, timeoutMs = 10000)
+                val obj = org.json.JSONObject(json)
+                val results = obj.optJSONArray("results")
+                
+                if (results != null && results.length() > 0) {
+                    val output = mutableListOf<String>()
+                    for (i in 0 until minOf(results.length(), 5)) {
+                        val item = results.optJSONObject(i) ?: continue
+                        val title = item.optString("title", "").trim()
+                        val content = item.optString("content", "").trim()
+                        val link = item.optString("url", "").trim()
+                        if (title.isNotBlank()) {
+                            output.add("• $title${if (content.isNotBlank()) "\n  $content" else ""}${if (link.isNotBlank()) "\n  $link" else ""}")
+                        }
+                    }
+                    if (output.isNotEmpty()) {
+                        return "Found ${results.length()} results:\n\n${output.joinToString("\n---\n")}"
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("AIToolSet", "SearXNG $url failed: ${e.message}")
+                continue
+            }
+        }
+        return "SearXNG search failed or returned no results."
+    }
+
+    /**
+     * Bing 搜索 - 作为备选
+     */
+    private fun searchViaBing(query: String): String {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val url = "https://www.bing.com/search?q=$encoded&setmkt=en-US&setlang=en"
+        
+        return try {
+            val html = fetchUrl(url, timeoutMs = 15000, extraHeaders = mapOf(
+                "Cookie" to "MUID=1; MUIDB=1",  // 匿名Cookie
+                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            ))
+            val results = parseBingResults(html)
+            if (results.isNotEmpty()) {
+                "Found ${results.size} results:\n\n${results.joinToString("\n---\n") { "• ${it.first}\n  ${it.second}" }}"
+            } else {
+                "Bing search returned no results."
+            }
+        } catch (e: Exception) {
+            "Bing search failed: ${e.message}"
+        }
+    }
+
     private fun searchViaDuckDuckGo(query: String): String {
         val encoded = URLEncoder.encode(query, "UTF-8")
-
         val urls = listOf(
             "https://lite.duckduckgo.com/lite/?q=$encoded",
             "https://html.duckduckgo.com/html/?q=$encoded",
@@ -262,7 +384,7 @@ class AIToolSet(
 
         for (searchUrl in urls) {
             try {
-                val html = fetchUrl(searchUrl)
+                val html = fetchUrl(searchUrl, timeoutMs = 15000)
                 val results = parseDdgResults(html)
                 if (results.isNotEmpty()) {
                     return results.joinToString("\n---\n") { "• ${it.first}\n  ${it.second}" }
@@ -272,7 +394,7 @@ class AIToolSet(
 
         try {
             val apiUrl = "https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1&skip_disambig=1"
-            val json = fetchUrl(apiUrl)
+            val json = fetchUrl(apiUrl, timeoutMs = 10000)
             val obj = org.json.JSONObject(json)
             val abstractText = obj.optString("AbstractText", "")
             val answer = obj.optString("Answer", "")
@@ -294,19 +416,58 @@ class AIToolSet(
         return "Search returned no results for: $query"
     }
 
-    private fun fetchUrl(urlString: String): String {
+    private fun fetchUrl(urlString: String, timeoutMs: Int = 15000, extraHeaders: Map<String, String> = emptyMap()): String {
         val url = URL(urlString)
         val conn = (url.openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15000; readTimeout = 15000
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36")
+            connectTimeout = timeoutMs
+            readTimeout = timeoutMs
+            setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
             setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-            setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+            setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en-US,en;q=0.8")
+            setRequestProperty("Accept-Encoding", "gzip, deflate, br")
+            setRequestProperty("DNT", "1")
+            setRequestProperty("Connection", "keep-alive")
+            extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
         }
-        val html = conn.inputStream.bufferedReader().readText()
+        
+        val inputStream = if (conn.contentEncoding == "gzip") {
+            java.util.zip.GZIPInputStream(conn.inputStream)
+        } else {
+            conn.inputStream
+        }
+        
+        val html = inputStream.bufferedReader().readText()
         val code = conn.responseCode
         conn.disconnect()
         if (code != 200) throw RuntimeException("HTTP $code")
         return html
+    }
+
+    private fun parseBingResults(html: String): List<Pair<String, String>> {
+        val results = mutableListOf<Pair<String, String>>()
+        
+        // Bing 搜索结果解析
+        val patterns = listOf(
+            // 新布局
+            Regex("""<a[^>]*target=\"_blank\"[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>.*?<p[^>]*>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL),
+            // 标准结果
+            Regex("""<li class=\"b_algo[^\"]*\"[^>]*>.*?<h2[^>]*>.*?<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>.*?</h2>.*?<p[^>]*>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL),
+            // 备选
+            Regex("""<a[^>]*href=\"([^\"]+)\"[^>]*h=\"[^\"]*\"[^>]*>(.*?)</a>.*?<span[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL),
+        )
+        
+        for (pattern in patterns) {
+            for (m in pattern.findAll(html).take(5)) {
+                val link = m.groupValues[1].replace(Regex("<[^>]*>"), "").trim()
+                val title = m.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
+                val snippet = m.groupValues.getOrNull(3)?.replace(Regex("<[^>]*>"), "")?.trim() ?: ""
+                if (title.isNotBlank() && title.length < 200) {
+                    results.add(title to snippet)
+                }
+            }
+            if (results.isNotEmpty()) break
+        }
+        return results.take(5)
     }
 
     private fun parseDdgResults(html: String): List<Pair<String, String>> {
@@ -383,7 +544,7 @@ class AIToolSet(
         } catch (e: Exception) { "命令失败: ${e.message}" }
     }
 
-    private fun isWindows(): Boolean = System.getProperty("os.name").lowercase().contains("win")
+    private fun isWindows(): Boolean = System.getProperty("os.name")?.lowercase()?.contains("win") == true
 
     // ---- Lint/诊断读取 ----
 
@@ -534,7 +695,7 @@ class AIToolSet(
     ) {
         if (results.size >= 100) return
 
-        val children = dirDoc.listFiles() ?: return
+        val children = dirDoc.listFiles()
         val searchableExtensions = setOf(
             "kt", "kts", "java", "xml", "json", "yml", "yaml", "properties",
             "txt", "md", "gradle", "toml", "cfg", "conf", "ini",

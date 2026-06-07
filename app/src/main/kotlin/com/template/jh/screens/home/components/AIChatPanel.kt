@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -434,57 +435,61 @@ private fun FileOperationCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
         shape = RoundedCornerShape(8.dp),
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 左侧：操作标签
-            Text(
-                text = opLabel,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                color = opColor,
-                modifier = Modifier
-                    .background(opColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-
-            Spacer(Modifier.width(10.dp))
-
-            // 中间：文件名称 + 路径
-            Column(
-                modifier = Modifier.weight(1f),
+            // 第一行：操作标签 + 文件名(居中) + 行数变化
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                // 文件名
+                // 左侧：操作标签
+                Text(
+                    text = opLabel,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = opColor,
+                    modifier = Modifier
+                        .background(opColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+
+                // 中间：文件名(居中)
                 Text(
                     text = fileName,
                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                 )
-                // 路径（灰色小字）
-                val dirPath = op.filePath.substringBeforeLast("/", "")
-                if (dirPath.isNotEmpty()) {
+
+                // 右侧：行数变化
+                if (!isDelete && op.lineChanges != 0) {
                     Text(
-                        text = dirPath,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        text = "${linePrefix}${op.lineChanges}",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        ),
+                        color = lineColor,
                     )
+                } else {
+                    Spacer(Modifier.width(20.dp))
                 }
             }
 
-            // 末尾：行数变化
-            if (!isDelete && op.lineChanges != 0) {
-                Spacer(Modifier.width(8.dp))
+            // 第二行：路径
+            val dirPath = op.filePath.substringBeforeLast("/", "")
+            if (dirPath.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "${linePrefix}${op.lineChanges}",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                    ),
-                    color = lineColor,
+                    text = dirPath,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -534,7 +539,7 @@ private fun ChatInputBar(
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator(
-                        progress = ratio,
+                        progress = { ratio },
                         modifier = Modifier.size(20.dp),
                         strokeWidth = 1.5.dp,
                         color = if (ratio < 0.5f) Color(0xFF4CAF50)
@@ -746,7 +751,7 @@ private fun ContextInfoDialog(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(
-                            progress = ratio / 100f,
+                            progress = { ratio / 100f },
                             modifier = Modifier.size(60.dp),
                             strokeWidth = 4.dp,
                             color = when {

@@ -77,7 +77,7 @@ class FileManager(private val context: Context) {
         if (!targetDoc.isDirectory) return "Not a directory: $subPath"
 
         return try {
-            val children = targetDoc.listFiles() ?: return "Empty directory."
+            val children = targetDoc.listFiles()
             if (children.isEmpty()) return "Empty directory."
 
             // 排序：目录在前，按名称排序
@@ -112,7 +112,7 @@ class FileManager(private val context: Context) {
         if (!targetDoc.isDirectory) return emptyList()
 
         return try {
-            val children = targetDoc.listFiles() ?: return emptyList()
+            val children = targetDoc.listFiles()
             children.map { doc ->
                 val name = doc.name ?: ""
                 val relPath = if (subPath.isBlank()) name else "${subPath.trim('/')}/$name"
@@ -298,7 +298,7 @@ class FileManager(private val context: Context) {
     ) {
         if (results.size >= 100) return
 
-        val children = dirDoc.listFiles() ?: return
+        val children = dirDoc.listFiles()
 
         for (doc in children) {
             val name = doc.name ?: continue

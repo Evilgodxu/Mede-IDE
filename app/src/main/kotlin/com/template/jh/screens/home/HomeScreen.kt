@@ -35,8 +35,10 @@ import androidx.window.core.layout.WindowSizeClass
 import com.template.jh.R
 import com.template.jh.core.ai.ChatViewModel
 import com.template.jh.core.ai.FileOperationEvents
+import com.template.jh.core.editor.CodeReviewState
 import com.template.jh.core.editor.LineChangeType
 import com.template.jh.core.editor.computeLineDiff
+import com.template.jh.core.editor.createCodeReviewState
 import com.template.jh.screens.home.components.AIChatPanel
 import com.template.jh.screens.home.components.CodeEditor
 import com.template.jh.screens.home.components.MainContentArea
@@ -166,13 +168,13 @@ fun HomeScreen(
             return runCatching {
                 context.contentResolver.openInputStream(Uri.parse(contentUri))
                     ?.bufferedReader()?.readText()
-            }?.getOrDefault("无法读取文件") ?: "无法读取文件"
+            }.getOrDefault("无法读取文件") ?: "无法读取文件"
         }
         if (path.startsWith("content://")) {
             return runCatching {
                 context.contentResolver.openInputStream(Uri.parse(path))
                     ?.bufferedReader()?.readText()
-            }?.getOrDefault("无法读取文件") ?: "无法读取文件"
+            }.getOrDefault("无法读取文件") ?: "无法读取文件"
         }
         val projectUriStr = homeState.openedFolderUri
         if (projectUriStr != null) {
@@ -228,71 +230,108 @@ fun HomeScreen(
         } catch (_: Exception) {}
     }
 
-    // 待审阅修改（文件路径 → 原始/新内容）
-    data class PendingFileEdit(val filePath: String, val originalContent: String, val newContent: String)
-    val pendingEdits = remember { mutableStateMapOf<String, PendingFileEdit>() }
+    // 待审阅修改状态（新的代码审查系统）
+    val reviewStates = remember { mutableStateMapOf<String, CodeReviewState>() }
+    // 每个文件是否显示审查面板
+    val showReviewPanels = remember { mutableStateMapOf<String, Boolean>() }
 
-    // 自动打开 AI 操作的文件 + 追踪待审阅修改
+    // 自动打开 AI 操作的文件 + 创建代码审查状态
     LaunchedEffect(Unit) {
         FileOperationEvents.events.collect { event ->
-            android.util.Log.d("HomeScreen", "FileOperationEvents: path=${event.path}, operation=${event.operation}, original=${event.originalContent.length}, new=${event.newContent.length}")
+            android.util.Log.d("HomeScreen", "FileOperationEvents: path=${event.path}, operation=${event.operation}")
             editorContent.remove(event.path)
-            // pending操作：需要用户审阅后确认才写入
-            if (event.operation == "pending" && event.originalContent.isNotEmpty() && event.newContent.isNotEmpty()) {
-                pendingEdits[event.path] = PendingFileEdit(event.path, event.originalContent, event.newContent)
-                android.util.Log.d("HomeScreen", "Created pending edit for ${event.path}")
+
+            // 创建代码审查状态（无论是 pending 还是 modify 操作）
+            if ((event.operation == "pending" || event.operation == "modify") &&
+                event.originalContent.isNotEmpty() && event.newContent.isNotEmpty()) {
+                val reviewState = createCodeReviewState(event.path, event.originalContent, event.newContent)
+                reviewStates[event.path] = reviewState
+                showReviewPanels[event.path] = false // 默认不显示面板
+                android.util.Log.d("HomeScreen", "Created review state for ${event.path} with ${reviewState.totalCount} change blocks")
             }
-            // modify操作：已写入文件（如writeFile），只需要显示diff
-            else if (event.operation == "modify" && event.originalContent.isNotEmpty() && event.newContent.isNotEmpty()) {
-                pendingEdits[event.path] = PendingFileEdit(event.path, event.originalContent, event.newContent)
-                android.util.Log.d("HomeScreen", "Created modify edit for ${event.path}")
-            }
+
             if (event.operation != "delete") {
                 openFileTab(event.path)
             }
         }
     }
 
-    // 确认/拒绝修改
-    fun acceptEdit(path: String) {
-        val edit = pendingEdits[path] ?: return
-        pendingEdits.remove(path)
-        // 将新内容写入文件
+    // 保存审查结果到文件
+    fun saveReviewResult(path: String, content: String) {
         val projectUriStr = homeState.openedFolderUri
         if (projectUriStr != null) {
             runCatching {
                 val treeUri = Uri.parse(projectUriStr)
                 var doc = DocumentFile.fromTreeUri(context, treeUri) ?: return@runCatching
-                for (segment in edit.filePath.trimStart('/').split('/')) {
+                for (segment in path.trimStart('/').split('/')) {
                     if (segment.isEmpty()) continue
                     doc = doc.findFile(segment) ?: return@runCatching
                 }
                 context.contentResolver.openOutputStream(doc.uri, "wt")?.use { out ->
-                    out.write(edit.newContent.toByteArray(Charsets.UTF_8))
+                    out.write(content.toByteArray(Charsets.UTF_8))
                 }
             }
         }
-        editorContent.remove(path) // 强制刷新
+        editorContent.remove(path)
+        reviewStates.remove(path)
+        showReviewPanels.remove(path)
     }
-    fun rejectEdit(path: String) {
-        val edit = pendingEdits[path] ?: return
-        pendingEdits.remove(path)
+
+    // 接受指定修改块
+    fun acceptChangeBlock(path: String, blockIndex: Int) {
+        val state = reviewStates[path] ?: return
+        val updated = state.acceptBlock(blockIndex)
+        reviewStates[path] = updated
+        android.util.Log.d("HomeScreen", "Accepted block $blockIndex for $path")
+    }
+
+    // 拒绝指定修改块
+    fun rejectChangeBlock(path: String, blockIndex: Int) {
+        val state = reviewStates[path] ?: return
+        val updated = state.rejectBlock(blockIndex)
+        reviewStates[path] = updated
+        android.util.Log.d("HomeScreen", "Rejected block $blockIndex for $path")
+    }
+
+    // 接受所有修改
+    fun acceptAllChanges(path: String) {
+        val state = reviewStates[path] ?: return
+        val updated = state.acceptAll()
+        reviewStates[path] = updated
+        // 写入最终内容
+        saveReviewResult(path, updated.generateFinalContent())
+        android.util.Log.d("HomeScreen", "Accepted all changes for $path")
+    }
+
+    // 拒绝所有修改
+    fun rejectAllChanges(path: String) {
+        val state = reviewStates[path] ?: return
+        val updated = state.rejectAll()
+        reviewStates[path] = updated
         // 写回原始内容
-        val projectUriStr = homeState.openedFolderUri
-        if (projectUriStr != null) {
-            runCatching {
-                val treeUri = Uri.parse(projectUriStr)
-                var doc = DocumentFile.fromTreeUri(context, treeUri) ?: return@runCatching
-                for (segment in edit.filePath.trimStart('/').split('/')) {
-                    if (segment.isEmpty()) continue
-                    doc = doc.findFile(segment) ?: return@runCatching
-                }
-                context.contentResolver.openOutputStream(doc.uri, "wt")?.use { out ->
-                    out.write(edit.originalContent.toByteArray(Charsets.UTF_8))
-                }
-            }
-        }
-        editorContent.remove(edit.filePath)
+        saveReviewResult(path, state.oldContent)
+        android.util.Log.d("HomeScreen", "Rejected all changes for $path")
+    }
+
+    // 导航到指定修改块
+    fun navigateToBlock(path: String, blockIndex: Int) {
+        val state = reviewStates[path] ?: return
+        reviewStates[path] = state.setCurrentIndex(blockIndex)
+    }
+
+    // 切换审查面板显示
+    fun toggleReviewPanel(path: String) {
+        showReviewPanels[path] = !(showReviewPanels[path] ?: false)
+    }
+
+    // 兼容旧接口：接受全部（用于旧版 UI）
+    fun acceptEdit(path: String) {
+        acceptAllChanges(path)
+    }
+
+    // 兼容旧接口：拒绝全部（用于旧版 UI）
+    fun rejectEdit(path: String) {
+        rejectAllChanges(path)
     }
 
     // 打开 AI 操作卡片指定的文件
@@ -319,7 +358,8 @@ fun HomeScreen(
         tabs.clear()
         editorContent.clear()
         relativeToContentUri.clear()
-        pendingEdits.clear()
+        reviewStates.clear()
+        showReviewPanels.clear()
         activeTabIndex = -1
         isSettingsOpen = false
         selectedTab = null
@@ -525,45 +565,74 @@ fun HomeScreen(
                     },
                     tabContent = { path ->
                         val tfv = editorContent.getOrPut(path) { TextFieldValue(readFileFromSource(path)) }
-                        val pending = pendingEdits[path]
-                        val lineDiffs: Map<Int, LineChangeType> = if (pending != null) {
-                            computeLineDiff(pending.originalContent, pending.newContent)
-                                .filter { it.type != LineChangeType.Unchanged }
-                                .associate { it.lineIndex to it.type }
-                        } else emptyMap()
-                        // 计算修改位置列表（按行号排序）
-                        val changeLines = remember(lineDiffs) {
-                            lineDiffs.keys.sorted()
+                        val reviewState = reviewStates[path]
+                        val showPanel = showReviewPanels[path] ?: false
+
+                        // 如果有审查状态，使用新代码；否则使用当前文件内容
+                        val displayText = reviewState?.newContent ?: tfv.text
+
+                        // 计算行级 diff（兼容旧接口）
+                        val (oldLineDiffs, newLineDiffs) = if (reviewState != null) {
+                            computeLineDiff(reviewState.oldContent, reviewState.newContent)
+                        } else Pair(emptyMap(), emptyMap())
+                        val lineDiffs = newLineDiffs.filter { it.value != LineChangeType.Unchanged }
+                        val oldDiffsFiltered = oldLineDiffs.filter { it.value != LineChangeType.Unchanged }
+
+                        // 当前修改索引
+                        var currentIndex by remember(path, reviewState) {
+                            mutableIntStateOf(reviewState?.currentBlockIndex ?: 0)
                         }
-                        // 当前修改索引状态（每个文件独立）
-                        var currentChangeIndex by remember(path, pending) { mutableIntStateOf(0) }
-                        // 确保索引在有效范围内
-                        LaunchedEffect(changeLines.size) {
-                            if (currentChangeIndex >= changeLines.size) {
-                                currentChangeIndex = 0
+
+                        // 确保索引有效
+                        val totalBlocks = reviewState?.totalCount ?: 0
+                        LaunchedEffect(totalBlocks) {
+                            if (currentIndex >= totalBlocks && totalBlocks > 0) {
+                                currentIndex = totalBlocks - 1
                             }
                         }
+
                         CodeEditor(
-                            text = if (pending != null) TextFieldValue(pending.newContent) else tfv,
-                            onTextChange = { if (pending == null) editorContent[path] = it },
+                            text = TextFieldValue(displayText),
+                            onTextChange = { if (reviewState == null) editorContent[path] = it },
                             modifier = Modifier.fillMaxSize(),
                             lineDiffs = lineDiffs,
-                            originalContent = pending?.originalContent,
-                            pendingFilePath = if (pending != null) path else null,
-                            onAcceptChanges = { acceptEdit(path) },
-                            onRejectChanges = { rejectEdit(path) },
+                            oldLineDiffs = oldDiffsFiltered,
+                            originalContent = reviewState?.oldContent,
+                            reviewState = reviewState,
+                            pendingFilePath = if (reviewState != null) path else null,
+                            showReviewPanel = showPanel,
+                            onToggleReviewPanel = { toggleReviewPanel(path) },
+                            // 修改块级别操作
+                            onAcceptBlock = { blockIndex -> acceptChangeBlock(path, blockIndex) },
+                            onRejectBlock = { blockIndex -> rejectChangeBlock(path, blockIndex) },
+                            onNavigateToBlock = { blockIndex ->
+                                currentIndex = blockIndex
+                                navigateToBlock(path, blockIndex)
+                            },
+                            // 导航操作
                             onJumpToPrevChange = {
-                                if (changeLines.isNotEmpty()) {
-                                    currentChangeIndex = if (currentChangeIndex > 0) currentChangeIndex - 1 else changeLines.size - 1
+                                reviewState?.let { state ->
+                                    val prev = state.prevPendingIndex()
+                                    if (prev >= 0) {
+                                        currentIndex = prev
+                                        navigateToBlock(path, prev)
+                                    }
                                 }
                             },
                             onJumpToNextChange = {
-                                if (changeLines.isNotEmpty()) {
-                                    currentChangeIndex = if (currentChangeIndex < changeLines.size - 1) currentChangeIndex + 1 else 0
+                                reviewState?.let { state ->
+                                    val next = state.nextPendingIndex()
+                                    if (next >= 0) {
+                                        currentIndex = next
+                                        navigateToBlock(path, next)
+                                    }
                                 }
                             },
-                            currentChangeIndex = currentChangeIndex,
-                            totalChanges = changeLines.size,
+                            // 全部接受/拒绝（兼容旧接口）
+                            onAcceptChanges = { acceptAllChanges(path) },
+                            onRejectChanges = { rejectAllChanges(path) },
+                            currentChangeIndex = currentIndex,
+                            totalChanges = totalBlocks,
                             onCursorChange = { line -> chatViewModel.setActiveFileContext(path, line) },
                         )
                     },
