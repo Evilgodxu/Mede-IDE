@@ -553,9 +553,6 @@ fun HomeScreen(
                 MainContentArea(
                     onOpenFolder = { folderPickerLauncher.launch(null) },
                     chatViewModel = chatViewModel,
-                    onBrowseModelFile = {
-                        filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*"))
-                    },
                     openedFolderName = homeState.openedFolderName,
                     recentFolderName = recentFolderName,
                     onOpenRecentFolder = { folderPickerLauncher.launch(null) },

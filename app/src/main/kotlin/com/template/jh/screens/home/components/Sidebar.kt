@@ -58,12 +58,7 @@ fun Sidebar(
                 onClick = { onTabClick(SidebarTab.Explorer) }
             )
 
-            SidebarItem(
-                icon = Icons.Default.CheckCircle,
-                contentDescription = "任务清单",
-                isSelected = selectedTab == SidebarTab.Tasks,
-                onClick = { onTabClick(SidebarTab.Tasks) }
-            )
+            // 任务清单侧边栏项已移除
 
             SidebarItem(
                 icon = Icons.Default.Search,

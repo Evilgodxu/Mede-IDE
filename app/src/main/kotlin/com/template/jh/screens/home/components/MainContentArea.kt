@@ -59,7 +59,6 @@ import com.template.jh.screens.home.TabType
 fun MainContentArea(
     onOpenFolder: () -> Unit = {},
     chatViewModel: ChatViewModel? = null,
-    onBrowseModelFile: () -> Unit = {},
     openedFolderName: String? = null,
     recentFolderName: String? = null,
     onOpenRecentFolder: () -> Unit = {},
@@ -130,7 +129,6 @@ fun MainContentArea(
                         SettingsPane(
                             modifier = Modifier.fillMaxSize(),
                             chatViewModel = chatViewModel,
-                            onBrowseModelFile = onBrowseModelFile,
                         )
                     }
                     TabType.File -> {

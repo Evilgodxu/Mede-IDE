@@ -83,7 +83,6 @@ import com.template.jh.core.ai.EngineStatus
 import com.template.jh.core.ai.LiteRTManager
 import com.template.jh.core.ai.ModelParams
 import com.template.jh.data.model.McpServer
-import com.template.jh.data.model.NotificationSettings
 import com.template.jh.data.model.Rule
 import com.template.jh.data.model.RuleType
 import com.template.jh.data.model.SkillItem
@@ -98,7 +97,6 @@ enum class SettingsCategory(val labelResId: Int) {
     MCP(R.string.settings_category_mcp),
     Skill(R.string.settings_category_skill),
     Model(R.string.settings_category_model),
-    Conversation(R.string.settings_category_conversation),
     Rules(R.string.settings_category_rules)
 }
 
@@ -108,7 +106,6 @@ fun SettingsPane(
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = koinViewModel(),
     chatViewModel: ChatViewModel? = null,
-    onBrowseModelFile: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
     var selectedCategory by remember { mutableStateOf(SettingsCategory.General) }
@@ -134,8 +131,7 @@ fun SettingsPane(
                 onSetThemeMode = { viewModel.setThemeMode(it) }, onSetLanguage = { viewModel.setLanguage(it) },
                 onSetRules = { viewModel.setRules(it) }, onSetSkills = { viewModel.setSkills(it) },
                 onSetMcpServers = { viewModel.setMcpServers(it) },
-                onSetNotificationSettings = { viewModel.setNotificationSettings(it) },
-                chatViewModel = chatViewModel, onBrowseModelFile = onBrowseModelFile,
+                chatViewModel = chatViewModel,
             )
         }
     }
@@ -158,8 +154,7 @@ private fun SettingsCategoryContent(
     category: SettingsCategory, state: HomeUiState, onSetThemeMode: (String) -> Unit, onSetLanguage: (String) -> Unit,
     onSetRules: (List<Rule>) -> Unit,
     onSetSkills: (List<SkillItem>) -> Unit, onSetMcpServers: (List<McpServer>) -> Unit,
-    onSetNotificationSettings: (NotificationSettings) -> Unit,
-    chatViewModel: ChatViewModel?, onBrowseModelFile: () -> Unit,
+    chatViewModel: ChatViewModel?,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -177,20 +172,16 @@ private fun SettingsCategoryContent(
                     GeneralSettingsCard(Modifier.fillMaxWidth())
                 }
             }
-            SettingsCategory.Model -> ModelSettingsContent(chatViewModel, onBrowseModelFile)
+            SettingsCategory.Model -> ModelSettingsContent(chatViewModel)
             SettingsCategory.Skill -> SkillsSettingsContent(state.skills, onSetSkills)
             SettingsCategory.MCP -> McpSettingsContent(state.mcpServers, onSetMcpServers)
-            SettingsCategory.Conversation -> {
-                // 对话设置已简化，仅保留通知设置
-                NotificationSettingsContent(state.notificationSettings, onSetNotificationSettings)
-            }
             SettingsCategory.Rules -> RulesSettingsContent(state.rules, onSetRules)
         }
     }
 }
 
 @Composable
-private fun ModelSettingsContent(chatViewModel: ChatViewModel?, onBrowseModelFile: () -> Unit) {
+private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
     if (chatViewModel == null) { CategoryPlaceholder("模型管理不可用"); return }
     val chatState by chatViewModel.state.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -224,78 +215,46 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?, onBrowseModelFil
             }
         }
 
-        // 当前状态
-        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("当前模型状态", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    when (chatState.engineStatus) {
-                        EngineStatus.Idle -> {
-                            Icon(Icons.Default.Error, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.width(8.dp))
-                            Text("未加载模型", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        EngineStatus.Loading -> {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("加载中: ${chatState.modelName}", style = MaterialTheme.typography.bodyMedium)
-                        }
-                        EngineStatus.Ready -> {
-                            Icon(Icons.Default.CheckCircle, null, Modifier.size(16.dp), tint = Color(0xFF4CAF50))
-                            Spacer(Modifier.width(8.dp))
-                            Text(chatState.modelName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                        }
-                        EngineStatus.Error -> {
-                            Icon(Icons.Default.Error, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
-                            Spacer(Modifier.width(8.dp))
-                            Text(chatState.engineErrorMessage.ifEmpty { "加载失败" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
+        // 模型参数（可折叠）
+        var isParamsExpanded by remember { mutableStateOf(false) }
+        Card(
+            modifier = Modifier.fillMaxWidth().clickable { isParamsExpanded = !isParamsExpanded },
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Text("模型参数", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    Icon(
+                        imageVector = if (isParamsExpanded) Icons.Default.ArrowDropDown else Icons.Default.ArrowDropDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp).let { if (!isParamsExpanded) it else it }
+                    )
+                }
+
+                if (isParamsExpanded) {
+                    // topK
+                    Text("Top-K: $topK", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Slider(value = topK.toFloat(), onValueChange = { topK = it.toInt() }, valueRange = 1f..100f, steps = 98, modifier = Modifier.fillMaxWidth())
+
+                    // topP
+                    Text("Top-P: ${"%.2f".format(topP)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Slider(value = topP, onValueChange = { topP = it }, valueRange = 0f..1f, modifier = Modifier.fillMaxWidth())
+
+                    // temperature
+                    Text("Temperature: ${"%.2f".format(temperature)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Slider(value = temperature, onValueChange = { temperature = it }, valueRange = 0f..2f, modifier = Modifier.fillMaxWidth())
+
+                    // seed
+                    Text("Seed: $seed (0=随机)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Slider(value = seed.toFloat(), onValueChange = { seed = it.toInt() }, valueRange = 0f..9999f, steps = 9998, modifier = Modifier.fillMaxWidth())
+
+                    Button(onClick = {
+                        val params = ModelParams(topK = topK, topP = topP.toDouble(), temperature = temperature.toDouble(), seed = seed)
+                        chatViewModel.setModelParams(params)
+                    }, modifier = Modifier.fillMaxWidth()) {
+                        Text("应用参数")
                     }
                 }
-            }
-        }
-
-        // 模型参数
-        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("模型参数", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-
-                // topK
-                Text("Top-K: $topK", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Slider(value = topK.toFloat(), onValueChange = { topK = it.toInt() }, valueRange = 1f..100f, steps = 98, modifier = Modifier.fillMaxWidth())
-
-                // topP
-                Text("Top-P: ${"%.2f".format(topP)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Slider(value = topP, onValueChange = { topP = it }, valueRange = 0f..1f, modifier = Modifier.fillMaxWidth())
-
-                // temperature
-                Text("Temperature: ${"%.2f".format(temperature)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Slider(value = temperature, onValueChange = { temperature = it }, valueRange = 0f..2f, modifier = Modifier.fillMaxWidth())
-
-                // seed
-                Text("Seed: $seed (0=随机)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Slider(value = seed.toFloat(), onValueChange = { seed = it.toInt() }, valueRange = 0f..9999f, steps = 9998, modifier = Modifier.fillMaxWidth())
-
-                Button(onClick = {
-                    val params = ModelParams(topK = topK, topP = topP.toDouble(), temperature = temperature.toDouble(), seed = seed)
-                    chatViewModel.setModelParams(params)
-                }, modifier = Modifier.fillMaxWidth()) {
-                    Text("应用参数")
-                }
-            }
-        }
-
-        // 操作按钮
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onBrowseModelFile, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Default.FolderOpen, null, Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("浏览文件")
-            }
-            OutlinedButton(onClick = { chatViewModel.scanModels() }, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("扫描设备")
             }
         }
 
@@ -418,12 +377,9 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
 
     Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("云端大模型", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                Switch(checked = chatState.cloudModelEnabled, onCheckedChange = { chatViewModel.setCloudModelEnabled(it) })
-            }
+            Text("云端大模型", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
 
-            Text("接入 OpenAI 兼容 API（DeepSeek、OpenAI、智谱AI 等），可添加多个配置并自由切换。",
+            Text("接入 OpenAI 兼容 API（DeepSeek、OpenAI、智谱AI 等），可添加多个配置并自由切换。在主界面顶部栏模型切换按钮中启用。", 
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             // 添加配置按钮
@@ -1204,81 +1160,6 @@ private fun McpSettingsContent(
             },
             dismissButton = { OutlinedButton(onClick = { showDialog = false }) { Text("取消") } },
         )
-    }
-}
-
-@Composable
-private fun NotificationSettingsContent(
-    settings: NotificationSettings,
-    onSetNotificationSettings: (NotificationSettings) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            "配置对话流中的通知行为：任务完成、异常打断、等待用户操作时的音效和弹出提示",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        // 任务完成
-        NotificationToggleCard(
-            title = "任务完成",
-            description = "AI 生成内容完成时通知",
-            soundChecked = settings.taskCompletedSound,
-            popupChecked = settings.taskCompletedPopup,
-            onSoundChange = { onSetNotificationSettings(settings.copy(taskCompletedSound = it)) },
-            onPopupChange = { onSetNotificationSettings(settings.copy(taskCompletedPopup = it)) },
-        )
-
-        // 任务失败
-        NotificationToggleCard(
-            title = "异常打断",
-            description = "任务执行异常或被打断时通知",
-            soundChecked = settings.taskFailedSound,
-            popupChecked = settings.taskFailedPopup,
-            onSoundChange = { onSetNotificationSettings(settings.copy(taskFailedSound = it)) },
-            onPopupChange = { onSetNotificationSettings(settings.copy(taskFailedPopup = it)) },
-        )
-
-        // 等待用户操作
-        NotificationToggleCard(
-            title = "等待用户授权",
-            description = "需要用户确认操作时通知",
-            soundChecked = settings.waitingUserActionSound,
-            popupChecked = settings.waitingUserActionPopup,
-            onSoundChange = { onSetNotificationSettings(settings.copy(waitingUserActionSound = it)) },
-            onPopupChange = { onSetNotificationSettings(settings.copy(waitingUserActionPopup = it)) },
-        )
-    }
-}
-
-@Composable
-private fun NotificationToggleCard(
-    title: String,
-    description: String,
-    soundChecked: Boolean,
-    popupChecked: Boolean,
-    onSoundChange: (Boolean) -> Unit,
-    onPopupChange: (Boolean) -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-    ) {
-        Column(Modifier.padding(12.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("音效", style = MaterialTheme.typography.labelSmall)
-                    androidx.compose.material3.Switch(checked = soundChecked, onCheckedChange = onSoundChange)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("弹出提示", style = MaterialTheme.typography.labelSmall)
-                    androidx.compose.material3.Switch(checked = popupChecked, onCheckedChange = onPopupChange)
-                }
-            }
-        }
     }
 }
 

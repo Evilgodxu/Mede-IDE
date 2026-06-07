@@ -152,15 +152,7 @@ fun AIChatPanel(
 
         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-        // 任务清单面板（始终可打开）
-        if (state.isTaskListOpen) {
-            TaskListPanel(
-                tasks = state.taskList,
-                fileChanges = state.fileChanges,
-                onClearCompleted = { viewModel.clearCompletedTasks() },
-                onDismiss = { viewModel.toggleTaskList() },
-            )
-        }
+        // 任务清单面板已移除
 
         if (state.messages.isEmpty() && state.engineStatus != EngineStatus.Loading) {
             Box(modifier = Modifier.weight(1f)) { EmptyChatState(state.engineStatus) }
