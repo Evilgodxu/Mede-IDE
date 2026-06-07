@@ -5,7 +5,7 @@ import com.template.jh.data.model.TaskItem
 import java.util.UUID
 
 // 文件操作类型
-enum class FileOpType { Create, Modify, Delete }
+enum class FileOpType { Create, Modify, Delete, Overwrite }
 
 // 文件操作元数据（嵌入 ChatMessage 用于渲染操作卡片）
 data class FileOperationMeta(
@@ -89,9 +89,8 @@ data class ChatUiState(
     val thinkingRounds: Int = 2,
     // 云端模型
     val cloudModelEnabled: Boolean = false,
-    val cloudApiEndpoint: String = "https://api.openai.com/v1",
-    val cloudApiKey: String = "",
-    val cloudModelName: String = "gpt-4o",
+    val cloudModelProfiles: List<CloudModelProfile> = emptyList(),
+    val activeCloudProfileId: String = "",
     // 当前打开的文件路径列表
     val openedFilePaths: List<String> = emptyList(),
     // 自动上下文

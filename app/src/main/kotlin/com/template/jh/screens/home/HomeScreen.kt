@@ -4,6 +4,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -76,6 +77,8 @@ fun HomeScreen(
     val workspaceRoot = remember { File(context.filesDir, "workspace") }
     // 相对路径 → content:// URI 缓存（SAF findFile 可能找不到隐藏文件，直接用原始 URI 读取）
     val relativeToContentUri = remember { mutableMapOf<String, String>() }
+    // 关闭 tab 前确认保存对话框
+    var closeConfirmPath by remember { mutableStateOf<String?>(null) }
 
     // SAF content:// 路径 → 相对于项目根目录的路径
     fun safPathToRelative(safPath: String): String {
@@ -195,6 +198,13 @@ fun HomeScreen(
         val tfv = TextFieldValue(readFileFromSource(path))
         editorContent[path] = tfv
         return tfv
+    }
+
+    // 检查文件是否已被修改（与原始文件内容比较）
+    fun isFileModified(path: String): Boolean {
+        val current = editorContent[path]?.text ?: return false
+        val original = readFileFromSource(path)
+        return current != original
     }
 
     // 保存文件（通过 SAF 相对路径或 workspaceRoot 兜底）
@@ -367,11 +377,15 @@ fun HomeScreen(
                 engineStatus = chatState.engineStatus,
                 modelName = chatState.modelName,
                 availableModels = chatState.availableModels,
+                cloudProfiles = chatState.cloudModelProfiles,
+                activeCloudProfileId = chatState.activeCloudProfileId,
+                cloudModelEnabled = chatState.cloudModelEnabled,
                 onScanModels = { chatViewModel.scanModels() },
                 onLoadModel = { chatViewModel.loadModel(it) },
                 onBrowseModelFile = {
                     filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*"))
                 },
+                onSwitchCloudProfile = { chatViewModel.switchCloudProfile(it) },
                 onTerminalClick = { isTerminalVisible = !isTerminalVisible },
                 onCloseFolder = closeFolder,
                 onNewFile = { showNewFileDialog = true; newFileName = "" },
@@ -455,6 +469,8 @@ fun HomeScreen(
                         val tab = tabs.getOrNull(idx) ?: return@MainContentArea
                         if (tab.id == settingsTabId) {
                             closeSettingsTab()
+                        } else if (tab.type == TabType.File && isFileModified(tab.id)) {
+                            closeConfirmPath = tab.id
                         } else {
                             tabs.removeAt(idx)
                             activeTabIndex = when {
@@ -579,6 +595,50 @@ fun HomeScreen(
             dismissButton = {
                 TextButton(onClick = { showNewFolderDialog = false }) {
                     Text(stringResource(R.string.chat_cancel))
+                }
+            },
+        )
+    }
+
+    // 关闭前确认保存对话框
+    closeConfirmPath?.let { path ->
+        val tabTitle = tabs.find { it.id == path }?.title ?: path
+        AlertDialog(
+            onDismissRequest = { closeConfirmPath = null },
+            title = { Text("文件已修改") },
+            text = { Text("「${tabTitle}」已被修改，是否保存更改？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    saveFile(path)
+                    closeConfirmPath = null
+                    val idx = tabs.indexOfFirst { it.id == path }
+                    if (idx >= 0) {
+                        tabs.removeAt(idx)
+                        activeTabIndex = when {
+                            tabs.isEmpty() -> -1
+                            activeTabIndex >= tabs.size -> tabs.size - 1
+                            else -> activeTabIndex.coerceIn(0, tabs.size - 1)
+                        }
+                        saveFileTabs()
+                    }
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        closeConfirmPath = null
+                        val idx = tabs.indexOfFirst { it.id == path }
+                        if (idx >= 0) {
+                            tabs.removeAt(idx)
+                            activeTabIndex = when {
+                                tabs.isEmpty() -> -1
+                                activeTabIndex >= tabs.size -> tabs.size - 1
+                                else -> activeTabIndex.coerceIn(0, tabs.size - 1)
+                            }
+                            saveFileTabs()
+                        }
+                    }) { Text("不保存") }
+                    TextButton(onClick = { closeConfirmPath = null }) { Text(stringResource(R.string.chat_cancel)) }
                 }
             },
         )

@@ -67,13 +67,15 @@ class AIToolSet(private val context: Context) : ToolSet {
                 val parentPath = path.substringBeforeLast('/')
                 if (parentPath.isNotEmpty() && parentPath != path) ensureSafDir(uri, parentPath)
                 val existing = resolveSafChild(uri, path)
-                val targetUri = if (existing != null) existing
+                val isOverwrite = existing != null
+                val targetUri = if (isOverwrite) existing
                     else createSafFile(uri, path)
                 if (targetUri == null) return "Failed to create file: $path"
                 context.contentResolver.openOutputStream(targetUri, "wt")?.use { out ->
                     out.write(content.toByteArray(Charsets.UTF_8))
                 } ?: return "Failed to write file: $path"
-                FileOperationEvents.notify(path, "create", content.lines().size, newContent = content)
+                val opName = if (isOverwrite) "overwrite" else "create"
+                FileOperationEvents.notify(path, opName, content.lines().size, newContent = content)
                 return "File written: $path (${content.lines().size} lines)"
             } catch (e: Exception) {
                 return "Failed to write file: ${e.message}"

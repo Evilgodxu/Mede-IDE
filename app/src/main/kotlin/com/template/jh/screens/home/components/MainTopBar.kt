@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.window.core.layout.WindowSizeClass
 import com.template.jh.R
+import com.template.jh.core.ai.CloudModelProfile
 import com.template.jh.core.ai.EngineStatus
 import com.template.jh.core.ai.ModelInfo
 
@@ -64,9 +65,13 @@ fun MainTopBar(
     engineStatus: EngineStatus = EngineStatus.Idle,
     modelName: String = "",
     availableModels: List<ModelInfo> = emptyList(),
+    cloudProfiles: List<CloudModelProfile> = emptyList(),
+    activeCloudProfileId: String = "",
+    cloudModelEnabled: Boolean = false,
     onScanModels: () -> Unit = {},
     onLoadModel: (String) -> Unit = {},
     onBrowseModelFile: () -> Unit = {},
+    onSwitchCloudProfile: (String) -> Unit = {},
     onTerminalClick: () -> Unit = {},
     onCloseFolder: () -> Unit = {},
     onNewFile: () -> Unit = {},
@@ -397,7 +402,7 @@ fun MainTopBar(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .clickable { modelMenuExpanded = true }
+                            .clickable { modelMenuExpanded = true; onScanModels() }
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         ModelStatusDot(engineStatus)
@@ -451,19 +456,6 @@ fun MainTopBar(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Refresh, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(stringResource(R.string.model_scan_device), style = MaterialTheme.typography.labelMedium)
-                                }
-                            },
-                            onClick = {
-                                modelMenuExpanded = false
-                                onScanModels()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.FolderOpen, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Spacer(Modifier.width(8.dp))
                                     Text(stringResource(R.string.model_browse_file_btn), style = MaterialTheme.typography.labelMedium)
@@ -477,6 +469,9 @@ fun MainTopBar(
                         // 可用模型列表
                         if (availableModels.isNotEmpty()) {
                             HorizontalDivider()
+                            Text("本地模型", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
                             availableModels.forEach { model ->
                                 val isActive = modelName == model.name || (modelName.isBlank() && engineStatus == EngineStatus.Loading)
                                 DropdownMenuItem(
@@ -517,6 +512,49 @@ fun MainTopBar(
                                 onClick = { },
                                 enabled = false,
                             )
+                        }
+                        // 云端模型配置列表
+                        if (cloudProfiles.isNotEmpty()) {
+                            HorizontalDivider()
+                            Text("云端模型", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                            cloudProfiles.forEach { profile ->
+                                val isActiveCloud = cloudModelEnabled && profile.id == activeCloudProfileId
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(
+                                                text = profile.name.ifEmpty { profile.modelName },
+                                                style = MaterialTheme.typography.labelMedium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                text = profile.modelName,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        modelMenuExpanded = false
+                                        onSwitchCloudProfile(profile.id)
+                                    },
+                                    trailingIcon = {
+                                        if (isActiveCloud) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }
                 }

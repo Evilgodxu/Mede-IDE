@@ -58,6 +58,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.template.jh.R
 import com.template.jh.screens.home.FileItem
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 // 资源管理器面板
 @Composable
@@ -373,91 +375,20 @@ private fun FileTreeItem(
             Column {
                 val cached = childrenCache[item.uri.toString()]
                 if (cached != null) {
-                    if (cached.isNotEmpty() && cached.all { it.isDirectory }) {
-                        // ===== 紧凑模式：所有子项都是目录，压缩为一条路径 =====
-                        val pathText = cached.joinToString("/") { it.name }
-                        val lastDir = cached.last()
-                        var compactOpen by remember(lastDir.uri) { mutableStateOf(false) }
-                        var compactLoading by remember(lastDir.uri) { mutableStateOf(false) }
-                        var compactChildren by remember { mutableStateOf<List<FileItem>?>(null) }
-
-                        // 展开时加载最后一个目录的子项
-                        LaunchedEffect(compactOpen) {
-                            if (compactOpen && compactChildren == null) {
-                                compactLoading = true
-                                onListChildren(lastDir.uri) { children ->
-                                    compactChildren = children
-                                    compactLoading = false
-                                }
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 28.dp)
-                                .combinedClickable(
-                                    onClick = {
-                                        if (!compactLoading) compactOpen = !compactOpen
-                                    },
-                                    onLongClick = { showContextMenu = true },
-                                )
-                                .padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Spacer(Modifier.width(((depth + 1) * 16).dp))
-
-                            if (compactLoading) {
-                                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = MaterialTheme.colorScheme.primary)
-                            } else {
-                                Icon(
-                                    Icons.Default.ChevronRight,
-                                    if (compactOpen) "折叠" else "展开",
-                                    Modifier.size(14.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-
-                            Spacer(Modifier.width(4.dp))
-                            Icon(
-                                Icons.Default.Folder,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.primary,
+                    cached.forEach { child ->
+                        if (child.isDirectory) {
+                            DirTreeItem(
+                                item = child,
+                                depth = depth + 1,
+                                autoExpandedUris = drillDownUris,
+                                onListChildren = onListChildren,
+                                onFileClick = onFileClick,
+                                onAddToConversation = onAddToConversation,
+                                onRenameRequest = onRenameRequest,
+                                onDelete = onDelete,
+                                onCreateRequest = onCreateRequest,
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = pathText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-
-                        // 紧凑路径展开后的实际内容
-                        AnimatedVisibility(visible = compactOpen) {
-                            Column {
-                                if (compactChildren != null) {
-                                    compactChildren!!.forEach { child ->
-                                        FileTreeItem(
-                                            item = child,
-                                            depth = depth + 2,
-                                            onListChildren = onListChildren,
-                                            onFileClick = onFileClick,
-                                            onAddToConversation = onAddToConversation,
-                                            onRenameRequest = onRenameRequest,
-                                            onDelete = onDelete,
-                                            onCreateRequest = onCreateRequest,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // ===== 正常模式：逐个渲染子项 =====
-                        cached.forEach { child ->
+                        } else {
                             FileTreeItem(
                                 item = child,
                                 depth = depth + 1,
@@ -497,7 +428,6 @@ private fun startDrill(
     }
     step(uri)
     if (drillUris.isEmpty()) {
-        // 尚未缓存，加载一次
         onListChildren(uri) { children ->
             cache[uri.toString()] = children
             if (children.isNotEmpty() && children.all { it.isDirectory }) {
@@ -509,6 +439,191 @@ private fun startDrill(
         }
     } else {
         onResult(drillUris)
+    }
+}
+
+// 目录项：自动检测单链条并压缩显示
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DirTreeItem(
+    item: FileItem,
+    depth: Int,
+    autoExpandedUris: Set<String> = emptySet(),
+    onListChildren: (Uri, (List<FileItem>) -> Unit) -> Unit,
+    onFileClick: (FileItem) -> Unit = {},
+    onAddToConversation: (FileItem) -> Unit = {},
+    onRenameRequest: (FileItem) -> Unit = {},
+    onDelete: (Uri) -> Unit = {},
+    onCreateRequest: (FileItem, Boolean) -> Unit = { _, _ -> },
+) {
+    val context = LocalContext.current
+
+    suspend fun loadChildren(uri: Uri): List<FileItem> = suspendCancellableCoroutine { cont ->
+        onListChildren(uri) { result -> cont.resume(result) }
+    }
+
+    var displayPath by remember { mutableStateOf<String?>(null) }
+    var leafItem by remember { mutableStateOf(item) }
+    var isOpen by remember { mutableStateOf(false) }
+    var leafChildren by remember { mutableStateOf<List<FileItem>?>(null) }
+    var leafLoading by remember { mutableStateOf(false) }
+    var showContextMenu by remember { mutableStateOf(false) }
+
+    // 递归解析完整链条
+    LaunchedEffect(item.uri) {
+        val firstLevel = loadChildren(item.uri)
+        if (firstLevel.isEmpty() || firstLevel.any { !it.isDirectory }) {
+            displayPath = ""
+            return@LaunchedEffect
+        }
+        val names = mutableListOf(item.name)
+        var cur = item
+        var curChildren = firstLevel
+        while (curChildren.isNotEmpty() && curChildren.all { it.isDirectory }) {
+            if (cur != item) names.add(cur.name)
+            if (curChildren.size == 1) {
+                cur = curChildren[0]
+                curChildren = loadChildren(cur.uri)
+            } else {
+                break // 多个同级目录，在此停止链条
+            }
+        }
+        names.removeAt(0)
+        leafItem = cur
+        displayPath = names.joinToString("/")
+    }
+
+    // 展开时加载叶子层的子项
+    LaunchedEffect(isOpen, leafItem) {
+        if (isOpen && leafChildren == null) {
+            leafLoading = true
+            onListChildren(leafItem.uri) { result ->
+                leafChildren = result
+                leafLoading = false
+            }
+        }
+    }
+
+    if (displayPath == "") {
+        FileTreeItem(
+            item = item, depth = depth, autoExpandedUris = autoExpandedUris,
+            onListChildren = onListChildren, onFileClick = onFileClick,
+            onAddToConversation = onAddToConversation, onRenameRequest = onRenameRequest,
+            onDelete = onDelete, onCreateRequest = onCreateRequest,
+        )
+        return
+    }
+
+    if (displayPath == null) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 28.dp).padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (depth > 0) Spacer(Modifier.width((depth * 16).dp))
+            Spacer(Modifier.width(14.dp))
+            CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(10.dp))
+            Text(item.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface)
+        }
+        return
+    }
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 28.dp)
+                .combinedClickable(
+                    onClick = { if (!leafLoading) isOpen = !isOpen },
+                    onLongClick = { showContextMenu = true },
+                )
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (depth > 0) Spacer(Modifier.width((depth * 16).dp))
+
+            if (leafLoading) {
+                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = MaterialTheme.colorScheme.primary)
+            } else {
+                Icon(Icons.Default.ChevronRight, if (isOpen) "折叠" else "展开", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.Default.Folder, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = displayPath ?: item.name,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+
+            Box {
+                DropdownMenu(expanded = showContextMenu, onDismissRequest = { showContextMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("打开文件夹") },
+                        onClick = { showContextMenu = false; onFileClick(item) },
+                        leadingIcon = { Icon(Icons.Default.OpenInNew, null, Modifier.size(16.dp)) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.add_to_conversation)) },
+                        onClick = { showContextMenu = false; onAddToConversation(item) },
+                        leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) },
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("新建文件") },
+                        onClick = { showContextMenu = false; onCreateRequest(item, false) },
+                        leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("新建目录") },
+                        onClick = { showContextMenu = false; onCreateRequest(item, true) },
+                        leadingIcon = { Icon(Icons.Default.Folder, null, Modifier.size(16.dp)) },
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("重命名") },
+                        onClick = { showContextMenu = false; onRenameRequest(item) },
+                        leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, null, Modifier.size(16.dp)) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("复制路径") },
+                        onClick = {
+                            showContextMenu = false
+                            val clip = ClipData.newPlainText("path", item.uri.toString())
+                            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+                        },
+                        leadingIcon = { Icon(Icons.Default.ContentCopy, null, Modifier.size(16.dp)) },
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("删除") },
+                        onClick = { showContextMenu = false; onDelete(item.uri) },
+                        leadingIcon = { Icon(Icons.Default.Delete, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error) },
+                    )
+                }
+            }
+        }
+
+        AnimatedVisibility(visible = isOpen && leafChildren != null) {
+            Column {
+                leafChildren?.forEach { child ->
+                    if (child.isDirectory) {
+                        DirTreeItem(
+                            item = child, depth = depth + 1,
+                            onListChildren = onListChildren, onFileClick = onFileClick,
+                            onAddToConversation = onAddToConversation, onRenameRequest = onRenameRequest,
+                            onDelete = onDelete, onCreateRequest = onCreateRequest,
+                        )
+                    } else {
+                        FileTreeItem(
+                            item = child, depth = depth + 1,
+                            onListChildren = onListChildren, onFileClick = onFileClick,
+                            onAddToConversation = onAddToConversation, onRenameRequest = onRenameRequest,
+                            onDelete = onDelete, onCreateRequest = onCreateRequest,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

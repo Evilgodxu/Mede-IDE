@@ -43,9 +43,8 @@ class UserPreferencesRepository(private val context: Context) {
         val OPENED_FILE_TABS = stringPreferencesKey("opened_file_tabs")
         // 云端模型
         val CLOUD_MODEL_ENABLED = booleanPreferencesKey("cloud_model_enabled")
-        val CLOUD_API_ENDPOINT = stringPreferencesKey("cloud_api_endpoint")
-        val CLOUD_API_KEY = stringPreferencesKey("cloud_api_key")
-        val CLOUD_MODEL_NAME = stringPreferencesKey("cloud_model_name")
+        val CLOUD_PROFILES_JSON = stringPreferencesKey("cloud_profiles_json")
+        val ACTIVE_CLOUD_PROFILE_ID = stringPreferencesKey("active_cloud_profile_id")
     }
 
     val themeMode: Flow<String> = context.dataStore.data
@@ -57,18 +56,30 @@ class UserPreferencesRepository(private val context: Context) {
     val modelName: Flow<String> = context.dataStore.data
         .map { it[PreferencesKeys.MODEL_NAME] ?: "" }
 
-    // 云端模型配置
+    // 云端模型配置（多 profile 支持）
     val cloudModelEnabled: Flow<Boolean> = context.dataStore.data
         .map { it[PreferencesKeys.CLOUD_MODEL_ENABLED] ?: false }
 
-    val cloudApiEndpoint: Flow<String> = context.dataStore.data
-        .map { it[PreferencesKeys.CLOUD_API_ENDPOINT] ?: "https://api.openai.com/v1" }
+    val cloudModelProfiles: Flow<List<com.template.jh.core.ai.CloudModelProfile>> = context.dataStore.data
+        .map { prefs ->
+            val json = prefs[PreferencesKeys.CLOUD_PROFILES_JSON] ?: return@map emptyList()
+            try {
+                val arr = JSONArray(json)
+                (0 until arr.length()).map { i ->
+                    val obj = arr.getJSONObject(i)
+                    com.template.jh.core.ai.CloudModelProfile(
+                        id = obj.optString("id", ""),
+                        name = obj.optString("name", ""),
+                        apiEndpoint = obj.optString("apiEndpoint", "https://api.openai.com/v1"),
+                        apiKey = obj.optString("apiKey", ""),
+                        modelName = obj.optString("modelName", "gpt-4o"),
+                    )
+                }
+            } catch (_: Exception) { emptyList() }
+        }
 
-    val cloudApiKey: Flow<String> = context.dataStore.data
-        .map { it[PreferencesKeys.CLOUD_API_KEY] ?: "" }
-
-    val cloudModelName: Flow<String> = context.dataStore.data
-        .map { it[PreferencesKeys.CLOUD_MODEL_NAME] ?: "gpt-4o" }
+    val activeCloudProfileId: Flow<String> = context.dataStore.data
+        .map { it[PreferencesKeys.ACTIVE_CLOUD_PROFILE_ID] ?: "" }
 
     val userName: Flow<String> = context.dataStore.data
         .map { it[PreferencesKeys.USER_NAME] ?: "" }
@@ -163,16 +174,24 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit { it[PreferencesKeys.CLOUD_MODEL_ENABLED] = enabled }
     }
 
-    suspend fun setCloudApiEndpoint(endpoint: String) {
-        context.dataStore.edit { it[PreferencesKeys.CLOUD_API_ENDPOINT] = endpoint }
+    suspend fun setCloudModelProfiles(profiles: List<com.template.jh.core.ai.CloudModelProfile>) {
+        context.dataStore.edit { prefs ->
+            val arr = JSONArray()
+            profiles.forEach { p ->
+                val obj = org.json.JSONObject()
+                obj.put("id", p.id)
+                obj.put("name", p.name)
+                obj.put("apiEndpoint", p.apiEndpoint)
+                obj.put("apiKey", p.apiKey)
+                obj.put("modelName", p.modelName)
+                arr.put(obj)
+            }
+            prefs[PreferencesKeys.CLOUD_PROFILES_JSON] = arr.toString()
+        }
     }
 
-    suspend fun setCloudApiKey(apiKey: String) {
-        context.dataStore.edit { it[PreferencesKeys.CLOUD_API_KEY] = apiKey }
-    }
-
-    suspend fun setCloudModelName(modelName: String) {
-        context.dataStore.edit { it[PreferencesKeys.CLOUD_MODEL_NAME] = modelName }
+    suspend fun setActiveCloudProfileId(id: String) {
+        context.dataStore.edit { it[PreferencesKeys.ACTIVE_CLOUD_PROFILE_ID] = id }
     }
 
     suspend fun setUserName(name: String) {

@@ -79,6 +79,7 @@ class ChatViewModel(
                 val opType = when (event.operation) {
                     "create" -> FileOpType.Create
                     "modify" -> FileOpType.Modify
+                    "overwrite" -> FileOpType.Overwrite
                     "delete" -> FileOpType.Delete
                     else -> return@collect
                 }
@@ -144,18 +145,13 @@ class ChatViewModel(
             }
         }
         viewModelScope.launch {
-            preferencesRepo.cloudApiEndpoint.collect { endpoint ->
-                _state.update { it.copy(cloudApiEndpoint = endpoint) }
+            preferencesRepo.cloudModelProfiles.collect { profiles ->
+                _state.update { it.copy(cloudModelProfiles = profiles) }
             }
         }
         viewModelScope.launch {
-            preferencesRepo.cloudApiKey.collect { key ->
-                _state.update { it.copy(cloudApiKey = key) }
-            }
-        }
-        viewModelScope.launch {
-            preferencesRepo.cloudModelName.collect { name ->
-                _state.update { it.copy(cloudModelName = name) }
+            preferencesRepo.activeCloudProfileId.collect { id ->
+                _state.update { it.copy(activeCloudProfileId = id) }
             }
         }
     }
@@ -273,30 +269,12 @@ class ChatViewModel(
 
     fun setProjectRoot(uri: Uri?) { aiToolSet.projectUri = uri }
 
-    // 接收 HomeScreen 的打开文件列表，注入到 system prompt
+    // 接收 HomeScreen 的打开文件列表，供 UI 徽章展示
     fun setOpenedFilePaths(paths: List<String>) {
         _state.update { it.copy(openedFilePaths = paths) }
     }
 
-    // 构建当前打开文件的上下文文本（注入到每个用户消息前，不回显给用户）
-    private fun buildFileContext(): String {
-        val sb = StringBuilder()
-        val paths = _state.value.openedFilePaths
-        if (paths.isNotEmpty()) {
-            sb.append("[当前打开的文件]\n")
-            paths.forEach { p -> sb.append("- $p\n") }
-        }
-        val activeFile = _state.value.activeFilePath
-        if (activeFile.isNotBlank()) {
-            sb.append("当前活动文件: $activeFile")
-            val cursorLine = _state.value.cursorLine
-            if (cursorLine > 0) sb.append(" (光标在第${cursorLine}行)")
-            sb.append("\n")
-        }
-        return if (sb.isNotEmpty()) sb.toString() + "\n" else ""
-    }
-
-    // 自动上下文：活动文件 + 光标行号
+    // 自动上下文：活动文件 + 光标行号（UI 展示用）
     fun setActiveFileContext(path: String, cursorLine: Int) {
         _state.update { it.copy(activeFilePath = path, cursorLine = cursorLine) }
     }
@@ -397,21 +375,6 @@ class ChatViewModel(
             rules.forEach { r -> sb.append("\n- ${r.name}: ${r.content}") }
             sb.append("\n严格遵守以上规则。")
         }
-        // 注入当前打开的文件的路径（让模型感知用户正在浏览的内容）
-        val openPaths = _state.value.openedFilePaths
-        if (openPaths.isNotEmpty()) {
-            sb.append("\n\n## 用户当前打开的文件\n")
-            openPaths.forEach { p -> sb.append("- $p\n") }
-            sb.append("这些文件用户可能正在查看。回答问题时优先参考这些文件，必要时用 readFile 读取它们的内容。\n")
-        }
-        // 注入当前活动文件 + 行号（自动上下文）
-        val activeFile = _state.value.activeFilePath
-        if (activeFile.isNotBlank()) {
-            sb.append("\n当前活动文件: $activeFile")
-            val cursorLine = _state.value.cursorLine
-            if (cursorLine > 0) sb.append(" (光标在第${cursorLine}行)")
-            sb.append("\n")
-        }
         return sb.toString()
     }
 
@@ -481,10 +444,7 @@ class ChatViewModel(
             val conv = activeConversation ?: return
 
             // 每轮注入文件上下文（让模型感知当前打开的文件和活动文件）
-            val fileCtx = buildFileContext()
-            val sendInput = if (fileCtx.isNotEmpty()) fileCtx + nextInput.toString() else nextInput.toString()
-
-            conv.sendMessageAsync(sendInput).catch { t ->
+            conv.sendMessageAsync(nextInput.toString()).catch { t ->
                 copyCrashToClipboard("sendMessageAsync(round=$rounds)", t)
                 updateModelMessage(currentMsgId, "\n\n[错误: ${t.message}]", false)
                 updateTaskStatus(taskId, TaskStatus.Failed)
@@ -537,18 +497,25 @@ class ChatViewModel(
         text: String, msgId: String, taskId: String,
         ctx: Application, notif: com.template.jh.data.model.NotificationSettings,
     ) {
-        val cfg = CloudModelConfig(
-            enabled = true,
-            apiEndpoint = _state.value.cloudApiEndpoint,
-            apiKey = _state.value.cloudApiKey,
-            modelName = _state.value.cloudModelName,
-        )
-        if (cfg.apiKey.isBlank()) {
+        val profile = _state.value.cloudModelProfiles.find { it.id == _state.value.activeCloudProfileId }
+        if (profile == null) {
+            updateModelMessage(msgId, "\n\n[错误: 未选择云端模型配置]", false)
+            finalizeModelMessage(msgId)
+            updateTaskStatus(taskId, TaskStatus.Failed)
+            return
+        }
+        if (profile.apiKey.isBlank()) {
             updateModelMessage(msgId, "\n\n[错误: 未配置 API Key]", false)
             finalizeModelMessage(msgId)
             updateTaskStatus(taskId, TaskStatus.Failed)
             return
         }
+        val cfg = CloudModelConfig(
+            enabled = true,
+            apiEndpoint = profile.apiEndpoint,
+            apiKey = profile.apiKey,
+            modelName = profile.modelName,
+        )
 
         var currentMsgId = msgId
         var currentInput: String = text
@@ -623,24 +590,60 @@ class ChatViewModel(
     fun setCloudModelEnabled(enabled: Boolean) {
         viewModelScope.launch { preferencesRepo.setCloudModelEnabled(enabled) }
         if (!enabled) _state.update { it.copy(cloudModelEnabled = false) }
+        else _state.update { it.copy(cloudModelEnabled = true) }
     }
 
-    fun setCloudApiEndpoint(endpoint: String) {
-        viewModelScope.launch { preferencesRepo.setCloudApiEndpoint(endpoint) }
+    fun addCloudProfile(name: String, apiEndpoint: String, apiKey: String, modelName: String) {
+        val id = java.util.UUID.randomUUID().toString()
+        val newProfile = CloudModelProfile(
+            id = id,
+            name = name.ifEmpty { modelName },
+            apiEndpoint = apiEndpoint,
+            apiKey = apiKey,
+            modelName = modelName,
+        )
+        viewModelScope.launch {
+            val current = preferencesRepo.cloudModelProfiles.first()
+            val updated = current + newProfile
+            preferencesRepo.setCloudModelProfiles(updated)
+            if (updated.size == 1) {
+                preferencesRepo.setActiveCloudProfileId(id)
+            }
+        }
     }
 
-    fun setCloudApiKey(apiKey: String) {
-        viewModelScope.launch { preferencesRepo.setCloudApiKey(apiKey) }
+    fun removeCloudProfile(profileId: String) {
+        viewModelScope.launch {
+            val current = preferencesRepo.cloudModelProfiles.first()
+            val updated = current.filter { it.id != profileId }
+            preferencesRepo.setCloudModelProfiles(updated)
+            val activeId = preferencesRepo.activeCloudProfileId.first()
+            if (activeId == profileId) {
+                val newActive = updated.firstOrNull()?.id ?: ""
+                preferencesRepo.setActiveCloudProfileId(newActive)
+            }
+        }
     }
 
-    fun setCloudModelName(name: String) {
-        viewModelScope.launch { preferencesRepo.setCloudModelName(name) }
+    fun updateCloudProfile(profile: CloudModelProfile) {
+        viewModelScope.launch {
+            val current = preferencesRepo.cloudModelProfiles.first()
+            val updated = current.map { if (it.id == profile.id) profile else it }
+            preferencesRepo.setCloudModelProfiles(updated)
+        }
+    }
+
+    fun switchCloudProfile(profileId: String) {
+        viewModelScope.launch {
+            preferencesRepo.setActiveCloudProfileId(profileId)
+            preferencesRepo.setCloudModelEnabled(true)
+        }
     }
 
     fun verifyCloudConnection() {
-        val cfg = _state.value.let {
-            CloudModelConfig(true, it.cloudApiEndpoint, it.cloudApiKey, it.cloudModelName)
-        }
+        val profile = _state.value.cloudModelProfiles.find { it.id == _state.value.activeCloudProfileId }
+        if (profile == null) { _state.update { it.copy(engineErrorMessage = "未选择云端模型配置") }; return }
+        val cfg = CloudModelConfig(true, profile.apiEndpoint, profile.apiKey, profile.modelName)
         _state.update { it.copy(engineErrorMessage = "验证中…") }
         viewModelScope.launch {
             val result = cloudLLMClient.verifyConnection(cfg)

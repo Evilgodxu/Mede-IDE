@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,8 +22,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -40,7 +43,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TextButton
@@ -66,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.template.jh.R
 import com.template.jh.core.ai.ChatMessage
 import com.template.jh.core.ai.ChatRole
@@ -372,58 +375,83 @@ private fun ContextBadge(text: String) {
     }
 }
 
-// 文件操作卡片（精简单行 git-diff 风格）
+// 文件操作卡片
 @Composable
 private fun FileOperationCard(
     op: com.template.jh.core.ai.FileOperationMeta,
     onFileCardClick: ((String) -> Unit)?,
 ) {
-    val isDelete = op.opType == com.template.jh.core.ai.FileOpType.Delete
-    val prefix = when (op.opType) {
-        com.template.jh.core.ai.FileOpType.Create -> "+"
-        com.template.jh.core.ai.FileOpType.Modify -> "~"
-        com.template.jh.core.ai.FileOpType.Delete -> "-"
+    val opType = op.opType
+    val isDelete = opType == com.template.jh.core.ai.FileOpType.Delete
+    // 区分操作类型
+    val opLabel = when (opType) {
+        com.template.jh.core.ai.FileOpType.Create -> "创建"
+        com.template.jh.core.ai.FileOpType.Modify -> "修改"
+        com.template.jh.core.ai.FileOpType.Overwrite -> "覆盖"
+        com.template.jh.core.ai.FileOpType.Delete -> "删除"
     }
-    val prefixColor = when (op.opType) {
+    val opColor = when (opType) {
         com.template.jh.core.ai.FileOpType.Create -> Color(0xFF4CAF50)
-        com.template.jh.core.ai.FileOpType.Modify -> MaterialTheme.colorScheme.primary
-        com.template.jh.core.ai.FileOpType.Delete -> MaterialTheme.colorScheme.error
+        com.template.jh.core.ai.FileOpType.Modify -> Color(0xFF2196F3)
+        com.template.jh.core.ai.FileOpType.Overwrite -> Color(0xFFFF9800)
+        com.template.jh.core.ai.FileOpType.Delete -> Color(0xFFE53935)
     }
-    val lineInfo = if (!isDelete && op.lineChanges != 0) {
-        val diff = if (op.lineChanges > 0) "+${op.lineChanges}" else "${op.lineChanges}"
-        " ($diff)"
-    } else ""
+    val lineColor = when {
+        op.lineChanges > 0 -> Color(0xFF4CAF50)
+        op.lineChanges < 0 -> Color(0xFFE53935)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val linePrefix = if (op.lineChanges > 0) "+" else ""
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp, horizontal = 4.dp)
+            .padding(vertical = 3.dp, horizontal = 4.dp)
             .clickable { onFileCardClick?.invoke(op.filePath) },
-        colors = CardDefaults.cardColors(
-            containerColor = if (isDelete)
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-            else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
         shape = RoundedCornerShape(8.dp),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(
-                prefix,
-                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-                color = prefixColor,
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                op.filePath + lineInfo,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
+            // 文件路径 + 操作标签
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = op.filePath,
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = opLabel,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = opColor,
+                    modifier = Modifier
+                        .background(opColor.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+
+            // 行数变化信息（居中）
+            if (!isDelete && op.lineChanges != 0) {
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${linePrefix}${op.lineChanges}",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                        color = lineColor,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "行",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = lineColor,
+                    )
+                }
+            }
         }
     }
 }
@@ -460,19 +488,6 @@ private fun ChatInputBar(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (engineStatus == EngineStatus.Ready && isLoading) {
-                    // 生成中：暂停图标 + 加载动画
-                    IconButton(onClick = onCancel, Modifier.size(32.dp)) {
-                        Box(contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
-                            Icon(Icons.Default.Pause, stringResource(R.string.chat_cancel), Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                } else {
-                    IconButton(onClick = onSend, Modifier.size(32.dp), enabled = inputText.isNotBlank() && engineStatus == EngineStatus.Ready) {
-                        Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.ai_send_message), Modifier.size(20.dp), tint = if (inputText.isNotBlank() && engineStatus == EngineStatus.Ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
-                    }
-                }
                 // 上下文窗口进度按钮
                 val ratio = if (contextMaxTokens > 0) (contextUsedTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
                 Box(
@@ -492,6 +507,19 @@ private fun ChatInputBar(
                             else Color(0xFFE53935),
                         trackColor = Color(0xFFE0E0E0),
                     )
+                }
+                if (engineStatus == EngineStatus.Ready && isLoading) {
+                    // 生成中：暂停图标 + 加载动画
+                    IconButton(onClick = onCancel, Modifier.size(32.dp)) {
+                        Box(contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Pause, stringResource(R.string.chat_cancel), Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                } else {
+                    IconButton(onClick = onSend, Modifier.size(32.dp), enabled = inputText.isNotBlank() && engineStatus == EngineStatus.Ready) {
+                        Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.ai_send_message), Modifier.size(20.dp), tint = if (inputText.isNotBlank() && engineStatus == EngineStatus.Ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                    }
                 }
             }
         }
@@ -661,11 +689,22 @@ private fun ContextInfoDialog(
     onDismiss: () -> Unit,
 ) {
     val ratio = if (maxTokens > 0) (usedTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("上下文窗口", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .widthIn(min = 280.dp, max = 360.dp)
+                .heightIn(max = 400.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("上下文窗口", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
                 Box(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center,
@@ -690,7 +729,7 @@ private fun ContextInfoDialog(
                     }
                 }
                 HorizontalDivider()
-                Text("Token 用量", fontWeight = FontWeight.SemiBold)
+                Text("Token 用量", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
                 Text(
                     text = "$usedTokens / $maxTokens",
                     style = MaterialTheme.typography.bodySmall,
@@ -703,7 +742,7 @@ private fun ContextInfoDialog(
                 )
                 if (activeRulesCount > 0 || activeSkillsCount > 0) {
                     HorizontalDivider()
-                    Text("系统上下文", fontWeight = FontWeight.SemiBold)
+                    Text("系统上下文", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
                     if (activeRulesCount > 0) Text(
                         text = "活跃规则: $activeRulesCount 条",
                         style = MaterialTheme.typography.bodySmall,
@@ -717,7 +756,7 @@ private fun ContextInfoDialog(
                 }
                 if (openedFilePaths.isNotEmpty()) {
                     HorizontalDivider()
-                    Text("已打开文件", fontWeight = FontWeight.SemiBold)
+                    Text("已打开文件", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
                     openedFilePaths.take(5).forEach { path ->
                         Text(
                             text = path,
@@ -733,14 +772,15 @@ private fun ContextInfoDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                Spacer(Modifier.height(4.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) {
+                        Text("关闭")
+                    }
+                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("关闭")
-            }
-        },
-    )
+        }
+    }
 }
 
 @Composable
@@ -748,16 +788,19 @@ private fun FileChangeRow(change: com.template.jh.core.ai.FileChangeItem) {
     val icon = when (change.opType) {
         com.template.jh.core.ai.FileOpType.Create -> Icons.Default.Add
         com.template.jh.core.ai.FileOpType.Modify -> Icons.Default.Refresh
+        com.template.jh.core.ai.FileOpType.Overwrite -> Icons.Default.Refresh
         com.template.jh.core.ai.FileOpType.Delete -> Icons.Default.Delete
     }
     val opLabel = when (change.opType) {
         com.template.jh.core.ai.FileOpType.Create -> "创建"
         com.template.jh.core.ai.FileOpType.Modify -> "修改"
+        com.template.jh.core.ai.FileOpType.Overwrite -> "覆盖"
         com.template.jh.core.ai.FileOpType.Delete -> "删除"
     }
     val tint = when (change.opType) {
         com.template.jh.core.ai.FileOpType.Create -> Color(0xFF4CAF50)
         com.template.jh.core.ai.FileOpType.Modify -> MaterialTheme.colorScheme.primary
+        com.template.jh.core.ai.FileOpType.Overwrite -> Color(0xFFFF9800)
         com.template.jh.core.ai.FileOpType.Delete -> MaterialTheme.colorScheme.error
     }
     val lineInfo = if (change.lineChanges != 0) {

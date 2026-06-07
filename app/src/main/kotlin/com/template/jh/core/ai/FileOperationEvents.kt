@@ -16,7 +16,7 @@ object FileOperationEvents {
 
 data class FileEvent(
     val path: String,
-    val operation: String, // create / modify / delete
+    val operation: String, // create / modify / delete / overwrite
     val lineChanges: Int = 0, // 行数变化
     val originalContent: String = "", // 修改前内容（用于 diff 和高亮）
     val newContent: String = "", // 修改后内容（用于 diff 和高亮）

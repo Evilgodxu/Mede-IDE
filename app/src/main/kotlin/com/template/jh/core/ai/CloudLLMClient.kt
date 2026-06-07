@@ -11,9 +11,18 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 
-// 云端大模型配置
+// 云端大模型配置（单个配置）
 data class CloudModelConfig(
     val enabled: Boolean = false,
+    val apiEndpoint: String = "https://api.openai.com/v1",
+    val apiKey: String = "",
+    val modelName: String = "gpt-4o",
+)
+
+// 云端模型配置档案（可保存多个，自由切换）
+data class CloudModelProfile(
+    val id: String = "",
+    val name: String = "",            // 用户自定义名称，如"DeepSeek V4"
     val apiEndpoint: String = "https://api.openai.com/v1",
     val apiKey: String = "",
     val modelName: String = "gpt-4o",
