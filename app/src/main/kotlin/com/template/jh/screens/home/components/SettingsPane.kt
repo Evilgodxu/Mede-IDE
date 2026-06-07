@@ -451,6 +451,7 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
     }
 }
 
+// 对话配置卡片 - IDE风格紧凑行内布局
 @Composable
 private fun GeneralSettingsCard(
     state: HomeUiState,
@@ -463,35 +464,57 @@ private fun GeneralSettingsCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("对话配置", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text("对话配置", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
 
             var modelName by remember(state) { mutableStateOf(state.modelName) }
-            OutlinedTextField(
-                value = modelName,
-                onValueChange = { modelName = it; onSetModelName(it) },
-                label = { Text("模型名称") },
-                placeholder = { Text("例如: Gemini 2.5 Pro") },
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                ),
-            )
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "AI 模型名称",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(96.dp),
+                )
+                OutlinedTextField(
+                    value = modelName,
+                    onValueChange = { modelName = it; onSetModelName(it) },
+                    placeholder = { Text("例如: Gemini 2.5 Pro", style = MaterialTheme.typography.bodySmall) },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                    ),
+                )
+            }
 
             var userName by remember(state) { mutableStateOf(state.userName) }
-            OutlinedTextField(
-                value = userName,
-                onValueChange = { userName = it; onSetUserName(it) },
-                label = { Text("用户名称") },
-                placeholder = { Text("你的名字") },
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                ),
-            )
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "用户名称",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(96.dp),
+                )
+                OutlinedTextField(
+                    value = userName,
+                    onValueChange = { userName = it; onSetUserName(it) },
+                    placeholder = { Text("你的名字", style = MaterialTheme.typography.bodySmall) },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                    ),
+                )
+            }
         }
     }
 }

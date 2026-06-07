@@ -373,18 +373,103 @@ private fun FileTreeItem(
             Column {
                 val cached = childrenCache[item.uri.toString()]
                 if (cached != null) {
-                    cached.forEach { child ->
-                        FileTreeItem(
-                            item = child,
-                            depth = depth + 1,
-                            autoExpandedUris = drillDownUris,
-                            onListChildren = onListChildren,
-                            onFileClick = onFileClick,
-                            onAddToConversation = onAddToConversation,
-                            onRenameRequest = onRenameRequest,
-                            onDelete = onDelete,
-                            onCreateRequest = onCreateRequest,
-                        )
+                    if (cached.isNotEmpty() && cached.all { it.isDirectory }) {
+                        // ===== 紧凑模式：所有子项都是目录，压缩为一条路径 =====
+                        val pathText = cached.joinToString("/") { it.name }
+                        val lastDir = cached.last()
+                        var compactOpen by remember(lastDir.uri) { mutableStateOf(false) }
+                        var compactLoading by remember(lastDir.uri) { mutableStateOf(false) }
+                        var compactChildren by remember { mutableStateOf<List<FileItem>?>(null) }
+
+                        // 展开时加载最后一个目录的子项
+                        LaunchedEffect(compactOpen) {
+                            if (compactOpen && compactChildren == null) {
+                                compactLoading = true
+                                onListChildren(lastDir.uri) { children ->
+                                    compactChildren = children
+                                    compactLoading = false
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 28.dp)
+                                .combinedClickable(
+                                    onClick = {
+                                        if (!compactLoading) compactOpen = !compactOpen
+                                    },
+                                    onLongClick = { showContextMenu = true },
+                                )
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Spacer(Modifier.width(((depth + 1) * 16).dp))
+
+                            if (compactLoading) {
+                                CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = MaterialTheme.colorScheme.primary)
+                            } else {
+                                Icon(
+                                    Icons.Default.ChevronRight,
+                                    if (compactOpen) "折叠" else "展开",
+                                    Modifier.size(14.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                Icons.Default.Folder,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = pathText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+
+                        // 紧凑路径展开后的实际内容
+                        AnimatedVisibility(visible = compactOpen) {
+                            Column {
+                                if (compactChildren != null) {
+                                    compactChildren!!.forEach { child ->
+                                        FileTreeItem(
+                                            item = child,
+                                            depth = depth + 2,
+                                            onListChildren = onListChildren,
+                                            onFileClick = onFileClick,
+                                            onAddToConversation = onAddToConversation,
+                                            onRenameRequest = onRenameRequest,
+                                            onDelete = onDelete,
+                                            onCreateRequest = onCreateRequest,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // ===== 正常模式：逐个渲染子项 =====
+                        cached.forEach { child ->
+                            FileTreeItem(
+                                item = child,
+                                depth = depth + 1,
+                                autoExpandedUris = drillDownUris,
+                                onListChildren = onListChildren,
+                                onFileClick = onFileClick,
+                                onAddToConversation = onAddToConversation,
+                                onRenameRequest = onRenameRequest,
+                                onDelete = onDelete,
+                                onCreateRequest = onCreateRequest,
+                            )
+                        }
                     }
                 }
             }

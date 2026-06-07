@@ -2,6 +2,7 @@ package com.template.jh.screens.home.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,26 +11,27 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BrightnessMedium
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.template.jh.R
 import com.template.jh.screens.home.HomeUiState
 
-// 主题设置卡片
+// 主题设置卡片 - IDE风格紧凑分段选择器
 @Composable
 fun ThemeSettingsCard(
     state: HomeUiState,
@@ -52,10 +54,9 @@ fun ThemeSettingsCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            // 标题
             Text(
                 text = stringResource(R.string.settings_theme_title),
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -63,57 +64,46 @@ fun ThemeSettingsCard(
             Spacer(modifier = Modifier.height(12.dp))
 
             val themeOptions = listOf(
-                "system" to stringResource(R.string.theme_system),
-                "light" to stringResource(R.string.theme_light),
-                "dark" to stringResource(R.string.theme_dark),
+                Triple("system", stringResource(R.string.theme_system), Icons.Default.BrightnessMedium),
+                Triple("light", stringResource(R.string.theme_light), Icons.Default.LightMode),
+                Triple("dark", stringResource(R.string.theme_dark), Icons.Default.DarkMode),
             )
 
-            themeOptions.forEachIndexed { index, (value, label) ->
-                val isSelected = state.themeMode == value
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(
-                            if (isSelected) {
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.3f)
-                            }
-                        )
-                        .selectable(
-                            selected = isSelected,
-                            onClick = { onSetThemeMode(value) },
-                            role = Role.RadioButton,
-                        )
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(
-                        selected = isSelected,
-                        onClick = null,
-                        modifier = Modifier.size(20.dp),
-                        colors = RadioButtonDefaults.colors(
-                            selectedColor = MaterialTheme.colorScheme.primary,
-                            unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        ),
-                    )
-                    Text(
-                        text = label,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isSelected) {
-                            MaterialTheme.colorScheme.onSurface
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = Modifier
-                            .padding(start = 12.dp)
-                            .weight(1f),
-                    )
-                }
+            // IDE风格分段选择器：一行三列
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                themeOptions.forEachIndexed { index, (value, label, icon) ->
+                    val isSelected = state.themeMode == value
+                    val bg = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                    else MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.4f)
+                    val fg = if (isSelected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
 
-                if (index < themeOptions.lastIndex) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(bg)
+                            .clickable { onSetThemeMode(value) }
+                            .padding(vertical = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = label,
+                            modifier = Modifier.size(20.dp),
+                            tint = fg,
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = fg,
+                        )
+                    }
                 }
             }
         }
