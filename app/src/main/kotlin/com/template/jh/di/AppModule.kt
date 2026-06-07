@@ -12,5 +12,5 @@ val appModule = module {
     single { UserPreferencesRepository(androidContext()) }
     single { ConversationRepository(androidContext()) }
     viewModel { HomeViewModel(androidContext() as android.app.Application, get()) }
-    viewModel { ChatViewModel(androidContext() as android.app.Application, get()) }
+    viewModel { ChatViewModel(androidContext() as android.app.Application, get(), get()) }
 }

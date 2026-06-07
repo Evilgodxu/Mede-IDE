@@ -12,6 +12,7 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.LogSeverity
 import com.google.ai.edge.litertlm.SamplerConfig
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +65,7 @@ data class ModelParams(
 }
 
 // LiteRT-LM 引擎管理器
+@OptIn(com.google.ai.edge.litertlm.ExperimentalApi::class)
 class LiteRTManager(private val context: Context) : AutoCloseable {
 
     private val _state = MutableStateFlow(EngineState())
@@ -81,6 +83,8 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
 
     init {
         Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
+        // 禁用工具名的 snake_case 转换，保持原始函数名
+        ExperimentalFlags.convertCamelToSnakeCaseInToolDescription = false
     }
 
     // 直接从 URL 下载模型到系统下载目录

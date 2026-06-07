@@ -4,6 +4,7 @@
     <!-- Explorer -->
     <string name="resource_manager_title">Explorer</string>
     <string name="no_folder_opened">No folder opened</string>
+    <string name="add_to_conversation">Add to Conversation</string>
 
     <!-- Center Panel -->
     <string name="new_project">New Project</string>
@@ -135,4 +136,51 @@
     <string name="chat_cancel">Cancel</string>
     <string name="chat_clear">Clear Chat</string>
     <string name="chat_streaming">Generating…</string>
+
+    <!-- Rules -->
+    <string name="rules_title">Rule Management</string>
+    <string name="rules_description">Create rules as context injected into conversations</string>
+    <string name="rules_add">Add Rule</string>
+    <string name="rules_edit">Edit Rule</string>
+    <string name="rules_name_hint">Rule Name</string>
+    <string name="rules_content_hint">Describe rule requirements…</string>
+    <string name="rules_type_global">Global Rule</string>
+    <string name="rules_type_project">Project Rule</string>
+    <string name="rules_count_hint">%d rule(s) enabled, will be injected as context reference</string>
+    <string name="rules_save">Save</string>
+    <string name="rules_cancel">Cancel</string>
+
+    <!-- General - Chat Config -->
+    <string name="general_chat_config">Chat Configuration</string>
+    <string name="general_model_name">Model Name</string>
+    <string name="general_model_name_hint">e.g. Gemini 2.5 Pro</string>
+    <string name="general_user_name">User Name</string>
+    <string name="general_user_name_hint">Your name</string>
+
+    <!-- Skill -->
+    <string name="skill_title">Skill Management</string>
+    <string name="skill_desc">Enable or disable AI skills as conversation context</string>
+    <string name="skill_count">%d skill(s) enabled</string>
+
+    <!-- MCP -->
+    <string name="mcp_title">MCP Servers</string>
+    <string name="mcp_desc">Configure MCP servers to extend AI capabilities</string>
+    <string name="mcp_add">Add MCP Server</string>
+    <string name="mcp_edit">Edit MCP Server</string>
+    <string name="mcp_name">Server Name</string>
+    <string name="mcp_command">Command/Address</string>
+    <string name="mcp_args">Arguments</string>
+
+    <!-- Notification -->
+    <string name="notif_title">Task Flow Notifications</string>
+    <string name="notif_desc">Configure notification behavior for task events</string>
+    <string name="notif_task_completed">Task Completed</string>
+    <string name="notif_task_failed">Exception Interrupted</string>
+    <string name="notif_waiting_auth">Waiting Authorization</string>
+    <string name="notif_sound">Sound</string>
+    <string name="notif_popup">Popup</string>
+
+    <!-- Task List -->
+    <string name="task_list_title">Task List</string>
+
 </resources>

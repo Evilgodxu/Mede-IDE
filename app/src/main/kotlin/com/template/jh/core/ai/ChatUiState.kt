@@ -1,6 +1,26 @@
 package com.template.jh.core.ai
 
+import com.template.jh.data.model.NotificationEventType
+import com.template.jh.data.model.TaskItem
 import java.util.UUID
+
+// 文件操作类型
+enum class FileOpType { Create, Modify, Delete }
+
+// 文件操作元数据（嵌入 ChatMessage 用于渲染操作卡片）
+data class FileOperationMeta(
+    val filePath: String,
+    val opType: FileOpType,
+    val lineChanges: Int = 0, // +N (新增) / -N (删除)
+)
+
+// 文件变更记录（对话中累计，供任务清单文件列表展示）
+data class FileChangeItem(
+    val filePath: String,
+    val opType: FileOpType,
+    val lineChanges: Int = 0,
+    val timestamp: Long = System.currentTimeMillis(),
+)
 
 // 聊天消息
 data class ChatMessage(
@@ -9,6 +29,7 @@ data class ChatMessage(
     val content: String,
     val isStreaming: Boolean = false,
     val timestamp: Long = System.currentTimeMillis(),
+    val fileOp: FileOperationMeta? = null,
 )
 
 enum class ChatRole { User, Model, System }
@@ -18,6 +39,13 @@ data class ConversationEntry(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
     val messages: List<ChatMessage> = emptyList(),
+    val timestamp: Long = System.currentTimeMillis(),
+)
+
+// 对话流通知事件
+data class NotificationEvent(
+    val type: NotificationEventType,
+    val message: String,
     val timestamp: Long = System.currentTimeMillis(),
 )
 
@@ -43,4 +71,15 @@ data class ChatUiState(
     val activeConversationId: String? = null,
     val isHistoryOpen: Boolean = false,
     val isOptimizing: Boolean = false,
+    // 任务清单
+    val taskList: List<TaskItem> = emptyList(),
+    val fileChanges: List<FileChangeItem> = emptyList(),
+    val isTaskListOpen: Boolean = false,
+    // 通知事件
+    val lastNotification: NotificationEvent? = null,
+    // 删除行为卡片开关
+    val deleteCardEnabled: Boolean = false,
+    // 上下文参考计数
+    val activeRulesCount: Int = 0,
+    val activeSkillsCount: Int = 0,
 )

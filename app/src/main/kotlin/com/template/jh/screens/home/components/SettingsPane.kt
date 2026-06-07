@@ -18,7 +18,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FolderOpen
@@ -27,11 +29,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
@@ -56,6 +63,11 @@ import com.template.jh.core.ai.DownloadStatus
 import com.template.jh.core.ai.EngineStatus
 import com.template.jh.core.ai.LiteRTManager
 import com.template.jh.core.ai.ModelParams
+import com.template.jh.data.model.McpServer
+import com.template.jh.data.model.NotificationSettings
+import com.template.jh.data.model.Rule
+import com.template.jh.data.model.RuleType
+import com.template.jh.data.model.SkillItem
 import com.template.jh.screens.home.HomeUiState
 import com.template.jh.screens.home.HomeViewModel
 import org.koin.androidx.compose.koinViewModel
@@ -100,6 +112,10 @@ fun SettingsPane(
             SettingsCategoryContent(
                 category = selectedCategory, state = state,
                 onSetThemeMode = { viewModel.setThemeMode(it) }, onSetLanguage = { viewModel.setLanguage(it) },
+                onSetModelName = { viewModel.setModelName(it) }, onSetUserName = { viewModel.setUserName(it) },
+                onSetRules = { viewModel.setRules(it) }, onSetSkills = { viewModel.setSkills(it) },
+                onSetMcpServers = { viewModel.setMcpServers(it) },
+                onSetNotificationSettings = { viewModel.setNotificationSettings(it) },
                 chatViewModel = chatViewModel, onBrowseModelFile = onBrowseModelFile,
             )
         }
@@ -121,6 +137,9 @@ private fun SettingsCategoryItem(category: SettingsCategory, isSelected: Boolean
 @Composable
 private fun SettingsCategoryContent(
     category: SettingsCategory, state: HomeUiState, onSetThemeMode: (String) -> Unit, onSetLanguage: (String) -> Unit,
+    onSetModelName: (String) -> Unit, onSetUserName: (String) -> Unit, onSetRules: (List<Rule>) -> Unit,
+    onSetSkills: (List<SkillItem>) -> Unit, onSetMcpServers: (List<McpServer>) -> Unit,
+    onSetNotificationSettings: (NotificationSettings) -> Unit,
     chatViewModel: ChatViewModel?, onBrowseModelFile: () -> Unit,
 ) {
     Column(
@@ -136,13 +155,14 @@ private fun SettingsCategoryContent(
                 else {
                     ThemeSettingsCard(state, onSetThemeMode, Modifier.fillMaxWidth())
                     LanguageSettingsCard(state, onSetLanguage, Modifier.fillMaxWidth())
+                    GeneralSettingsCard(state, onSetModelName, onSetUserName, Modifier.fillMaxWidth())
                 }
             }
             SettingsCategory.Model -> ModelSettingsContent(chatViewModel, onBrowseModelFile)
-            SettingsCategory.MCP -> CategoryPlaceholder(stringResource(R.string.settings_category_mcp_desc))
-            SettingsCategory.Skill -> CategoryPlaceholder(stringResource(R.string.settings_category_skill_desc))
-            SettingsCategory.Conversation -> CategoryPlaceholder(stringResource(R.string.settings_category_conversation_desc))
-            SettingsCategory.Rules -> CategoryPlaceholder(stringResource(R.string.settings_category_rules_desc))
+            SettingsCategory.Skill -> SkillsSettingsContent(state.skills, onSetSkills)
+            SettingsCategory.MCP -> McpSettingsContent(state.mcpServers, onSetMcpServers)
+            SettingsCategory.Conversation -> NotificationSettingsContent(state.notificationSettings, onSetNotificationSettings)
+            SettingsCategory.Rules -> RulesSettingsContent(state.rules, onSetRules)
         }
     }
 }
@@ -300,6 +320,595 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?, onBrowseModelFil
                             Text("下载到系统下载目录")
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GeneralSettingsCard(
+    state: HomeUiState,
+    onSetModelName: (String) -> Unit,
+    onSetUserName: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("对话配置", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+
+            var modelName by remember(state) { mutableStateOf(state.modelName) }
+            OutlinedTextField(
+                value = modelName,
+                onValueChange = { modelName = it; onSetModelName(it) },
+                label = { Text("模型名称") },
+                placeholder = { Text("例如: Gemini 2.5 Pro") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                ),
+            )
+
+            var userName by remember(state) { mutableStateOf(state.userName) }
+            OutlinedTextField(
+                value = userName,
+                onValueChange = { userName = it; onSetUserName(it) },
+                label = { Text("用户名称") },
+                placeholder = { Text("你的名字") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RulesSettingsContent(
+    rules: List<Rule>,
+    onSetRules: (List<Rule>) -> Unit,
+) {
+    var editingRuleId by remember { mutableStateOf<String?>(null) }
+    var editName by remember { mutableStateOf("") }
+    var editContent by remember { mutableStateOf("") }
+    var editType by remember { mutableStateOf(RuleType.Global) }
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            "创建规则作为上下文注入对话，模型对话时自动引用",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        // 规则数量提示
+        if (rules.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)),
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.CheckCircle, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "已启用 ${rules.size} 条规则，对话时将自动注入为上下文参考",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+        }
+
+        // 添加按钮
+        OutlinedButton(
+            onClick = {
+                editName = ""
+                editContent = ""
+                editType = RuleType.Global
+                editingRuleId = null
+                showAddDialog = true
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("添加规则")
+        }
+
+        // 规则列表
+        rules.forEach { rule ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+            ) {
+                Column(Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(rule.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (rule.type == RuleType.Global) "全局" else "项目",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                rule.content.take(80) + if (rule.content.length > 80) "…" else "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        IconButton(onClick = {
+                            editName = rule.name
+                            editContent = rule.content
+                            editType = rule.type
+                            editingRuleId = rule.id
+                            showAddDialog = true
+                        }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Refresh, "编辑", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        IconButton(onClick = {
+                            onSetRules(rules.filter { it.id != rule.id })
+                        }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Delete, "删除", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 添加/编辑对话框
+    if (showAddDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text(if (editingRuleId != null) "编辑规则" else "添加规则") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        label = { Text("规则名称") },
+                        placeholder = { Text("例如: 编码规范") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+
+                    // 规则类型选择
+                    var typeExpanded by remember { mutableStateOf(false) }
+                    Box {
+                        OutlinedButton(onClick = { typeExpanded = true }) {
+                            Text("类型: ${if (editType == RuleType.Global) "全局规则" else "项目规则"}")
+                        }
+                        DropdownMenu(expanded = typeExpanded, onDismissRequest = { typeExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text("全局规则") },
+                                onClick = { editType = RuleType.Global; typeExpanded = false },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("项目规则") },
+                                onClick = { editType = RuleType.Project; typeExpanded = false },
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = editContent,
+                        onValueChange = { editContent = it },
+                        label = { Text("规则内容") },
+                        placeholder = { Text("描述规则要求…") },
+                        modifier = Modifier.fillMaxWidth().height(150.dp),
+                        maxLines = 10,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (editName.isNotBlank() && editContent.isNotBlank()) {
+                        val updated = if (editingRuleId != null) {
+                            rules.map { if (it.id == editingRuleId) it.copy(name = editName, content = editContent, type = editType) else it }
+                        } else {
+                            rules + Rule(name = editName, content = editContent, type = editType)
+                        }
+                        onSetRules(updated)
+                        showAddDialog = false
+                    }
+                }) { Text("保存") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showAddDialog = false }) { Text("取消") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SkillsSettingsContent(
+    skills: List<SkillItem>,
+    onSetSkills: (List<SkillItem>) -> Unit,
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    var editingId by remember { mutableStateOf<String?>(null) }
+    var editName by remember { mutableStateOf("") }
+    var editDesc by remember { mutableStateOf("") }
+    var editPrompt by remember { mutableStateOf("") }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            "导入或创建自定义 AI 技能，已启用技能的提示词将作为上下文注入对话",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        if (skills.isEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+            ) {
+                Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("暂无技能", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("点击下方按钮添加自定义技能", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        } else {
+            val enabledCount = skills.count { it.enabled }
+            if (enabledCount > 0) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)),
+                ) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CheckCircle, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("已启用 $enabledCount 项技能", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
+                }
+            }
+        }
+
+        OutlinedButton(
+            onClick = { editName = ""; editDesc = ""; editPrompt = ""; editingId = null; showDialog = true },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("添加技能")
+        }
+
+        skills.forEach { skill ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+            ) {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(skill.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text(skill.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (skill.prompt.isNotBlank()) {
+                            Text(
+                                skill.prompt.take(60) + if (skill.prompt.length > 60) "…" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            )
+                        }
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = skill.enabled,
+                        onCheckedChange = { checked ->
+                            onSetSkills(skills.map { if (it.id == skill.id) it.copy(enabled = checked) else it })
+                        },
+                    )
+                    IconButton(
+                        onClick = {
+                            editName = skill.name; editDesc = skill.description
+                            editPrompt = skill.prompt; editingId = skill.id; showDialog = true
+                        },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(Icons.Default.Refresh, "编辑", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(
+                        onClick = { onSetSkills(skills.filter { it.id != skill.id }) },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(Icons.Default.Delete, "删除", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text(if (editingId != null) "编辑技能" else "添加技能") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = editName, onValueChange = { editName = it },
+                        label = { Text("技能名称") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = editDesc, onValueChange = { editDesc = it },
+                        label = { Text("技能描述") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = editPrompt, onValueChange = { editPrompt = it },
+                        label = { Text("提示词（注入到系统指令中）") },
+                        placeholder = { Text("定义该技能的行为规则和指令…") },
+                        modifier = Modifier.fillMaxWidth().height(120.dp),
+                        maxLines = 8,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (editName.isNotBlank() && editPrompt.isNotBlank()) {
+                        val updated = if (editingId != null) {
+                            skills.map { if (it.id == editingId) it.copy(name = editName, description = editDesc, prompt = editPrompt) else it }
+                        } else {
+                            skills + SkillItem(name = editName, description = editDesc, prompt = editPrompt)
+                        }
+                        onSetSkills(updated)
+                        showDialog = false
+                    }
+                }) { Text("保存") }
+            },
+            dismissButton = { OutlinedButton(onClick = { showDialog = false }) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
+private fun McpSettingsContent(
+    servers: List<McpServer>,
+    onSetMcpServers: (List<McpServer>) -> Unit,
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    var editingId by remember { mutableStateOf<String?>(null) }
+    var editName by remember { mutableStateOf("") }
+    var editCommand by remember { mutableStateOf("") }
+    var editArgs by remember { mutableStateOf("") }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            "配置 MCP 服务器以扩展 AI 能力，连接后可调用服务器提供的工具",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        val enabledCount = servers.count { it.enabled }
+        if (enabledCount > 0) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)),
+            ) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CheckCircle, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("已连接 $enabledCount 个 MCP 服务器", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+        }
+
+        OutlinedButton(
+            onClick = {
+                editName = ""; editCommand = ""; editArgs = ""; editingId = null; showDialog = true
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.Add, null, Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("添加 MCP 服务器")
+        }
+
+        servers.forEach { server ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+            ) {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(server.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                if (server.enabled) "已连接" else "未启用",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (server.enabled) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            "${server.command} ${server.args}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = server.enabled,
+                        onCheckedChange = { checked ->
+                            onSetMcpServers(servers.map { if (it.id == server.id) it.copy(enabled = checked) else it })
+                        },
+                    )
+                    IconButton(
+                        onClick = {
+                            editName = server.name; editCommand = server.command; editArgs = server.args
+                            editingId = server.id; showDialog = true
+                        },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(Icons.Default.Refresh, "编辑", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(
+                        onClick = { onSetMcpServers(servers.filter { it.id != server.id }) },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(Icons.Default.Delete, "删除", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text(if (editingId != null) "编辑 MCP 服务器" else "添加 MCP 服务器") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = editName, onValueChange = { editName = it },
+                        label = { Text("服务器名称") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = editCommand, onValueChange = { editCommand = it },
+                        label = { Text("命令/地址") },
+                        placeholder = { Text("例如: npx 或 http://localhost:3000") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = editArgs, onValueChange = { editArgs = it },
+                        label = { Text("参数") },
+                        placeholder = { Text("-y @server/mcp") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (editName.isNotBlank() && editCommand.isNotBlank()) {
+                        val updated = if (editingId != null) {
+                            servers.map { if (it.id == editingId) it.copy(name = editName, command = editCommand, args = editArgs) else it }
+                        } else {
+                            servers + McpServer(name = editName, command = editCommand, args = editArgs, enabled = true)
+                        }
+                        onSetMcpServers(updated)
+                        showDialog = false
+                    }
+                }) { Text("保存") }
+            },
+            dismissButton = { OutlinedButton(onClick = { showDialog = false }) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
+private fun NotificationSettingsContent(
+    settings: NotificationSettings,
+    onSetNotificationSettings: (NotificationSettings) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            "配置对话流中的通知行为：任务完成、异常打断、等待用户操作时的音效和弹出提示",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        // 任务完成
+        NotificationToggleCard(
+            title = "任务完成",
+            description = "AI 生成内容完成时通知",
+            soundChecked = settings.taskCompletedSound,
+            popupChecked = settings.taskCompletedPopup,
+            onSoundChange = { onSetNotificationSettings(settings.copy(taskCompletedSound = it)) },
+            onPopupChange = { onSetNotificationSettings(settings.copy(taskCompletedPopup = it)) },
+        )
+
+        // 任务失败
+        NotificationToggleCard(
+            title = "异常打断",
+            description = "任务执行异常或被打断时通知",
+            soundChecked = settings.taskFailedSound,
+            popupChecked = settings.taskFailedPopup,
+            onSoundChange = { onSetNotificationSettings(settings.copy(taskFailedSound = it)) },
+            onPopupChange = { onSetNotificationSettings(settings.copy(taskFailedPopup = it)) },
+        )
+
+        // 等待用户操作
+        NotificationToggleCard(
+            title = "等待用户授权",
+            description = "需要用户确认操作时通知",
+            soundChecked = settings.waitingUserActionSound,
+            popupChecked = settings.waitingUserActionPopup,
+            onSoundChange = { onSetNotificationSettings(settings.copy(waitingUserActionSound = it)) },
+            onPopupChange = { onSetNotificationSettings(settings.copy(waitingUserActionPopup = it)) },
+        )
+
+        HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+        // 删除行为卡片开关
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text("删除文件行为", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    "开启后删除文件时不在对话中显示确认卡片，直接删除",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (settings.deleteCardEnabled) "直接删除（不显示卡片）" else "显示删除确认卡片",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    androidx.compose.material3.Switch(
+                        checked = settings.deleteCardEnabled,
+                        onCheckedChange = { onSetNotificationSettings(settings.copy(deleteCardEnabled = it)) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NotificationToggleCard(
+    title: String,
+    description: String,
+    soundChecked: Boolean,
+    popupChecked: Boolean,
+    onSoundChange: (Boolean) -> Unit,
+    onPopupChange: (Boolean) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("音效", style = MaterialTheme.typography.labelSmall)
+                    androidx.compose.material3.Switch(checked = soundChecked, onCheckedChange = onSoundChange)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("弹出提示", style = MaterialTheme.typography.labelSmall)
+                    androidx.compose.material3.Switch(checked = popupChecked, onCheckedChange = onPopupChange)
                 }
             }
         }

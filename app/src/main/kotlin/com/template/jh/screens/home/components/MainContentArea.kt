@@ -2,6 +2,7 @@ package com.template.jh.screens.home.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
@@ -49,50 +51,71 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.template.jh.R
 import com.template.jh.core.ai.ChatViewModel
+import com.template.jh.screens.home.TabItem
+import com.template.jh.screens.home.TabType
 
 // 中间主内容区
 @Composable
 fun MainContentArea(
-    isSettingsOpen: Boolean = false,
-    onCloseSettings: () -> Unit = {},
     onOpenFolder: () -> Unit = {},
     onNewProject: () -> Unit = {},
     onCloneGit: () -> Unit = {},
     chatViewModel: ChatViewModel? = null,
     onBrowseModelFile: () -> Unit = {},
     openedFolderName: String? = null,
+    tabs: List<TabItem> = emptyList(),
+    activeTabIndex: Int = -1,
+    onSelectTab: (Int) -> Unit = {},
+    onCloseTab: (Int) -> Unit = {},
+    onCloseAllTabs: () -> Unit = {},
+    onSaveAllTabs: () -> Unit = {},
+    onSaveCurrent: () -> Unit = {},
+    tabContent: @Composable (String) -> Unit = {},
 ) {
+    val hasTabs = tabs.isNotEmpty()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        if (isSettingsOpen) {
-            // Tab 栏
+        if (hasTabs) {
             EditorTabBar(
-                tabs = listOf(stringResource(R.string.settings_tab_name)),
-                activeIndex = 0,
-                onCloseTab = { onCloseSettings() },
-                onCloseAllTabs = { onCloseSettings() }
+                tabs = tabs,
+                activeIndex = activeTabIndex,
+                onSelectTab = onSelectTab,
+                onCloseTab = onCloseTab,
+                onCloseAllTabs = onCloseAllTabs,
+                onSaveAllTabs = onSaveAllTabs,
+                onSaveCurrent = onSaveCurrent,
             )
             HorizontalDivider(
                 thickness = 1.dp,
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
             )
-            // 设置内容
-            SettingsPane(
-                modifier = Modifier.weight(1f),
-                chatViewModel = chatViewModel,
-                onBrowseModelFile = onBrowseModelFile,
-            )
-        } else {
-            // 欢迎页
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
+        }
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            if (activeTabIndex in tabs.indices) {
+                val activeTab = tabs[activeTabIndex]
+                when (activeTab.type) {
+                    TabType.Settings -> {
+                        SettingsPane(
+                            modifier = Modifier.fillMaxSize(),
+                            chatViewModel = chatViewModel,
+                            onBrowseModelFile = onBrowseModelFile,
+                        )
+                    }
+                    TabType.File -> {
+                        tabContent(activeTab.id)
+                    }
+                }
+            } else if (openedFolderName == null) {
+                // 欢迎页（仅未打开文件夹时）
                 WelcomeContent(
                     onOpenFolder = onOpenFolder,
                     onNewProject = onNewProject,
@@ -104,13 +127,16 @@ fun MainContentArea(
     }
 }
 
-// Tab 栏（模拟 IDE 编辑区顶部标签页）
+// Tab 栏（可水平滚动）
 @Composable
 private fun EditorTabBar(
-    tabs: List<String>,
+    tabs: List<TabItem>,
     activeIndex: Int,
+    onSelectTab: (Int) -> Unit = {},
     onCloseTab: (Int) -> Unit,
     onCloseAllTabs: () -> Unit = {},
+    onSaveAllTabs: () -> Unit = {},
+    onSaveCurrent: () -> Unit = {},
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -121,52 +147,59 @@ private fun EditorTabBar(
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        tabs.forEachIndexed { index, title ->
-            val isActive = index == activeIndex
-            Row(
-                modifier = Modifier
-                    .height(32.dp)
-                    .background(
-                        if (isActive) MaterialTheme.colorScheme.background
-                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f)
-                    )
-                    .clickable { },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = null,
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tabs.forEachIndexed { index, tab ->
+                val isActive = index == activeIndex
+                Row(
                     modifier = Modifier
-                        .padding(start = 10.dp, end = 4.dp)
-                        .size(14.dp),
-                    tint = if (isActive) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (isActive) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 120.dp)
-                )
-                IconButton(
-                    onClick = { onCloseTab(index) },
-                    modifier = Modifier.size(24.dp)
+                        .height(32.dp)
+                        .background(
+                            if (isActive) MaterialTheme.colorScheme.background
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f)
+                        )
+                        .clickable { onSelectTab(index) },
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = stringResource(R.string.tab_close),
-                        modifier = Modifier.size(12.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        imageVector = when (tab.type) {
+                            TabType.Settings -> Icons.Default.Settings
+                            TabType.File -> Icons.Default.Description
+                        },
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(start = 10.dp, end = 4.dp)
+                            .size(14.dp),
+                        tint = if (isActive) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Text(
+                        text = tab.title,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isActive) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 120.dp)
+                    )
+                    IconButton(
+                        onClick = { onCloseTab(index) },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = stringResource(R.string.tab_close),
+                            modifier = Modifier.size(12.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
-
-        // 占位，让更多按钮靠右
-        Spacer(modifier = Modifier.weight(1f))
 
         // 更多操作按钮
         Box {
@@ -197,6 +230,7 @@ private fun EditorTabBar(
                     text = { Text(stringResource(R.string.tab_save_and_close)) },
                     onClick = {
                         menuExpanded = false
+                        onSaveAllTabs()
                         onCloseAllTabs()
                     }
                 )
@@ -221,7 +255,6 @@ private fun WelcomeContent(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // 快捷操作按钮组
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.7f)
@@ -233,13 +266,11 @@ private fun WelcomeContent(
                 text = stringResource(R.string.new_project),
                 onClick = onNewProject
             )
-
             QuickActionRow(
                 icon = Icons.Default.FolderOpen,
                 text = stringResource(R.string.open_folder),
                 onClick = onOpenFolder
             )
-
             QuickActionRow(
                 icon = Icons.Default.Storage,
                 text = stringResource(R.string.clone_git_repo),
@@ -249,7 +280,6 @@ private fun WelcomeContent(
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // 最近项目
         if (openedFolderName != null) {
             Text(
                 text = stringResource(R.string.recent_projects),
@@ -258,13 +288,8 @@ private fun WelcomeContent(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
-
             Spacer(modifier = Modifier.height(12.dp))
-
-            RecentProjectCard(
-                name = openedFolderName,
-                path = openedFolderName,
-            )
+            RecentProjectCard(name = openedFolderName, path = openedFolderName)
         }
     }
 }
@@ -293,7 +318,6 @@ private fun QuickActionRow(
                 modifier = Modifier.size(18.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
-
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodyMedium,
@@ -304,15 +328,10 @@ private fun QuickActionRow(
 }
 
 @Composable
-private fun RecentProjectCard(
-    name: String,
-    path: String
-) {
+private fun RecentProjectCard(name: String, path: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
@@ -328,16 +347,12 @@ private fun RecentProjectCard(
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.primary
             )
-
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = name,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-
                 Text(
                     text = path,
                     style = MaterialTheme.typography.labelSmall,

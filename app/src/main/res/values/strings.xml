@@ -4,6 +4,7 @@
     <!-- 资源管理器 -->
     <string name="resource_manager_title">资源管理器</string>
     <string name="no_folder_opened">尚未打开文件夹</string>
+    <string name="add_to_conversation">添加到对话</string>
     
 
     <!-- 中间面板 -->
@@ -136,5 +137,51 @@
     <string name="chat_cancel">取消</string>
     <string name="chat_clear">清空对话</string>
     <string name="chat_streaming">生成中…</string>
+
+    <!-- 规则设置 -->
+    <string name="rules_title">规则管理</string>
+    <string name="rules_description">创建规则作为上下文注入对话，模型对话时自动引用</string>
+    <string name="rules_add">添加规则</string>
+    <string name="rules_edit">编辑规则</string>
+    <string name="rules_name_hint">规则名称</string>
+    <string name="rules_content_hint">描述规则要求…</string>
+    <string name="rules_type_global">全局规则</string>
+    <string name="rules_type_project">项目规则</string>
+    <string name="rules_count_hint">已启用 %d 条规则，对话时将自动注入为上下文参考</string>
+    <string name="rules_save">保存</string>
+    <string name="rules_cancel">取消</string>
+
+    <!-- 通用设置-对话配置 -->
+    <string name="general_chat_config">对话配置</string>
+    <string name="general_model_name">模型名称</string>
+    <string name="general_model_name_hint">例如: Gemini 2.5 Pro</string>
+    <string name="general_user_name">用户名称</string>
+    <string name="general_user_name_hint">你的名字</string>
+
+    <!-- Skill 设置 -->
+    <string name="skill_title">技能管理</string>
+    <string name="skill_desc">启用或禁用 AI 技能，已启用技能将作为上下文注入对话</string>
+    <string name="skill_count">已启用 %d 项技能</string>
+
+    <!-- MCP 设置 -->
+    <string name="mcp_title">MCP 服务器</string>
+    <string name="mcp_desc">配置 MCP 服务器以扩展 AI 能力</string>
+    <string name="mcp_add">添加 MCP 服务器</string>
+    <string name="mcp_edit">编辑 MCP 服务器</string>
+    <string name="mcp_name">服务器名称</string>
+    <string name="mcp_command">命令/地址</string>
+    <string name="mcp_args">参数</string>
+
+    <!-- 通知设置 -->
+    <string name="notif_title">对话流通知</string>
+    <string name="notif_desc">配置对话流中的通知行为</string>
+    <string name="notif_task_completed">任务完成</string>
+    <string name="notif_task_failed">异常打断</string>
+    <string name="notif_waiting_auth">等待用户授权</string>
+    <string name="notif_sound">音效</string>
+    <string name="notif_popup">弹出提示</string>
+
+    <!-- 任务清单 -->
+    <string name="task_list_title">任务清单</string>
 
 </resources>
