@@ -56,7 +56,7 @@ import com.template.jh.R
 import com.template.jh.core.ai.EngineStatus
 import com.template.jh.core.ai.ModelInfo
 
-// 主窗口标题栏组件
+// 主窗口顶部工具栏组件
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainTopBar(
@@ -68,6 +68,15 @@ fun MainTopBar(
     onLoadModel: (String) -> Unit = {},
     onBrowseModelFile: () -> Unit = {},
     onTerminalClick: () -> Unit = {},
+    onCloseFolder: () -> Unit = {},
+    onNewFile: () -> Unit = {},
+    onNewFolder: () -> Unit = {},
+    onOpenFile: () -> Unit = {},
+    onOpenFolder: () -> Unit = {},
+    onRecentFiles: () -> Unit = {},
+    onSaveFile: () -> Unit = {},
+    onSaveAs: () -> Unit = {},
+    onSaveAll: () -> Unit = {},
 ) {
     val topBarInsets = if (!windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)) {
         WindowInsets.statusBars
@@ -107,78 +116,78 @@ fun MainTopBar(
                             onDismissRequest = { fileMenuExpanded = false },
                             modifier = Modifier.heightIn(max = dropdownMaxHeight)
                         ) {
+                            // 关闭文件夹
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.file_menu_close_folder)) },
+                                onClick = {
+                                    try { fileMenuExpanded = false; onCloseFolder() }
+                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                }
+                            )
+                            HorizontalDivider()
                             // 新建文件
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_new_file)) },
                                 onClick = {
-                                    try {
-                                        // 新建文件逻辑
-                                        fileMenuExpanded = false
-                                    } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
-                                    }
+                                    try { fileMenuExpanded = false; onNewFile() }
+                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                }
+                            )
+                            // 新建文件夹
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.file_menu_new_folder)) },
+                                onClick = {
+                                    try { fileMenuExpanded = false; onNewFolder() }
+                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
                                 }
                             )
                             // 打开文件
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_open_file)) },
                                 onClick = {
-                                    try {
-                                        // 打开文件逻辑
-                                        fileMenuExpanded = false
-                                    } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
-                                    }
+                                    try { fileMenuExpanded = false; onOpenFile() }
+                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
+                                }
+                            )
+                            // 打开文件夹
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.file_menu_open_folder_btn)) },
+                                onClick = {
+                                    try { fileMenuExpanded = false; onOpenFolder() }
+                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
                                 }
                             )
                             // 最近文件
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_recent_files)) },
                                 onClick = {
-                                    try {
-                                        // 最近文件逻辑
-                                        fileMenuExpanded = false
-                                    } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
-                                    }
+                                    try { fileMenuExpanded = false; onRecentFiles() }
+                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
                                 }
                             )
-                            // 分隔线
                             HorizontalDivider()
                             // 保存
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_save)) },
                                 onClick = {
-                                    try {
-                                        // 保存逻辑
-                                        fileMenuExpanded = false
-                                    } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
-                                    }
+                                    try { fileMenuExpanded = false; onSaveFile() }
+                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
                                 }
                             )
                             // 另存为
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_save_as)) },
                                 onClick = {
-                                    try {
-                                        // 另存为逻辑
-                                        fileMenuExpanded = false
-                                    } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
-                                    }
+                                    try { fileMenuExpanded = false; onSaveAs() }
+                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
                                 }
                             )
                             // 全部保存
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_save_all)) },
                                 onClick = {
-                                    try {
-                                        // 全部保存逻辑
-                                        fileMenuExpanded = false
-                                    } catch (e: Exception) {
-                                        copyCrashToClipboard(context, e)
-                                    }
+                                    try { fileMenuExpanded = false; onSaveAll() }
+                                    catch (e: Exception) { copyCrashToClipboard(context, e) }
                                 }
                             )
                             // 自动保存
@@ -472,19 +481,12 @@ fun MainTopBar(
                                 val isActive = modelName == model.name || (modelName.isBlank() && engineStatus == EngineStatus.Loading)
                                 DropdownMenuItem(
                                     text = {
-                                        Column(modifier = Modifier.fillMaxWidth()) {
-                                            Text(
-                                                text = model.name,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            Text(
-                                                text = model.sizeText,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
+                                        Text(
+                                            text = model.name,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                     },
                                     onClick = {
                                         modelMenuExpanded = false

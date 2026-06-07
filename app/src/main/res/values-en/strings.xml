@@ -7,10 +7,7 @@
     <string name="add_to_conversation">Add to Conversation</string>
 
     <!-- Center Panel -->
-    <string name="new_project">New Project</string>
     <string name="open_folder">Open Folder</string>
-    <string name="clone_git_repo">Clone Git Repository</string>
-    <string name="recent_projects">Recent</string>
 
     <!-- AI Collaboration -->
     <string name="trae_title">Chat</string>

@@ -4,11 +4,16 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -41,6 +46,7 @@ import com.template.jh.screens.home.components.Sidebar
 import com.template.jh.screens.home.components.SidebarTab
 import com.template.jh.screens.home.components.ThreeColumnLayout
 import com.template.jh.ui.adaptive.rememberWindowSizeClass
+import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import java.io.File
 
@@ -99,6 +105,12 @@ fun HomeScreen(
             paths.map { p -> safPathToRelative(p) }
         } else paths
         chatViewModel.setOpenedFilePaths(relPaths)
+        // 同步当前活动文件（供 AI 感知正在编辑的文件）
+        val activeTab = tabs.getOrNull(activeTabIndex)
+        if (activeTab != null && activeTab.type == TabType.File) {
+            val activeRel = if (projectUriStr != null) safPathToRelative(activeTab.id) else activeTab.id
+            chatViewModel.setActiveFileContext(activeRel, 0)
+        }
     }
 
     // 打开/切换 Tab
@@ -267,8 +279,52 @@ fun HomeScreen(
     val lastFolderUri by viewModel.lastOpenedFolderUri.collectAsState()
     val savedTabs by viewModel.openedFileTabs.collectAsState()
     var autoOpened by remember { mutableStateOf(false) }
+    val closeFolder: () -> Unit = {
+        viewModel.closeFolder()
+        chatViewModel.setProjectRoot(null)
+        tabs.clear()
+        editorContent.clear()
+        relativeToContentUri.clear()
+        pendingEdits.clear()
+        activeTabIndex = -1
+        isSettingsOpen = false
+        selectedTab = null
+        autoOpened = false
+    }
+
+    // 对话框状态
+    var showNewFileDialog by remember { mutableStateOf(false) }
+    var showNewFolderDialog by remember { mutableStateOf(false) }
+    var showRecentFilesDialog by remember { mutableStateOf(false) }
+    var newFileName by remember { mutableStateOf("") }
+    var newFolderName by remember { mutableStateOf("") }
+
+    // SAF 文件选择器（打开文件）
+    val fileOpenLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            openFileTab(it.toString())
+        }
+    }
+
+    // SAF 另存为
+    val saveAsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("*/*")
+    ) { uri: Uri? ->
+        uri?.let { targetUri ->
+            val tab = tabs.getOrNull(activeTabIndex) ?: return@let
+            val content = editorContent[tab.id]?.text ?: return@let
+            try {
+                context.contentResolver.openOutputStream(targetUri)?.use { out ->
+                    out.write(content.toByteArray(Charsets.UTF_8))
+                }
+            } catch (_: Exception) {}
+        }
+    }
     LaunchedEffect(lastFolderUri) {
-        if (!autoOpened && lastFolderUri != null) {
+        val uri = lastFolderUri
+        if (!autoOpened && !uri.isNullOrBlank()) {
             autoOpened = true
             val parsed = Uri.parse(lastFolderUri)
             viewModel.openFolder(parsed)
@@ -279,6 +335,17 @@ fun HomeScreen(
                 savedTabs.forEach { path -> openFileTab(path) }
             }
         }
+    }
+
+    // 最近文件夹名称（当前未打开文件夹时用于欢迎页展示）
+    val recentFolderName = remember(lastFolderUri, homeState.openedFolderName) {
+        if (homeState.openedFolderName != null) null
+        else if (!lastFolderUri.isNullOrBlank()) {
+            try {
+                val docFile = DocumentFile.fromTreeUri(context, Uri.parse(lastFolderUri))
+                docFile?.name ?: "最近文件夹"
+            } catch (_: Exception) { "最近文件夹" }
+        } else null
     }
 
     // SAF 文件夹选择器
@@ -306,6 +373,27 @@ fun HomeScreen(
                     filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*"))
                 },
                 onTerminalClick = { isTerminalVisible = !isTerminalVisible },
+                onCloseFolder = closeFolder,
+                onNewFile = { showNewFileDialog = true; newFileName = "" },
+                onNewFolder = { showNewFolderDialog = true; newFolderName = "" },
+                onOpenFile = { fileOpenLauncher.launch(arrayOf("*/*")) },
+                onOpenFolder = { folderPickerLauncher.launch(null) },
+                onRecentFiles = { showRecentFilesDialog = true },
+                onSaveFile = {
+                    val idx = activeTabIndex
+                    val tab = tabs.getOrNull(idx) ?: return@MainTopBar
+                    if (tab.type == TabType.File) saveFile(tab.id)
+                },
+                onSaveAs = {
+                    val tab = tabs.getOrNull(activeTabIndex)
+                    val name = tab?.title ?: "untitled"
+                    saveAsLauncher.launch(name)
+                },
+                onSaveAll = {
+                    for (tab in tabs) {
+                        if (tab.type == TabType.File) saveFile(tab.id)
+                    }
+                },
             )
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -353,13 +441,13 @@ fun HomeScreen(
             centerContent = {
                 MainContentArea(
                     onOpenFolder = { folderPickerLauncher.launch(null) },
-                    onNewProject = {},
-                    onCloneGit = {},
                     chatViewModel = chatViewModel,
                     onBrowseModelFile = {
                         filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*"))
                     },
                     openedFolderName = homeState.openedFolderName,
+                    recentFolderName = recentFolderName,
+                    onOpenRecentFolder = { folderPickerLauncher.launch(null) },
                     tabs = tabs,
                     activeTabIndex = activeTabIndex,
                     onSelectTab = { activeTabIndex = it },
@@ -425,6 +513,105 @@ fun HomeScreen(
                 .fillMaxSize()
                 .consumeWindowInsets(innerPadding)
                 .padding(innerPadding)
+        )
+    }
+
+    // 新建文件对话框
+    if (showNewFileDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewFileDialog = false },
+            title = { Text(stringResource(R.string.dialog_new_file_title)) },
+            text = {
+                OutlinedTextField(
+                    value = newFileName,
+                    onValueChange = { newFileName = it },
+                    placeholder = { Text(stringResource(R.string.dialog_new_file_name_hint)) },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val name = newFileName.trim()
+                    if (name.isNotEmpty()) {
+                        val folderUri = homeState.openedFolderUri
+                        if (folderUri != null) {
+                            viewModel.createFile(Uri.parse(folderUri), name, false)
+                            selectedTab = SidebarTab.Explorer
+                        }
+                        showNewFileDialog = false
+                    }
+                }) { Text(stringResource(R.string.dialog_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewFileDialog = false }) {
+                    Text(stringResource(R.string.chat_cancel))
+                }
+            },
+        )
+    }
+
+    // 新建文件夹对话框
+    if (showNewFolderDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewFolderDialog = false },
+            title = { Text(stringResource(R.string.dialog_new_folder_title)) },
+            text = {
+                OutlinedTextField(
+                    value = newFolderName,
+                    onValueChange = { newFolderName = it },
+                    placeholder = { Text(stringResource(R.string.dialog_new_folder_name_hint)) },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val name = newFolderName.trim()
+                    if (name.isNotEmpty()) {
+                        val folderUri = homeState.openedFolderUri
+                        if (folderUri != null) {
+                            viewModel.createFile(Uri.parse(folderUri), name, true)
+                            selectedTab = SidebarTab.Explorer
+                        }
+                        showNewFolderDialog = false
+                    }
+                }) { Text(stringResource(R.string.dialog_save)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewFolderDialog = false }) {
+                    Text(stringResource(R.string.chat_cancel))
+                }
+            },
+        )
+    }
+
+    // 最近文件对话框
+    val openFileTabs = tabs.filter { it.type == TabType.File }
+    if (showRecentFilesDialog) {
+        AlertDialog(
+            onDismissRequest = { showRecentFilesDialog = false },
+            title = { Text(stringResource(R.string.file_menu_recent_files)) },
+            text = {
+                if (openFileTabs.isEmpty()) {
+                    Text(stringResource(R.string.recent_files_empty))
+                } else {
+                    Column {
+                        openFileTabs.forEach { tab ->
+                            TextButton(onClick = {
+                                showRecentFilesDialog = false
+                                val idx = tabs.indexOf(tab)
+                                if (idx >= 0) activeTabIndex = idx
+                            }) {
+                                Text(tab.title)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showRecentFilesDialog = false }) {
+                    Text(stringResource(R.string.chat_cancel))
+                }
+            },
         )
     }
 }

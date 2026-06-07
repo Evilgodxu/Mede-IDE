@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -191,6 +192,7 @@ fun ResourcePanel(
 private fun FileTreeItem(
     item: FileItem,
     depth: Int,
+    autoExpandedUris: Set<String> = emptySet(),
     onListChildren: (Uri, (List<FileItem>) -> Unit) -> Unit,
     onFileClick: (FileItem) -> Unit = {},
     onAddToConversation: (FileItem) -> Unit = {},
@@ -203,8 +205,25 @@ private fun FileTreeItem(
     var isExpanded by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var showContextMenu by remember { mutableStateOf(false) }
-    // 紧凑链：展开时解析到最深层的路径片段，显示为 "kotlin / com / template"
-    var compactChain by remember { mutableStateOf<List<String>>(emptyList()) }
+    var drillDownUris by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    // 自动展开：当上级目录钻取到此节点时触发
+    val needsAutoExpand = item.uri.toString() in autoExpandedUris
+    LaunchedEffect(needsAutoExpand) {
+        if (needsAutoExpand && item.isDirectory && !isExpanded) {
+            isLoading = true
+            onListChildren(item.uri) { children ->
+                childrenCache[item.uri.toString()] = children
+                isExpanded = true
+                isLoading = false
+                if (children.isNotEmpty() && children.all { it.isDirectory }) {
+                    startDrill(children[0].uri, childrenCache, onListChildren) { drillUris ->
+                        drillDownUris = drillUris
+                    }
+                }
+            }
+        }
+    }
 
     Column {
         Row(
@@ -215,35 +234,27 @@ private fun FileTreeItem(
                         if (item.isDirectory) {
                             if (isLoading) return@combinedClickable
                             if (isExpanded) {
-                                // 展开状态 → 折叠（重置链）
-                                compactChain = emptyList()
                                 isExpanded = false
-                            } else if (compactChain.isNotEmpty()) {
-                                // 已有紧凑链 → 深入一层
-                                val prevChainSize = compactChain.size
-                                isLoading = true
-                                loadDeepestChild(item.uri, compactChain, childrenCache, onListChildren) { deeperChain, _ ->
-                                    compactChain = deeperChain
-                                    isLoading = false
-                                    if (deeperChain.size == prevChainSize) isExpanded = true
-                                }
+                                drillDownUris = emptySet()
                             } else {
                                 val cached = childrenCache[item.uri.toString()]
                                 if (cached != null) {
-                                    if (cached.size == 1 && cached[0].isDirectory && compactChain.isEmpty()) {
-                                        compactChain = listOf(cached[0].name)
-                                    } else {
-                                        isExpanded = true
+                                    isExpanded = true
+                                    if (cached.isNotEmpty() && cached.all { it.isDirectory }) {
+                                        startDrill(cached[0].uri, childrenCache, onListChildren) { drillUris ->
+                                            drillDownUris = drillUris
+                                        }
                                     }
                                 } else {
                                     isLoading = true
                                     onListChildren(item.uri) { children ->
                                         childrenCache[item.uri.toString()] = children
+                                        isExpanded = true
                                         isLoading = false
-                                        if (children.size == 1 && children[0].isDirectory) {
-                                            compactChain = listOf(children[0].name)
-                                        } else {
-                                            isExpanded = true
+                                        if (children.isNotEmpty() && children.all { it.isDirectory }) {
+                                            startDrill(children[0].uri, childrenCache, onListChildren) { drillUris ->
+                                                drillDownUris = drillUris
+                                            }
                                         }
                                     }
                                 }
@@ -293,12 +304,8 @@ private fun FileTreeItem(
 
             Spacer(Modifier.width(6.dp))
 
-            // 紧凑链路径 = 当前目录名 + 链上子目录
-            val displayName = if (compactChain.isNotEmpty()) {
-                item.name + " / " + compactChain.joinToString(" / ")
-            } else item.name
             Text(
-                text = displayName,
+                text = item.name,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -364,12 +371,13 @@ private fun FileTreeItem(
         // 展开的子文件
         AnimatedVisibility(visible = isExpanded && item.isDirectory) {
             Column {
-                val chainChildren = findChainChildren(item.uri, compactChain, childrenCache)
-                if (chainChildren != null) {
-                    chainChildren.forEach { child ->
+                val cached = childrenCache[item.uri.toString()]
+                if (cached != null) {
+                    cached.forEach { child ->
                         FileTreeItem(
                             item = child,
                             depth = depth + 1,
+                            autoExpandedUris = drillDownUris,
                             onListChildren = onListChildren,
                             onFileClick = onFileClick,
                             onAddToConversation = onAddToConversation,
@@ -384,51 +392,38 @@ private fun FileTreeItem(
     }
 }
 
-// 遍历紧凑链找到最深层的缓存子文件（展开时渲染用）
-private fun findChainChildren(
-    rootUri: Uri,
-    chain: List<String>,
-    cache: Map<String, List<FileItem>>,
-): List<FileItem>? {
-    var current = cache[rootUri.toString()] ?: return null
-    for (name in chain) {
-        val next = current.firstOrNull { it.name == name && it.isDirectory } ?: return current
-        current = cache[next.uri.toString()] ?: return current
-    }
-    return current
-}
-
-// 沿紧凑链深入一层：根据已有 chain 找到链尾目录，加载它的子文件
-// 如果链尾也是单子目录，继续深入，返回新的链和最终子文件
-private fun loadDeepestChild(
-    rootUri: Uri,
-    chain: List<String>,
+// 递归钻取：沿着单子目录链条加载，返回需要自动展开的 URI 集合
+private fun startDrill(
+    uri: Uri,
     cache: MutableMap<String, List<FileItem>>,
     onListChildren: (Uri, (List<FileItem>) -> Unit) -> Unit,
-    onResult: (chain: List<String>, children: List<FileItem>) -> Unit,
+    onResult: (Set<String>) -> Unit,
 ) {
-    // 首节点已在缓存中，直接找到链尾继续加载
-    fun findChainEnd(uri: Uri, remaining: List<String>, onDone: (Uri) -> Unit) {
-        if (remaining.isEmpty()) {
-            onDone(uri)
-        } else {
-            val cached = cache[uri.toString()]
-            if (cached != null && cached.size == 1 && cached[0].isDirectory && cached[0].name == remaining.first()) {
-                findChainEnd(cached[0].uri, remaining.drop(1), onDone)
-            } else {
-                onDone(uri)
+    val drillUris = mutableSetOf<String>()
+    fun step(curUri: Uri) {
+        val cached = cache[curUri.toString()]
+        if (cached != null) {
+            if (cached.isNotEmpty() && cached.all { it.isDirectory }) {
+                val next = cached[0]
+                drillUris.add(next.uri.toString())
+                step(next.uri)
             }
         }
     }
-    findChainEnd(rootUri, chain) { endUri ->
-        onListChildren(endUri) { children ->
-            cache[endUri.toString()] = children
-            if (children.size == 1 && children[0].isDirectory) {
-                onResult(chain + children[0].name, children)
-            } else {
-                onResult(chain, children)
+    step(uri)
+    if (drillUris.isEmpty()) {
+        // 尚未缓存，加载一次
+        onListChildren(uri) { children ->
+            cache[uri.toString()] = children
+            if (children.isNotEmpty() && children.all { it.isDirectory }) {
+                val next = children[0]
+                drillUris.add(next.uri.toString())
+                step(next.uri)
             }
+            onResult(drillUris)
         }
+    } else {
+        onResult(drillUris)
     }
 }
 

@@ -58,11 +58,11 @@ import com.template.jh.screens.home.TabType
 @Composable
 fun MainContentArea(
     onOpenFolder: () -> Unit = {},
-    onNewProject: () -> Unit = {},
-    onCloneGit: () -> Unit = {},
     chatViewModel: ChatViewModel? = null,
     onBrowseModelFile: () -> Unit = {},
     openedFolderName: String? = null,
+    recentFolderName: String? = null,
+    onOpenRecentFolder: () -> Unit = {},
     tabs: List<TabItem> = emptyList(),
     activeTabIndex: Int = -1,
     onSelectTab: (Int) -> Unit = {},
@@ -141,9 +141,8 @@ fun MainContentArea(
                 // 欢迎页（仅未打开文件夹时）
                 WelcomeContent(
                     onOpenFolder = onOpenFolder,
-                    onNewProject = onNewProject,
-                    onCloneGit = onCloneGit,
-                    openedFolderName = openedFolderName,
+                    recentFolderName = recentFolderName,
+                    onOpenRecentFolder = onOpenRecentFolder,
                 )
             }
         }
@@ -275,9 +274,8 @@ private fun EditorTabBar(
 @Composable
 private fun WelcomeContent(
     onOpenFolder: () -> Unit,
-    onNewProject: () -> Unit,
-    onCloneGit: () -> Unit,
-    openedFolderName: String? = null,
+    recentFolderName: String? = null,
+    onOpenRecentFolder: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -287,41 +285,23 @@ private fun WelcomeContent(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(0.7f)
-                .padding(horizontal = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            QuickActionRow(
-                icon = Icons.Default.Add,
-                text = stringResource(R.string.new_project),
-                onClick = onNewProject
-            )
-            QuickActionRow(
-                icon = Icons.Default.FolderOpen,
-                text = stringResource(R.string.open_folder),
-                onClick = onOpenFolder
-            )
-            QuickActionRow(
-                icon = Icons.Default.Storage,
-                text = stringResource(R.string.clone_git_repo),
-                onClick = onCloneGit
-            )
-        }
+        QuickActionRow(
+            icon = Icons.Default.FolderOpen,
+            text = stringResource(R.string.open_folder),
+            onClick = onOpenFolder
+        )
 
-        Spacer(modifier = Modifier.height(32.dp))
-
-        if (openedFolderName != null) {
+        if (recentFolderName != null) {
+            Spacer(modifier = Modifier.height(24.dp))
             Text(
-                text = stringResource(R.string.recent_projects),
+                text = "最近",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(12.dp))
-            RecentProjectCard(name = openedFolderName, path = openedFolderName)
+            RecentProjectCard(name = recentFolderName, path = recentFolderName, onClick = onOpenRecentFolder)
         }
     }
 }
@@ -360,9 +340,9 @@ private fun QuickActionRow(
 }
 
 @Composable
-private fun RecentProjectCard(name: String, path: String) {
+private fun RecentProjectCard(name: String, path: String, onClick: () -> Unit = {}) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {

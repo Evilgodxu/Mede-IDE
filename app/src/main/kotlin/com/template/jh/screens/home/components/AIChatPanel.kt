@@ -40,8 +40,10 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -155,6 +157,12 @@ fun AIChatPanel(
 
         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
+        val contextUsedTokens = remember(state.messages.size, state.messages.lastOrNull()?.content) {
+            state.messages.sumOf { it.content.length / 2 }
+        }
+        val contextMaxTokens = 128000
+        var showContextInfoDialog by remember { mutableStateOf(false) }
+
         ChatInputBar(
             inputText = state.inputText,
             onInputChange = { viewModel.setInputText(it) },
@@ -164,7 +172,22 @@ fun AIChatPanel(
             engineStatus = state.engineStatus,
             onCancel = { viewModel.cancelGeneration() },
             onOptimize = { viewModel.optimizeInput() },
+            contextUsedTokens = contextUsedTokens,
+            contextMaxTokens = contextMaxTokens,
+            onContextInfoClick = { showContextInfoDialog = true },
         )
+
+        if (showContextInfoDialog) {
+            ContextInfoDialog(
+                usedTokens = contextUsedTokens,
+                maxTokens = contextMaxTokens,
+                messagesCount = state.messages.size,
+                activeRulesCount = state.activeRulesCount,
+                activeSkillsCount = state.activeSkillsCount,
+                openedFilePaths = state.openedFilePaths,
+                onDismiss = { showContextInfoDialog = false },
+            )
+        }
     }
 }
 
@@ -410,6 +433,8 @@ private fun ChatInputBar(
     inputText: String, onInputChange: (String) -> Unit, onSend: () -> Unit,
     isLoading: Boolean, isOptimizing: Boolean, engineStatus: EngineStatus,
     onCancel: () -> Unit, onOptimize: () -> Unit,
+    contextUsedTokens: Int = 0, contextMaxTokens: Int = 128000,
+    onContextInfoClick: () -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         OutlinedTextField(
@@ -434,7 +459,7 @@ private fun ChatInputBar(
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (engineStatus == EngineStatus.Ready && isLoading) {
                     // 生成中：暂停图标 + 加载动画
                     IconButton(onClick = onCancel, Modifier.size(32.dp)) {
@@ -447,6 +472,26 @@ private fun ChatInputBar(
                     IconButton(onClick = onSend, Modifier.size(32.dp), enabled = inputText.isNotBlank() && engineStatus == EngineStatus.Ready) {
                         Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.ai_send_message), Modifier.size(20.dp), tint = if (inputText.isNotBlank() && engineStatus == EngineStatus.Ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
                     }
+                }
+                // 上下文窗口进度按钮
+                val ratio = if (contextMaxTokens > 0) (contextUsedTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .clickable { onContextInfoClick() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        progress = ratio,
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 1.5.dp,
+                        color = if (ratio < 0.5f) Color(0xFF4CAF50)
+                            else if (ratio < 0.8f) Color(0xFFFFA000)
+                            else Color(0xFFE53935),
+                        trackColor = Color(0xFFE0E0E0),
+                    )
                 }
             }
         }
@@ -602,6 +647,100 @@ private fun TaskRow(task: com.template.jh.data.model.TaskItem) {
             modifier = Modifier.weight(1f),
         )
     }
+}
+
+// 上下文窗口详情对话框
+@Composable
+private fun ContextInfoDialog(
+    usedTokens: Int,
+    maxTokens: Int,
+    messagesCount: Int,
+    activeRulesCount: Int,
+    activeSkillsCount: Int,
+    openedFilePaths: List<String>,
+    onDismiss: () -> Unit,
+) {
+    val ratio = if (maxTokens > 0) (usedTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("上下文窗口", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(
+                            progress = ratio / 100f,
+                            modifier = Modifier.size(60.dp),
+                            strokeWidth = 4.dp,
+                            color = when {
+                                ratio < 50f -> Color(0xFF4CAF50)
+                                ratio < 80f -> Color(0xFFFFA000)
+                                else -> Color(0xFFE53935)
+                            },
+                            trackColor = Color(0xFFE0E0E0),
+                        )
+                        Text(
+                            text = "${ratio.toInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                HorizontalDivider()
+                Text("Token 用量", fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = "$usedTokens / $maxTokens",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "对话框消息: $messagesCount 条",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (activeRulesCount > 0 || activeSkillsCount > 0) {
+                    HorizontalDivider()
+                    Text("系统上下文", fontWeight = FontWeight.SemiBold)
+                    if (activeRulesCount > 0) Text(
+                        text = "活跃规则: $activeRulesCount 条",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (activeSkillsCount > 0) Text(
+                        text = "活跃技能: $activeSkillsCount 项",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (openedFilePaths.isNotEmpty()) {
+                    HorizontalDivider()
+                    Text("已打开文件", fontWeight = FontWeight.SemiBold)
+                    openedFilePaths.take(5).forEach { path ->
+                        Text(
+                            text = path,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (openedFilePaths.size > 5) Text(
+                        text = "... 还有 ${openedFilePaths.size - 5} 个文件",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+    )
 }
 
 @Composable

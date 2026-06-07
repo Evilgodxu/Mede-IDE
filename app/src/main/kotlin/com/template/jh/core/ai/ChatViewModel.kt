@@ -278,11 +278,22 @@ class ChatViewModel(
         _state.update { it.copy(openedFilePaths = paths) }
     }
 
-    // 构建当前打开文件的上下文文本（每次模型输入时注入，不回显给用户）
+    // 构建当前打开文件的上下文文本（注入到每个用户消息前，不回显给用户）
     private fun buildFileContext(): String {
+        val sb = StringBuilder()
         val paths = _state.value.openedFilePaths
-        if (paths.isEmpty()) return ""
-        return paths.joinToString("\n", "[当前打开的文件]\n", "\n\n") { "- $it" }
+        if (paths.isNotEmpty()) {
+            sb.append("[当前打开的文件]\n")
+            paths.forEach { p -> sb.append("- $p\n") }
+        }
+        val activeFile = _state.value.activeFilePath
+        if (activeFile.isNotBlank()) {
+            sb.append("当前活动文件: $activeFile")
+            val cursorLine = _state.value.cursorLine
+            if (cursorLine > 0) sb.append(" (光标在第${cursorLine}行)")
+            sb.append("\n")
+        }
+        return if (sb.isNotEmpty()) sb.toString() + "\n" else ""
     }
 
     // 自动上下文：活动文件 + 光标行号
@@ -469,11 +480,9 @@ class ChatViewModel(
             val fullResponse = StringBuilder()
             val conv = activeConversation ?: return
 
-            // 首轮注入文件上下文（不修改用户可见消息）
-            val sendInput = if (rounds == 1) {
-                val ctx = buildFileContext()
-                if (ctx.isNotEmpty()) ctx + nextInput.toString() else nextInput.toString()
-            } else nextInput.toString()
+            // 每轮注入文件上下文（让模型感知当前打开的文件和活动文件）
+            val fileCtx = buildFileContext()
+            val sendInput = if (fileCtx.isNotEmpty()) fileCtx + nextInput.toString() else nextInput.toString()
 
             conv.sendMessageAsync(sendInput).catch { t ->
                 copyCrashToClipboard("sendMessageAsync(round=$rounds)", t)

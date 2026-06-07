@@ -8,10 +8,7 @@
     
 
     <!-- 中间面板 -->
-    <string name="new_project">新建项目</string>
     <string name="open_folder">打开文件夹</string>
-    <string name="clone_git_repo">克隆 Git 仓库</string>
-    <string name="recent_projects">最近</string>
 
     <!-- AI 协作 -->
     <string name="trae_title">聊天</string>
@@ -25,13 +22,25 @@
     <string name="menu_terminal">终端</string>
 
     <!-- 文件菜单 -->
+    <string name="file_menu_close_folder">关闭文件夹</string>
     <string name="file_menu_new_file">新建文件</string>
+    <string name="file_menu_new_folder">新建文件夹</string>
     <string name="file_menu_open_file">打开文件</string>
+    <string name="file_menu_open_folder_btn">打开文件夹</string>
     <string name="file_menu_recent_files">最近文件</string>
     <string name="file_menu_save">保存</string>
     <string name="file_menu_save_as">另存为</string>
     <string name="file_menu_save_all">全部保存</string>
     <string name="file_menu_auto_save">自动保存</string>
+
+    <!-- 文件对话框 -->
+    <string name="dialog_confirm">确定</string>
+    <string name="dialog_new_file_title">新建文件</string>
+    <string name="dialog_new_folder_title">新建文件夹</string>
+    <string name="dialog_new_file_name_hint">输入文件名</string>
+    <string name="dialog_new_folder_name_hint">输入文件夹名</string>
+    <string name="dialog_save">保存</string>
+    <string name="recent_files_empty">暂无最近文件</string>
 
     <!-- 编辑菜单 -->
     <string name="edit_menu_undo">撤销</string>
