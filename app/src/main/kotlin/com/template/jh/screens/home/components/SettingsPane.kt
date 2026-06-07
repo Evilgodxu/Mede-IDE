@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -326,6 +328,114 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?, onBrowseModelFil
                             Text("下载到系统下载目录")
                         }
                     }
+                }
+            }
+        }
+
+        // 云端模型配置
+        HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+        CloudModelCard(chatViewModel, chatState)
+    }
+}
+
+@Composable
+private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template.jh.core.ai.ChatUiState) {
+    var apiEndpoint by remember(chatState.cloudApiEndpoint) { mutableStateOf(chatState.cloudApiEndpoint) }
+    var apiKey by remember(chatState.cloudApiKey) { mutableStateOf(chatState.cloudApiKey) }
+    var modelName by remember(chatState.cloudModelName) { mutableStateOf(chatState.cloudModelName) }
+    var showKey by remember { mutableStateOf(false) }
+
+    val verifyMsg = when {
+        chatState.engineStatus == EngineStatus.Idle && chatState.engineErrorMessage.startsWith("验证") -> chatState.engineErrorMessage
+        chatState.engineErrorMessage.startsWith("error") || chatState.engineErrorMessage.startsWith("连接失败") -> chatState.engineErrorMessage
+        else -> ""
+    }
+
+    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("云端大模型", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Switch(checked = chatState.cloudModelEnabled, onCheckedChange = { chatViewModel.setCloudModelEnabled(it) })
+            }
+
+            Text("接入 OpenAI 兼容 API（DeepSeek、OpenAI、Claude 等），不依赖本地模型。启用云端模型后自动切换。",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            // 快速预设
+            Text("快速预设", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("DeepSeek", "OpenAI", "自定义").forEach { preset ->
+                    OutlinedButton(onClick = {
+                        when (preset) {
+                            "DeepSeek" -> { apiEndpoint = "https://api.deepseek.com"; modelName = "deepseek-chat" }
+                            "OpenAI" -> { apiEndpoint = "https://api.openai.com/v1"; modelName = "gpt-4o" }
+                        }
+                        chatViewModel.setCloudApiEndpoint(apiEndpoint)
+                        chatViewModel.setCloudModelName(modelName)
+                    }, modifier = Modifier.weight(1f)) {
+                        Text(preset, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+
+            // API 端点
+            OutlinedTextField(
+                value = apiEndpoint,
+                onValueChange = { apiEndpoint = it; chatViewModel.setCloudApiEndpoint(it) },
+                label = { Text("API 端点") },
+                placeholder = { Text("https://api.openai.com/v1") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent),
+            )
+
+            // API Key
+            OutlinedTextField(
+                value = apiKey,
+                onValueChange = { apiKey = it; chatViewModel.setCloudApiKey(it) },
+                label = { Text("API Key") },
+                placeholder = { Text("sk-...") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None
+                    else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { showKey = !showKey }) {
+                        Icon(
+                            if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (showKey) "隐藏" else "显示",
+                        )
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent),
+            )
+
+            // 模型名称
+            OutlinedTextField(
+                value = modelName,
+                onValueChange = { modelName = it; chatViewModel.setCloudModelName(it) },
+                label = { Text("模型名称") },
+                placeholder = { Text("gpt-4o") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent),
+            )
+
+            // 验证连接
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    chatViewModel.setCloudApiEndpoint(apiEndpoint)
+                    chatViewModel.setCloudApiKey(apiKey)
+                    chatViewModel.setCloudModelName(modelName)
+                    chatViewModel.verifyCloudConnection()
+                }) {
+                    Text("验证连接", style = MaterialTheme.typography.labelSmall)
+                }
+                if (verifyMsg.isNotEmpty()) {
+                    Text(verifyMsg, style = MaterialTheme.typography.labelSmall,
+                        color = if (verifyMsg == "验证中…") MaterialTheme.colorScheme.primary
+                        else if (verifyMsg == "ok") Color(0xFF4CAF50)
+                        else MaterialTheme.colorScheme.error)
                 }
             }
         }

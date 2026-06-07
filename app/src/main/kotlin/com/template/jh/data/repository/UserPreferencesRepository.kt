@@ -40,6 +40,11 @@ class UserPreferencesRepository(private val context: Context) {
         val THINKING_ROUNDS = intPreferencesKey("thinking_rounds")
         val LAST_OPENED_FOLDER_URI = stringPreferencesKey("last_opened_folder_uri")
         val OPENED_FILE_TABS = stringPreferencesKey("opened_file_tabs")
+        // 云端模型
+        val CLOUD_MODEL_ENABLED = booleanPreferencesKey("cloud_model_enabled")
+        val CLOUD_API_ENDPOINT = stringPreferencesKey("cloud_api_endpoint")
+        val CLOUD_API_KEY = stringPreferencesKey("cloud_api_key")
+        val CLOUD_MODEL_NAME = stringPreferencesKey("cloud_model_name")
     }
 
     val themeMode: Flow<String> = context.dataStore.data
@@ -50,6 +55,19 @@ class UserPreferencesRepository(private val context: Context) {
 
     val modelName: Flow<String> = context.dataStore.data
         .map { it[PreferencesKeys.MODEL_NAME] ?: "" }
+
+    // 云端模型配置
+    val cloudModelEnabled: Flow<Boolean> = context.dataStore.data
+        .map { it[PreferencesKeys.CLOUD_MODEL_ENABLED] ?: false }
+
+    val cloudApiEndpoint: Flow<String> = context.dataStore.data
+        .map { it[PreferencesKeys.CLOUD_API_ENDPOINT] ?: "https://api.openai.com/v1" }
+
+    val cloudApiKey: Flow<String> = context.dataStore.data
+        .map { it[PreferencesKeys.CLOUD_API_KEY] ?: "" }
+
+    val cloudModelName: Flow<String> = context.dataStore.data
+        .map { it[PreferencesKeys.CLOUD_MODEL_NAME] ?: "gpt-4o" }
 
     val userName: Flow<String> = context.dataStore.data
         .map { it[PreferencesKeys.USER_NAME] ?: "" }
@@ -138,6 +156,22 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun setModelName(name: String) {
         context.dataStore.edit { it[PreferencesKeys.MODEL_NAME] = name }
+    }
+
+    suspend fun setCloudModelEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.CLOUD_MODEL_ENABLED] = enabled }
+    }
+
+    suspend fun setCloudApiEndpoint(endpoint: String) {
+        context.dataStore.edit { it[PreferencesKeys.CLOUD_API_ENDPOINT] = endpoint }
+    }
+
+    suspend fun setCloudApiKey(apiKey: String) {
+        context.dataStore.edit { it[PreferencesKeys.CLOUD_API_KEY] = apiKey }
+    }
+
+    suspend fun setCloudModelName(modelName: String) {
+        context.dataStore.edit { it[PreferencesKeys.CLOUD_MODEL_NAME] = modelName }
     }
 
     suspend fun setUserName(name: String) {

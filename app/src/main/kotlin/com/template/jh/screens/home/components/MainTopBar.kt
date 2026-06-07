@@ -67,6 +67,7 @@ fun MainTopBar(
     onScanModels: () -> Unit = {},
     onLoadModel: (String) -> Unit = {},
     onBrowseModelFile: () -> Unit = {},
+    onTerminalClick: () -> Unit = {},
 ) {
     val topBarInsets = if (!windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)) {
         WindowInsets.statusBars
@@ -351,7 +352,7 @@ fun MainTopBar(
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier
-                            .clickable { }
+                            .clickable { onTerminalClick() }
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     )
 

@@ -36,6 +36,7 @@ class ChatViewModel(
 
     private val liteRTManager = LiteRTManager(application)
     private val aiToolSet = AIToolSet(application)
+    private val cloudLLMClient = CloudLLMClient(application)
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
@@ -132,6 +133,26 @@ class ChatViewModel(
                 _state.update { it.copy(thinkingRounds = rounds) }
             }
         }
+        viewModelScope.launch {
+            preferencesRepo.cloudModelEnabled.collect { enabled ->
+                _state.update { it.copy(cloudModelEnabled = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            preferencesRepo.cloudApiEndpoint.collect { endpoint ->
+                _state.update { it.copy(cloudApiEndpoint = endpoint) }
+            }
+        }
+        viewModelScope.launch {
+            preferencesRepo.cloudApiKey.collect { key ->
+                _state.update { it.copy(cloudApiKey = key) }
+            }
+        }
+        viewModelScope.launch {
+            preferencesRepo.cloudModelName.collect { name ->
+                _state.update { it.copy(cloudModelName = name) }
+            }
+        }
     }
 
     fun setDeepThinkEnabled(enabled: Boolean) {
@@ -180,8 +201,9 @@ class ChatViewModel(
     fun sendMessage() {
         val text = _state.value.inputText.trim()
         if (text.isEmpty()) return
-        if (!liteRTManager.isInitialized) {
-            _state.update { it.copy(engineErrorMessage = "请先加载模型") }
+        val isCloud = _state.value.cloudModelEnabled
+        if (!isCloud && !liteRTManager.isInitialized) {
+            _state.update { it.copy(engineErrorMessage = "请先加载模型或启用云端模型") }
             return
         }
         val userMsg = ChatMessage(role = ChatRole.User, content = text)
@@ -195,8 +217,12 @@ class ChatViewModel(
         val notifSettings = runBlocking { preferencesRepo.notificationSettings.first() }
         sendJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val conv = ensureConversation()
-                processWithJsonTools(text, modelMsgId, taskId, ctx, notifSettings)
+                if (isCloud) {
+                    processWithCloudTools(text, modelMsgId, taskId, ctx, notifSettings)
+                } else {
+                    val conv = ensureConversation()
+                    processWithJsonTools(text, modelMsgId, taskId, ctx, notifSettings)
+                }
             } catch (e: Exception) {
                 copyCrashToClipboard("sendMessage", e)
                 updateModelMessage(modelMsgId, "\n\n[错误: ${e.message}]", false)
@@ -237,6 +263,16 @@ class ChatViewModel(
     fun clearNotification() { _state.update { it.copy(lastNotification = null) } }
 
     fun setProjectRoot(uri: Uri?) { aiToolSet.projectUri = uri }
+
+    // 接收 HomeScreen 的打开文件列表，注入到 system prompt
+    fun setOpenedFilePaths(paths: List<String>) {
+        _state.update { it.copy(openedFilePaths = paths) }
+    }
+
+    // 自动上下文：活动文件 + 光标行号
+    fun setActiveFileContext(path: String, cursorLine: Int) {
+        _state.update { it.copy(activeFilePath = path, cursorLine = cursorLine) }
+    }
 
     fun cancelGeneration() {
         sendJob?.cancel()
@@ -300,20 +336,32 @@ class ChatViewModel(
         sb.append("你可以多次调用工具来获取信息或修改文件。每轮之后决定：继续调用还是给出最终答案。\n\n")
         sb.append("## 可用工具\n")
         sb.append("- listFiles: 列出项目目录内容\n")
-        sb.append("- readFile: 读取文件内容\n")
+        sb.append("- readFile: 读取文件内容（带行号）\n")
         sb.append("- writeFile: 创建或覆盖文件\n")
-        sb.append("- runCommand: 执行 shell 命令 (git/gradle/adb等)\n")
-        sb.append("- searchWeb: 搜索互联网\n\n")
+        sb.append("- applyPatch: 行级差异编辑（只修改部分行，比 writeFile 更精确），参数: path(文件路径), patches(JSON数组)\n")
+        sb.append("- runCommand: 执行 shell 命令\n")
+        sb.append("- searchWeb: 搜索互联网\n")
+        sb.append("- gitStatus: 查看 git 状态\n")
+        sb.append("- gitAdd: 暂存文件（参数 paths，用 '.' 暂存全部）\n")
+        sb.append("- gitCommit: 提交暂存（参数 message）\n")
+        sb.append("- gitPush: 推送到远程（参数 remote, branch）\n")
+        sb.append("- gitBranch: 查看分支\n")
+        sb.append("- gitDiff: 查看差异\n")
+        sb.append("- readLints: 读取项目的编译/Lint 错误，修复代码后调用此工具检查是否已解决\n\n")
+        sb.append("## 修改文件时的策略\n")
+        sb.append("- 修改文件**优先使用 applyPatch**（只替换特定行），只有当文件需要完全重写时才用 writeFile\n")
+        sb.append("- applyPatch 的 patches 参数格式: [{\"type\":\"replace\"|\"insert\"|\"delete\", \"startLine\":行号(从1开始), \"endLine\":结束行(不包含), \"content\":\"新内容\"}]\n")
+        sb.append("- 修改后调用 readLints 检查是否引入新错误，如有则修复\n\n")
         sb.append("## 工具调用格式\n")
         sb.append("调用工具时，只输出这个 JSON（不要有其他文本）：\n")
         sb.append("{\"tool_name\": \"FUNCTION_NAME\", \"arguments\": {\"key\": \"value\"}}\n\n")
         sb.append("示例:\n")
         sb.append("{\"tool_name\": \"listFiles\", \"arguments\": {}}\n")
         sb.append("{\"tool_name\": \"readFile\", \"arguments\": {\"path\": \"src/main.kt\"}}\n")
-        sb.append("{\"tool_name\": \"writeFile\", \"arguments\": {\"path\": \"test.txt\", \"content\": \"hello\"}}\n")
-        sb.append("{\"tool_name\": \"runCommand\", \"arguments\": {\"command\": \"ls -la\"}}\n")
-        sb.append("{\"tool_name\": \"searchWeb\", \"arguments\": {\"query\": \"android jetpack\"}}\n\n")
-        sb.append("总是先调用 listFiles 查看项目结构，修改前先 readFile。\n")
+        sb.append("{\"tool_name\": \"applyPatch\", \"arguments\": {\"path\": \"src/main.kt\", \"patches\": \"[{\\\"type\\\":\\\"replace\\\",\\\"startLine\\\":2,\\\"endLine\\\":4,\\\"content\\\":\\\"new\\\"}]\"}}\n")
+        sb.append("{\"tool_name\": \"gitStatus\", \"arguments\": {}}\n")
+        sb.append("{\"tool_name\": \"readLints\", \"arguments\": {}}\n\n")
+        sb.append("总是在执行修改前先 readFile 获取文件当前内容。\n")
         val userName = runBlocking { preferencesRepo.userName.first() }
         if (userName.isNotBlank()) sb.append("\n用户: $userName")
         val rules = runBlocking { preferencesRepo.rules.first() }
@@ -321,6 +369,21 @@ class ChatViewModel(
             sb.append("\n\n用户规则:")
             rules.forEach { r -> sb.append("\n- ${r.name}: ${r.content}") }
             sb.append("\n严格遵守以上规则。")
+        }
+        // 注入当前打开的文件的路径（让模型感知用户正在浏览的内容）
+        val openPaths = _state.value.openedFilePaths
+        if (openPaths.isNotEmpty()) {
+            sb.append("\n\n## 用户当前打开的文件\n")
+            openPaths.forEach { p -> sb.append("- $p\n") }
+            sb.append("这些文件用户可能正在查看。回答问题时优先参考这些文件，必要时用 readFile 读取它们的内容。\n")
+        }
+        // 注入当前活动文件 + 行号（自动上下文）
+        val activeFile = _state.value.activeFilePath
+        if (activeFile.isNotBlank()) {
+            sb.append("\n当前活动文件: $activeFile")
+            val cursorLine = _state.value.cursorLine
+            if (cursorLine > 0) sb.append(" (光标在第${cursorLine}行)")
+            sb.append("\n")
         }
         return sb.toString()
     }
@@ -354,8 +417,16 @@ class ChatViewModel(
             "listFiles" -> aiToolSet.listFiles(args["subPath"] ?: "")
             "readFile" -> aiToolSet.readFile(args["path"] ?: "")
             "writeFile" -> aiToolSet.writeFile(args["path"] ?: "", args["content"] ?: "")
+            "applyPatch" -> aiToolSet.applyPatch(args["path"] ?: "", args["patches"] ?: "")
             "runCommand" -> aiToolSet.runCommand(args["command"] ?: "")
             "searchWeb" -> aiToolSet.searchWeb(args["query"] ?: "")
+            "gitStatus" -> aiToolSet.gitStatus()
+            "gitAdd" -> aiToolSet.gitAdd(args["paths"] ?: ".")
+            "gitCommit" -> aiToolSet.gitCommit(args["message"] ?: "")
+            "gitPush" -> aiToolSet.gitPush(args["remote"] ?: "origin", args["branch"] ?: "main")
+            "gitBranch" -> aiToolSet.gitBranch(args["args"] ?: "")
+            "gitDiff" -> aiToolSet.gitDiff(args["args"] ?: "")
+            "readLints" -> aiToolSet.readLints()
             else -> "Unknown tool: $name"
         }
     } catch (e: Exception) { "Tool error: ${e.message}" }
@@ -423,6 +494,120 @@ class ChatViewModel(
             nextInput = Message.tool(Contents.of(listOf(Content.ToolResponse(funcName, toolResult))))
             currentMsgId = java.util.UUID.randomUUID().toString()
             _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true)) }
+        }
+    }
+
+    // ---- 云端模型工具循环（OpenAI 兼容 API）----
+
+    private suspend fun processWithCloudTools(
+        text: String, msgId: String, taskId: String,
+        ctx: Application, notif: com.template.jh.data.model.NotificationSettings,
+    ) {
+        val cfg = CloudModelConfig(
+            enabled = true,
+            apiEndpoint = _state.value.cloudApiEndpoint,
+            apiKey = _state.value.cloudApiKey,
+            modelName = _state.value.cloudModelName,
+        )
+        if (cfg.apiKey.isBlank()) {
+            updateModelMessage(msgId, "\n\n[错误: 未配置 API Key]", false)
+            finalizeModelMessage(msgId)
+            updateTaskStatus(taskId, TaskStatus.Failed)
+            return
+        }
+
+        var currentMsgId = msgId
+        var currentInput: String = text
+        // 构建对话历史
+        val historyMessages = mutableListOf<ChatMessage>()
+        for (msg in _state.value.messages) {
+            if (msg.id == currentMsgId) continue
+            if (msg.role == ChatRole.User || msg.role == ChatRole.Model) {
+                if (msg.content.isNotBlank()) historyMessages.add(msg)
+            }
+        }
+
+        while (true) {
+            val fullResponse = StringBuilder()
+            try {
+                cloudLLMClient.sendMessage(
+                    config = cfg,
+                    systemPrompt = buildSystemInstruction(),
+                    messages = historyMessages + ChatMessage(role = ChatRole.User, content = currentInput),
+                    onChunk = { chunk ->
+                        fullResponse.append(chunk)
+                        updateModelMessage(currentMsgId, chunk, true)
+                    },
+                )
+            } catch (e: Exception) {
+                copyCrashToClipboard("cloudSendMessage", e)
+                updateModelMessage(currentMsgId, "\n\n[云端模型错误: ${e.message}]", false)
+                finalizeModelMessage(currentMsgId)
+                updateTaskStatus(taskId, TaskStatus.Failed)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, "云端模型异常: ${e.message}", notif)
+                emitNotification(NotificationEventType.TaskFailed, "云端模型异常: ${e.message}")
+                return
+            }
+
+            val response = fullResponse.toString().trim()
+            if (response.isBlank()) {
+                finalizeModelMessage(currentMsgId)
+                updateTaskStatus(taskId, TaskStatus.Completed)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成", notif)
+                emitNotification(NotificationEventType.TaskCompleted, "任务完成")
+                return
+            }
+
+            val toolCall = extractJsonToolCall(response)
+            if (toolCall == null) {
+                finalizeModelMessage(currentMsgId)
+                updateTaskStatus(taskId, TaskStatus.Completed)
+                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, "任务完成", notif)
+                emitNotification(NotificationEventType.TaskCompleted, "任务完成")
+                return
+            }
+
+            val (prefixText, funcName, funcArgs) = toolCall
+            val toolResult = executeAiTool(funcName, funcArgs)
+            val toolDisplay = "\n\n$toolResult"
+
+            if (prefixText != null) updateModelMessage(currentMsgId, toolDisplay, true)
+            else updateModelMessage(currentMsgId, toolDisplay, false)
+            finalizeModelMessage(currentMsgId)
+
+            // 工具结果作为下一轮的用户输入
+            currentInput = toolResult
+            currentMsgId = java.util.UUID.randomUUID().toString()
+            _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true)) }
+        }
+    }
+
+    // 云端模型设置方法
+    fun setCloudModelEnabled(enabled: Boolean) {
+        viewModelScope.launch { preferencesRepo.setCloudModelEnabled(enabled) }
+        if (!enabled) _state.update { it.copy(cloudModelEnabled = false) }
+    }
+
+    fun setCloudApiEndpoint(endpoint: String) {
+        viewModelScope.launch { preferencesRepo.setCloudApiEndpoint(endpoint) }
+    }
+
+    fun setCloudApiKey(apiKey: String) {
+        viewModelScope.launch { preferencesRepo.setCloudApiKey(apiKey) }
+    }
+
+    fun setCloudModelName(name: String) {
+        viewModelScope.launch { preferencesRepo.setCloudModelName(name) }
+    }
+
+    fun verifyCloudConnection() {
+        val cfg = _state.value.let {
+            CloudModelConfig(true, it.cloudApiEndpoint, it.cloudApiKey, it.cloudModelName)
+        }
+        _state.update { it.copy(engineErrorMessage = "验证中…") }
+        viewModelScope.launch {
+            val result = cloudLLMClient.verifyConnection(cfg)
+            _state.update { it.copy(engineErrorMessage = if (result == "ok") "" else result) }
         }
     }
 

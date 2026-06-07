@@ -70,6 +70,8 @@ fun MainContentArea(
     onCloseAllTabs: () -> Unit = {},
     onSaveAllTabs: () -> Unit = {},
     onSaveCurrent: () -> Unit = {},
+    isTerminalVisible: Boolean = false,
+    onTerminalClose: () -> Unit = {},
     tabContent: @Composable (String) -> Unit = {},
 ) {
     val hasTabs = tabs.isNotEmpty()
@@ -97,7 +99,7 @@ fun MainContentArea(
 
         Box(
             modifier = Modifier
-                .weight(1f)
+                .weight(if (isTerminalVisible) 0.75f else 1f)
                 .fillMaxWidth()
         ) {
             if (activeTabIndex in tabs.indices) {
@@ -123,6 +125,15 @@ fun MainContentArea(
                     openedFolderName = openedFolderName,
                 )
             }
+        }
+
+        if (isTerminalVisible) {
+            TerminalPanel(
+                onClose = onTerminalClose,
+                modifier = Modifier
+                    .weight(0.25f)
+                    .fillMaxWidth()
+            )
         }
     }
 }

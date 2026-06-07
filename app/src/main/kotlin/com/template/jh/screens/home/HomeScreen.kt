@@ -1,6 +1,7 @@
 package com.template.jh.screens.home
 
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.WindowInsets
@@ -28,6 +29,8 @@ import androidx.window.core.layout.WindowSizeClass
 import com.template.jh.R
 import com.template.jh.core.ai.ChatViewModel
 import com.template.jh.core.ai.FileOperationEvents
+import com.template.jh.core.editor.LineChangeType
+import com.template.jh.core.editor.computeLineDiff
 import com.template.jh.screens.home.components.AIChatPanel
 import com.template.jh.screens.home.components.CodeEditor
 import com.template.jh.screens.home.components.MainContentArea
@@ -50,6 +53,7 @@ fun HomeScreen(
     val windowSizeClass = rememberWindowSizeClass()
     var selectedTab by remember { mutableStateOf<SidebarTab?>(null) }
     var isSettingsOpen by remember { mutableStateOf(false) }
+    var isTerminalVisible by remember { mutableStateOf(false) }
     val homeState by viewModel.state.collectAsState()
     val files by viewModel.files.collectAsState()
     val chatState by chatViewModel.state.collectAsState()
@@ -65,10 +69,34 @@ fun HomeScreen(
     val editorContent = remember { mutableStateMapOf<String, TextFieldValue>() }
     val workspaceRoot = remember { File(context.filesDir, "workspace") }
 
-    // 持久化文件 tabs
+    // SAF content:// 路径 → 相对于项目根目录的路径
+    fun safPathToRelative(safPath: String): String {
+        if (!safPath.startsWith("content://")) return safPath
+        val projectUriStr = homeState.openedFolderUri ?: return safPath
+        return try {
+            val treeUri = Uri.parse(projectUriStr)
+            val treeDocId = DocumentsContract.getTreeDocumentId(treeUri)
+            val fileDocId = DocumentsContract.getDocumentId(Uri.parse(safPath))
+            val prefix = treeDocId.trimEnd('/') + "/"
+            if (fileDocId.startsWith(prefix)) {
+                fileDocId.removePrefix(prefix)
+            } else {
+                val idx = fileDocId.indexOf("/")
+                if (idx > 0) fileDocId.substring(idx + 1) else safPath
+            }
+        } catch (_: Exception) { safPath }
+    }
+
+    // 持久化文件 tabs + 同步到 ChatViewModel（让大模型感知打开的文件，使用相对路径）
     fun saveFileTabs() {
         val paths = tabs.filter { it.type == TabType.File }.map { it.id }
         if (paths.isNotEmpty()) viewModel.saveOpenedTabs(paths)
+        // 转换为相对路径给大模型
+        val projectUriStr = homeState.openedFolderUri
+        val relPaths = if (projectUriStr != null) {
+            paths.map { p -> safPathToRelative(p) }
+        } else paths
+        chatViewModel.setOpenedFilePaths(relPaths)
     }
 
     // 打开/切换 Tab
@@ -83,9 +111,10 @@ fun HomeScreen(
         saveFileTabs()
     }
 
-    // 打开文件 Tab
+    // 打开文件 Tab（统一使用相对路径作为 ID，避免 content:// URI 与 AI 操作的相对路径不一致）
     fun openFileTab(path: String, displayName: String? = null) {
-        openTab(TabItem(path, displayName ?: displayNameFromPath(path), TabType.File))
+        val relPath = if (path.startsWith("content://")) safPathToRelative(path) else path
+        openTab(TabItem(relPath, displayName ?: displayNameFromPath(relPath), TabType.File))
     }
 
     // 打开设置 Tab
@@ -142,12 +171,19 @@ fun HomeScreen(
         return tfv
     }
 
-    // 保存文件
+    // 保存文件（通过 SAF 相对路径或 workspaceRoot 兜底）
     fun saveFile(path: String) {
         val content = editorContent[path]?.text ?: return
         try {
-            if (path.startsWith("content://")) {
-                context.contentResolver.openOutputStream(Uri.parse(path), "wt")?.use {
+            val projectUriStr = homeState.openedFolderUri
+            if (projectUriStr != null) {
+                val treeUri = Uri.parse(projectUriStr)
+                var doc = DocumentFile.fromTreeUri(context, treeUri) ?: return
+                for (segment in path.trimStart('/').split('/')) {
+                    if (segment.isEmpty()) continue
+                    doc = doc.findFile(segment) ?: return
+                }
+                context.contentResolver.openOutputStream(doc.uri, "wt")?.use {
                     it.write(content.toByteArray(Charsets.UTF_8))
                 }
             } else {
@@ -156,14 +192,47 @@ fun HomeScreen(
         } catch (_: Exception) {}
     }
 
-    // 自动打开 AI 操作的文件（写文件后清除缓存刷新编辑器）
+    // 待审阅修改（文件路径 → 原始/新内容）
+    data class PendingFileEdit(val filePath: String, val originalContent: String, val newContent: String)
+    val pendingEdits = remember { mutableStateMapOf<String, PendingFileEdit>() }
+
+    // 自动打开 AI 操作的文件 + 追踪待审阅修改
     LaunchedEffect(Unit) {
         FileOperationEvents.events.collect { event ->
             editorContent.remove(event.path)
+            if (event.operation == "modify" && event.originalContent.isNotEmpty() && event.newContent.isNotEmpty()) {
+                pendingEdits[event.path] = PendingFileEdit(event.path, event.originalContent, event.newContent)
+            }
             if (event.operation != "delete") {
                 openFileTab(event.path)
             }
         }
+    }
+
+    // 确认/拒绝修改
+    fun acceptEdit(path: String) {
+        pendingEdits.remove(path)
+        editorContent.remove(path) // 强制刷新
+    }
+    fun rejectEdit(path: String) {
+        val edit = pendingEdits[path] ?: return
+        pendingEdits.remove(path)
+        // 写回原始内容
+        val projectUriStr = homeState.openedFolderUri
+        if (projectUriStr != null) {
+            runCatching {
+                val treeUri = Uri.parse(projectUriStr)
+                var doc = DocumentFile.fromTreeUri(context, treeUri) ?: return@runCatching
+                for (segment in edit.filePath.trimStart('/').split('/')) {
+                    if (segment.isEmpty()) continue
+                    doc = doc.findFile(segment) ?: return@runCatching
+                }
+                context.contentResolver.openOutputStream(doc.uri, "wt")?.use { out ->
+                    out.write(edit.originalContent.toByteArray(Charsets.UTF_8))
+                }
+            }
+        }
+        editorContent.remove(edit.filePath)
     }
 
     // 打开 AI 操作卡片指定的文件
@@ -222,6 +291,7 @@ fun HomeScreen(
                 onBrowseModelFile = {
                     filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*"))
                 },
+                onTerminalClick = { isTerminalVisible = !isTerminalVisible },
             )
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -276,6 +346,8 @@ fun HomeScreen(
                             saveFileTabs()
                         }
                     },
+                    isTerminalVisible = isTerminalVisible,
+                    onTerminalClose = { isTerminalVisible = false },
                     onCloseAllTabs = {
                         tabs.clear()
                         activeTabIndex = -1
@@ -296,10 +368,20 @@ fun HomeScreen(
                         val content = readFileFromSource(path)
                         val tfv = TextFieldValue(content)
                         editorContent[path] = tfv
+                        val pending = pendingEdits[path]
+                        val lineDiffs: Map<Int, LineChangeType> = if (pending != null) {
+                            computeLineDiff(pending.originalContent, pending.newContent)
+                                .filter { it.type != LineChangeType.Unchanged }
+                                .associate { it.lineIndex to it.type }
+                        } else emptyMap()
                         CodeEditor(
                             text = tfv,
                             onTextChange = { editorContent[path] = it },
                             modifier = Modifier.fillMaxSize(),
+                            lineDiffs = lineDiffs,
+                            pendingFilePath = if (pending != null) path else null,
+                            onAcceptChanges = { acceptEdit(path) },
+                            onRejectChanges = { rejectEdit(path) },
                         )
                     },
                 )

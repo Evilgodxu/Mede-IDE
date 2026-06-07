@@ -85,4 +85,14 @@ data class ChatUiState(
     // 深度思考
     val deepThinkEnabled: Boolean = true,
     val thinkingRounds: Int = 2,
+    // 云端模型
+    val cloudModelEnabled: Boolean = false,
+    val cloudApiEndpoint: String = "https://api.openai.com/v1",
+    val cloudApiKey: String = "",
+    val cloudModelName: String = "gpt-4o",
+    // 当前打开的文件路径列表
+    val openedFilePaths: List<String> = emptyList(),
+    // 自动上下文
+    val activeFilePath: String = "",
+    val cursorLine: Int = 0,
 )

@@ -81,8 +81,16 @@ fun AIChatPanel(
     val state by viewModel.state.collectAsState()
     val listState = rememberLazyListState()
 
-    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.content) {
-        if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.size - 1)
+    // 自动滚动到最新消息（仅当用户未手动上滚时）
+    LaunchedEffect(state.messages.size, state.isLoading) {
+        if (state.messages.isEmpty()) return@LaunchedEffect
+        // 获取当前可见的最后一项索引
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        val lastIndex = state.messages.size - 1
+        // 如果用户正在靠近底部（最后可见项在倒数第3以内），自动滚到底
+        if (lastVisible >= lastIndex - 2 || state.isLoading) {
+            try { listState.scrollToItem(lastIndex) } catch (_: Exception) {}
+        }
     }
 
     // 通知事件弹出提示
@@ -276,7 +284,7 @@ private fun ChatBubble(
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🧠 思考", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("思考", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.width(4.dp))
                     Text(
                         if (expanded) "▼" else "▶",

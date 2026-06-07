@@ -1,0 +1,151 @@
+package com.template.jh.core.ai
+
+import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+
+// 云端大模型配置
+data class CloudModelConfig(
+    val enabled: Boolean = false,
+    val apiEndpoint: String = "https://api.openai.com/v1",
+    val apiKey: String = "",
+    val modelName: String = "gpt-4o",
+)
+
+// 云端大模型客户端（OpenAI 兼容 API /chat/completions + SSE 流式）
+class CloudLLMClient(private val context: Context) {
+
+    private val connectTimeout = 30000
+    private val readTimeout = 60000
+
+    // 发送消息并流式收集响应，返回完整响应文本
+    suspend fun sendMessage(
+        config: CloudModelConfig,
+        systemPrompt: String,
+        messages: List<ChatMessage>,
+        onChunk: (String) -> Unit,
+    ): String = withContext(Dispatchers.IO) {
+        val endpoint = config.apiEndpoint.trimEnd('/') + "/chat/completions"
+
+        val msgs = JSONArray().apply {
+            put(JSONObject().apply {
+                put("role", "system")
+                put("content", systemPrompt)
+            })
+            for (msg in messages) {
+                if (msg.content.isBlank()) continue
+                put(JSONObject().apply {
+                    put("role", when (msg.role) {
+                        ChatRole.User -> "user"
+                        ChatRole.Model -> "assistant"
+                        else -> return@apply
+                    })
+                    put("content", msg.content)
+                })
+            }
+        }
+
+        val body = JSONObject().apply {
+            put("model", config.modelName)
+            put("messages", msgs)
+            put("stream", true)
+            put("max_tokens", 8192)
+            put("temperature", 0.7)
+        }
+
+        val conn = URL(endpoint).openConnection() as HttpURLConnection
+        conn.apply {
+            requestMethod = "POST"
+            connectTimeout = connectTimeout
+            readTimeout = readTimeout
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Authorization", "Bearer ${config.apiKey}")
+            setRequestProperty("Accept", "text/event-stream")
+            doOutput = true
+        }
+
+        val fullText = StringBuilder()
+
+        try {
+            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+
+            val responseCode = conn.responseCode
+            if (responseCode != 200) {
+                val errorBody = try {
+                    conn.errorStream?.bufferedReader()?.readText() ?: conn.responseMessage
+                } catch (_: Exception) { conn.responseMessage }
+                throw RuntimeException("API error $responseCode: $errorBody")
+            }
+
+            BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { reader ->
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    val l = line ?: continue
+                    if (!l.startsWith("data: ")) continue
+                    val data = l.removePrefix("data: ").trim()
+                    if (data == "[DONE]") break
+                    try {
+                        val json = JSONObject(data)
+                        val choices = json.optJSONArray("choices")
+                        if (choices == null || choices.length() == 0) continue
+                        val delta = choices.getJSONObject(0).optJSONObject("delta") ?: continue
+                        val content = delta.optString("content", "")
+                        if (content.isNotEmpty()) {
+                            fullText.append(content)
+                            onChunk(content)
+                        }
+                    } catch (_: Exception) {
+                        // 跳过无法解析的 SSE 行
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            conn.disconnect()
+            throw e
+        }
+        conn.disconnect()
+        fullText.toString()
+    }
+
+    // 验证 API 连接是否正常（非流式短请求）
+    suspend fun verifyConnection(config: CloudModelConfig): String = withContext(Dispatchers.IO) {
+        val endpoint = config.apiEndpoint.trimEnd('/') + "/chat/completions"
+        val body = JSONObject().apply {
+            put("model", config.modelName)
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply { put("role", "user"); put("content", "ping") })
+            })
+            put("stream", false)
+            put("max_tokens", 5)
+        }
+        val conn = URL(endpoint).openConnection() as HttpURLConnection
+        conn.apply {
+            requestMethod = "POST"
+            connectTimeout = 10000
+            readTimeout = 10000
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Authorization", "Bearer ${config.apiKey}")
+            doOutput = true
+        }
+        try {
+            OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
+            val code = conn.responseCode
+            if (code == 200) "ok"
+            else {
+                val err = try { conn.errorStream?.bufferedReader()?.readText()?.take(200) } catch (_: Exception) { null }
+                "error $code: ${err ?: conn.responseMessage}"
+            }
+        } catch (e: Exception) {
+            "连接失败: ${e.message}"
+        } finally {
+            conn.disconnect()
+        }
+    }
+}

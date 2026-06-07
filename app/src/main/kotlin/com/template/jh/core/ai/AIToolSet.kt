@@ -7,6 +7,8 @@ import android.provider.DocumentsContract
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
+import com.template.jh.core.editor.applyPatches
+import com.template.jh.core.editor.PatchOp
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -30,15 +32,26 @@ class AIToolSet(private val context: Context) : ToolSet {
         return "No project folder is open. Please open a folder first."
     }
 
-    @Tool(description = "Read the content of a file in the project. Must be called before modifying a file.")
+    // 读取原始内容（无行号，供 applyPatch 内部使用）
+    private fun readFileRaw(path: String): String? {
+        val uri = projectUri ?: return null
+        val docUri = resolveSafChild(uri, path) ?: return null
+        return try {
+            context.contentResolver.openInputStream(docUri)?.bufferedReader()?.readText()
+        } catch (_: Exception) { null }
+    }
+
+    @Tool(description = "Read the content of a file in the project. Must be called before modifying a file. Returns content with line numbers.")
     fun readFile(
         @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
     ): String {
         val uri = projectUri
         if (uri != null) {
-            val docUri = resolveSafChild(uri, path) ?: return "File not found: $path"
-            return context.contentResolver.openInputStream(docUri)?.bufferedReader()?.readText()
-                ?: "Failed to read file: $path"
+            val text = readFileRaw(path) ?: return "File not found: $path"
+            val lineNumWidth = text.lines().size.toString().length
+            return text.lines().mapIndexed { i, line ->
+                "${(i + 1).toString().padStart(lineNumWidth)}: $line"
+            }.joinToString("\n")
         }
         return "No project folder is open."
     }
@@ -60,13 +73,58 @@ class AIToolSet(private val context: Context) : ToolSet {
                 context.contentResolver.openOutputStream(targetUri, "wt")?.use { out ->
                     out.write(content.toByteArray(Charsets.UTF_8))
                 } ?: return "Failed to write file: $path"
-                FileOperationEvents.notify(path, "create", content.lines().size)
+                FileOperationEvents.notify(path, "create", content.lines().size, newContent = content)
                 return "File written: $path (${content.lines().size} lines)"
             } catch (e: Exception) {
                 return "Failed to write file: ${e.message}"
             }
         }
         return "No project folder is open."
+    }
+
+    // 行级差异编辑：对大模型友好的 patch 格式
+    // patches 是 JSON 数组，每个元素: {"type":"replace"|"insert"|"delete", "startLine":int, "endLine":int, "content":"..."}
+    @Tool(description = "Apply line-level changes to an existing file. Use this instead of writeFile when only parts need modification. Returns summary of changes.")
+    fun applyPatch(
+        @ToolParam(description = "File path relative to project root") path: String,
+        @ToolParam(description = "JSON array of patches. Each: {\"type\":\"replace\"|\"insert\"|\"delete\", \"startLine\":int (1-based), \"endLine\":int (exclusive), \"content\":\"new text\"}") patchesJson: String,
+    ): String {
+        val uri = projectUri
+        if (uri == null) return "No project folder is open."
+        return try {
+            val original = readFileRaw(path)
+            if (original == null) {
+                return "Cannot patch: file not found or not open. Use writeFile to create first."
+            }
+            val patches = org.json.JSONArray(patchesJson)
+            val patchOps = (0 until patches.length()).map { i ->
+                val obj = patches.getJSONObject(i)
+                PatchOp(
+                    type = obj.optString("type", "replace"),
+                    startLine = obj.optInt("startLine", 0),
+                    endLine = obj.optInt("endLine", 0),
+                    content = obj.optString("content", ""),
+                )
+            }
+            val newContent = applyPatches(original, patchOps)
+            val parentPath = path.substringBeforeLast('/')
+            if (parentPath.isNotEmpty() && parentPath != path) ensureSafDir(uri, parentPath)
+            val existing = resolveSafChild(uri, path)
+            val targetUri = if (existing != null) existing else createSafFile(uri, path)
+            if (targetUri == null) return "Failed to create file: $path"
+            context.contentResolver.openOutputStream(targetUri, "wt")?.use { out ->
+                out.write(newContent.toByteArray(Charsets.UTF_8))
+            } ?: return "Failed to write file: $path"
+            FileOperationEvents.notify(path, "modify", computeChangedLines(original, newContent), original, newContent)
+            "Patched $path (${patchOps.size} ops applied)"
+        } catch (e: Exception) {
+            "Patch failed: ${e.message}"
+        }
+    }
+
+    private fun computeChangedLines(old: String, new: String): Int {
+        val o = old.lines(); val n = new.lines()
+        return (maxOf(o.size, n.size) - (o.zip(n).count { it.first == it.second })).coerceAtLeast(1)
     }
 
     // ---- 终端命令 ----
@@ -98,20 +156,131 @@ class AIToolSet(private val context: Context) : ToolSet {
     ): String {
         return runCatching {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            val url = URL("https://lite.duckduckgo.com/lite/?q=$encoded")
+            // 使用 DuckDuckGo HTML 搜索（非 Lite 版，结构更稳定）
+            val url = URL("https://html.duckduckgo.com/html/?q=$encoded")
             val conn = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 8000; readTimeout = 8000
-                setRequestProperty("User-Agent", "Mozilla/5.0")
+                connectTimeout = 10000; readTimeout = 10000
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
             }
             val html = conn.inputStream.bufferedReader().readText()
             conn.disconnect()
-            val results = Regex("""class="result-snippet"[^>]*>(.*?)</td>""", RegexOption.DOT_MATCHES_ALL)
-                .findAll(html).take(3).joinToString("\n") {
-                    it.groupValues[1].replace(Regex("<[^>]*>"), "").trim()
-                }
-            if (results.isBlank()) "Search returned no results."
-            else "Search results:\n$results"
+
+            // 提取标题 + 摘要（DDG HTML 搜索使用 result__a + result__snippet）
+            val pattern = Regex(
+                """class="result__a"[^>]*>\s*(.*?)\s*</a>.*?class="result__snippet"[^>]*>\s*(.*?)\s*</a>""",
+                setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
+            )
+            val results = pattern.findAll(html).take(5).map { match ->
+                val title = match.groupValues[1].replace(Regex("<[^>]*>"), "").trim()
+                val snippet = match.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
+                "• $title\n  $snippet"
+            }.toList()
+
+            if (results.isEmpty()) "Search returned no results for: $query"
+            else results.joinToString("\n---\n")
         }.getOrDefault("Search failed. Answer based on your knowledge.")
+    }
+
+    // ---- Git 集成 ----
+
+    @Tool(description = "Show git status (short format). Returns staged/unstaged changes.")
+    fun gitStatus(): String = runGit("git status --short")
+
+    @Tool(description = "Stage files for commit. Use '.' to stage all.")
+    fun gitAdd(
+        @ToolParam(description = "File paths to stage, space-separated. Use '.' for all") paths: String = ".",
+    ): String = runGit("git add $paths")
+
+    @Tool(description = "Commit staged changes with a message.")
+    fun gitCommit(
+        @ToolParam(description = "Commit message") message: String,
+    ): String = runGit("git commit -m \"$message\"")
+
+    @Tool(description = "Push commits to remote repository.")
+    fun gitPush(
+        @ToolParam(description = "Remote name, default 'origin'") remote: String = "origin",
+        @ToolParam(description = "Branch name, e.g. 'main' or 'master'") branch: String = "main",
+    ): String = runGit("git push $remote $branch")
+
+    @Tool(description = "List local branches. Add '-a' to show remote branches too.")
+    fun gitBranch(
+        @ToolParam(description = "Extra args, e.g. '-a' for all, '-D name' to delete") args: String = "",
+    ): String = runGit("git branch $args")
+
+    @Tool(description = "Show diff of staged/unstaged changes.")
+    fun gitDiff(
+        @ToolParam(description = "Args: '--staged' for staged only, 'HEAD~1' for last commit") args: String = "",
+    ): String = runGit("git diff $args")
+
+    private fun runGit(cmd: String): String {
+        val dir = if (projectUri != null) File(context.filesDir, "workspace").also { it.mkdirs() }
+            else File(context.filesDir, "workspace").also { it.mkdirs() }
+        return try {
+            val pb = if (isWindows()) {
+                ProcessBuilder("cmd", "/c", cmd).directory(dir).redirectErrorStream(true)
+            } else {
+                ProcessBuilder("sh", "-c", cmd).directory(dir).redirectErrorStream(true)
+            }
+            val proc = pb.start()
+            val text = proc.inputStream.bufferedReader().readText()
+            proc.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
+            proc.destroy()
+            if (text.isBlank()) "已完成，无输出。" else text.take(5000)
+        } catch (e: Exception) { "命令失败: ${e.message}" }
+    }
+
+    private fun isWindows(): Boolean = System.getProperty("os.name").lowercase().contains("win")
+
+    // ---- Lint/诊断读取 ----
+
+    @Tool(description = "Read build lint or compilation errors from the project. Runs gradle lint if needed.")
+    fun readLints(): String {
+        return try {
+            val buildDir = File(context.filesDir, "workspace")
+            // 1. 尝试读取 lint 报告
+            val lintFiles = listOf(
+                File(buildDir, "app/build/reports/lint-results.xml"),
+                File(buildDir, "app/build/reports/lint-results-release.xml"),
+            )
+            for (f in lintFiles) {
+                if (f.exists() && f.length() > 0) {
+                    val text = f.readText()
+                    val issues = Regex("""<issue[^>]*severity="Error"[^>]*>""", RegexOption.IGNORE_CASE)
+                        .findAll(text).take(20).joinToString("\n") { match ->
+                            val id = Regex("""id="([^"]+)"""").find(match.value)?.groupValues[1] ?: "?"
+                            val msg = Regex("""<message>([^<]+)</message>""").find(text, match.range.last)?.groupValues[1] ?: ""
+                            "• $id: $msg"
+                        }
+                    if (issues.isNotBlank()) return "Lint errors:\n$issues"
+                }
+            }
+            // 2. 尝试读取 Gradle 问题报告
+            val problemFiles = listOf(
+                File(buildDir, "build/reports/problems/problems-report.html"),
+                File(buildDir, "app/build/reports/problems/problems-report.html"),
+            )
+            for (f in problemFiles) {
+                if (f.exists() && f.length() > 0) {
+                    val html = f.readText()
+                    val errors = Regex("""<li[^>]*>(.*?)</li>""", RegexOption.DOT_MATCHES_ALL)
+                        .findAll(html).take(10).map { it.groupValues[1].replace(Regex("<[^>]*>"), "").trim() }
+                        .filter { it.isNotBlank() }.toList()
+                    if (errors.isNotEmpty()) return "Compilation problems:\n${errors.joinToString("\n")}"
+                }
+            }
+            // 3. 尝试运行 gradle lint（简短超时）
+            val pb = if (isWindows()) ProcessBuilder("cmd", "/c", "gradlew lint")
+                else ProcessBuilder("sh", "-c", "./gradlew lint")
+            pb.directory(buildDir).redirectErrorStream(true)
+            val proc = pb.start()
+            val out = proc.inputStream.bufferedReader().readText()
+            proc.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
+            proc.destroy()
+            // 从输出中提取错误
+            val errors = out.lines().filter { it.contains("ERROR") || it.contains("error:") }.take(30)
+            if (errors.isNotEmpty()) "Lint output errors:\n${errors.joinToString("\n")}" else "No lint errors found."
+        } catch (e: Exception) { "读取诊断失败: ${e.message}" }
     }
 
     // ---- SAF 辅助方法 ----
