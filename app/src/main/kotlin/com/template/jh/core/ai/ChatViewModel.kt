@@ -50,12 +50,10 @@ class ChatViewModel(
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
 
-    // 导出对话展示条目（从原始消息转换，过滤工具调用/合并连续模型消息）
     val displayItems: StateFlow<List<DisplayItem>> = _state.map { s ->
         toDisplayItems(s.messages)
     }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // 当前工具操作展示条目（实时显示正在执行的操作）
     val currentToolActivity: StateFlow<DisplayItem?> = _state.map { s ->
         if (s.isLoading && s.modelActivity != ModelActivity.Idle
             && s.modelActivity != ModelActivity.Thinking
@@ -164,7 +162,6 @@ class ChatViewModel(
         _state.update { it.copy(inputText = text) }
     }
 
-    // 图片附件管理
     fun attachImage(uri: Uri) {
         val current = _state.value.attachedImageUris
         if (current.size >= 4) return // 最多 4 张
@@ -223,7 +220,6 @@ class ChatViewModel(
     fun toggleModelPicker() { _state.update { it.copy(isModelPickerOpen = !it.isModelPickerOpen) } }
     fun closeModelPicker() { _state.update { it.copy(isModelPickerOpen = false) } }
 
-    // 发送消息（手动 JSON 工具调用 + 活动状态反馈）
     fun sendMessage() {
         val text = _state.value.inputText.trim()
         val images = _state.value.attachedImageUris
@@ -296,13 +292,6 @@ class ChatViewModel(
 
     fun requestOpenFile(path: String) { _openFileRequests.tryEmit(path) }
 
-
-
-
-
-
-
-
     fun setProjectRoot(uri: Uri?) {
         aiToolSet.projectUri = uri
         uri?.let { fileManager.setProjectUri(it) } ?: fileManager.clearProjectUri()
@@ -321,22 +310,18 @@ class ChatViewModel(
         } catch (_: Exception) { "" }
     }
 
-    // 接收 HomeScreen 的打开文件列表，供 UI 徽章展示
     fun setOpenedFilePaths(paths: List<String>) {
         _state.update { it.copy(openedFilePaths = paths) }
     }
 
-    // 自动上下文：活动文件 + 光标行号（UI 展示用）
     fun setActiveFileContext(path: String, cursorLine: Int) {
         _state.update { it.copy(activeFilePath = path, cursorLine = cursorLine) }
     }
 
-    // 已修改文件路径列表
     fun setModifiedFilePaths(paths: List<String>) {
         _state.update { it.copy(modifiedFilePaths = paths) }
     }
 
-    // 添加文件附件：仅记录路径，不预读内容
     fun attachFile(path: String, name: String) {
         val refs = _state.value.attachedFileRefs
         val exists = refs.any { it.path == path }
@@ -346,12 +331,10 @@ class ChatViewModel(
         _state.update { it.copy(attachedFileRefs = refs + AttachedFile(name = displayName, path = path)) }
     }
 
-    // 移除指定文件附件
     fun detachFile(index: Int) {
         _state.update { it.copy(attachedFileRefs = it.attachedFileRefs.toMutableList().also { list -> if (index in list.indices) list.removeAt(index) }) }
     }
 
-    // 用量统计
     fun resetUsageStats() {
         viewModelScope.launch { usageAnalyticsRepo.resetStats() }
     }
@@ -360,13 +343,19 @@ class ChatViewModel(
         usageAnalyticsRepo.recordCall(call)
     }
 
-    // 构建编辑器上下文块：当前活动文件 + 光标行 + 已打开文件列表 + 修改状态
+    // 构建编辑器上下文块：工作区文件树 + 当前活动文件 + 光标行 + 已打开文件列表 + 修改状态
     private fun buildEditorContext(): String {
         val s = _state.value
         val ctx = StringBuilder()
         ctx.appendLine("[当前编辑器上下文]")
         if (s.projectRootName.isNotBlank()) {
             ctx.appendLine("项目: ${s.projectRootName}")
+            // 注入工作区目录树
+            val tree = fileManager.buildFileTreeString(maxDepth = 3, maxItems = 40)
+            if (tree.isNotBlank()) {
+                ctx.appendLine("工作区结构:")
+                tree.lines().forEach { ctx.appendLine("  $it") }
+            }
         }
         if (s.activeFilePath.isNotBlank()) {
             ctx.appendLine("活动文件: ${s.activeFilePath}")
@@ -383,7 +372,7 @@ class ChatViewModel(
                 ctx.appendLine("  ... 及其他 ${s.openedFilePaths.size - 10} 个文件")
             }
         } else {
-            ctx.appendLine("（未打开任何文件 — 使用 searchInFiles 搜索目标文件内容来定位）")
+            ctx.appendLine("（未打开任何文件 — 可使用 listFiles 查看项目文件结构再定位目标）")
         }
         ctx.appendLine("文件路径相对于项目根目录。")
         ctx.appendLine("标注 [已修改] 的文件存在未保存的更改，活动文件光标所在行号已标注。")
@@ -391,7 +380,7 @@ class ChatViewModel(
         return ctx.toString()
     }
 
-    // 构建文件附件引用块（包含文件路径说明，模型需 readFile 获取内容）
+    // 构建文件附件引用块
     private fun buildFileAttachmentBlock(): String {
         val refs = _state.value.attachedFileRefs
         if (refs.isEmpty()) return ""
@@ -473,7 +462,7 @@ class ChatViewModel(
 
     private fun buildSystemInstruction(): String {
         val sb = StringBuilder()
-sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简体中文).\n\n")
+sb.append("You are a helpful AI coding assistant. When responding to the user, use Chinese (简体中文).\n\n")
         sb.append("## 对话规范（必须遵守）\n")
         sb.append("- 无社交废话：不问候、不感谢、不道歉、不总结\n")
         sb.append("- 无解释铺垫：不用'我来帮你解决'等引导句\n")
@@ -501,7 +490,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         sb.append("## 可用工具\n")
         sb.append("每个工具有固定名称和参数，调用时必须严格按照下方格式。\n\n")
         sb.append("文件操作:\n")
-        sb.append("  - listFiles(path?): 列出目录内容，path 为空列出根目录\n")
+        sb.append("  - listFiles(subPath?): 列出目录内容，subPath 为空列出根目录\n")
         sb.append("  - readFile(path, offset?, limit?): 读取文件内容（含行号），offset=起始行(1-based,默认1), limit=最大行数(默认1000)\n")
         sb.append("  - writeFile(path, content): 创建新文件或完全覆写已有文件\n")
         sb.append("  - replaceInFile(path, old_string, new_string): 唯一编辑方式，old_string 必须唯一匹配含缩进\n")
@@ -561,15 +550,13 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         return sb.toString()
     }
 
-    // ---- 图像支持：URI 转临时文件 ----
-    // ---- 上下文压缩 ----
     companion object {
         private const val DEFAULT_CONTEXT_WINDOW = 128000    // 默认上下文窗口
         private const val KEEP_EXCHANGES = 5                 // 保留最后 5 轮用户↔模型交换
         private const val KEEP_PRIORITY_LINES = 200          // 保护早期含代码块/工具结果的最多行数
     }
 
-    // 根据配置获取上下文窗口大小（云端按 profile，本地用默认值）
+    // 根据配置获取上下文窗口大小
     private fun getContextWindow(): Int {
         val s = _state.value
         if (!s.cloudModelEnabled) return DEFAULT_CONTEXT_WINDOW
@@ -578,7 +565,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
     }
     private fun getCompressThreshold(): Int = (getContextWindow() * 0.75).toInt()
 
-    // 精确 token 估算：代码 ASCII ~4 chars/token，中文等 ~2 chars/token
+    // 精确 token 估算
     private fun estimateTokens(text: String): Int {
         var ascii = 0
         var other = 0
@@ -588,11 +575,9 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         return ascii / 4 + other / 2
     }
 
-    // 计算当前消息列表的 token 估计值
     private fun estimateContextTokens(messages: List<ChatMessage>): Int =
         messages.sumOf { estimateTokens(it.content) }
 
-    // 压缩消息列表：丢弃早期消息，保留最后 KEEP_EXCHANGES 轮 + 含代码块/工具结果的早期消息
     private fun compressMessages(messages: List<ChatMessage>): List<ChatMessage> {
         val threshold = getCompressThreshold()
         val totalTokens = estimateContextTokens(messages)
@@ -656,14 +641,13 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         }
     }
 
-    // 重置 LiteRT Conversation 以节省上下文（用于本地模型路径）
+    // 重置 LiteRT Conversation 以节省上下文
     private fun resetConversation() {
         activeConversation = null
     }
 
-    // 将 ChatMessage 列表转为 LiteRT Message，用于重建 Conversation 时恢复上下文
     private fun chatMessagesToLiteRT(messages: List<ChatMessage>): List<Message> =
-        messages.mapNotNull { msg ->
+        messages.map { msg ->
             when (msg.role) {
                 ChatRole.User -> Message.user(msg.content)
                 ChatRole.Model -> Message.model(msg.content)
@@ -673,7 +657,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                         listOf(com.google.ai.edge.litertlm.Content.ToolResponse("", msg.content))
                     )
                 )
-                else -> null
             }
         }
 
@@ -686,9 +669,9 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         tempFile
     } catch (e: Exception) { null }
 
-    // ---- JSON 工具调用解析与调度（手动模式，适配 gemma-4 JSON 格式） ----
 
-    // 检查文本中的指定位置是否在 [think]...[/think] 块内部
+
+    // 检查位置是否在 [think]...[/think] 块内部
     private fun isInsideThinkBlock(text: String, pos: Int): Boolean {
         val before = text.substring(0, pos)
         val lastThinkOpen = before.lastIndexOf("[think]")
@@ -696,8 +679,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         return lastThinkOpen >= 0 && lastThinkOpen > lastThinkClose
     }
 
-    // 检查 JSON 起始位置是否为独立行（行首仅空白 → `{`）
-    // 若同行 `{` 前有非空白字符，则为嵌入文本，不是真正的工具调用
+    // 检查 JSON 起始位置是否为独立行
     private fun isStandaloneJson(text: String, pos: Int): Boolean {
         // 计算 `{` 所在行的行首位置
         val lineStart = text.lastIndexOf('\n', pos - 1) + 1  // -1 时返回 0
@@ -712,7 +694,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         val trimmed = text.trim()
         if (!trimmed.contains("{\"tool_name\"")) return null
 
-        // 逐次扫描，跳过 [think] 块内部 JSON 以及非独立行的嵌入 JSON
         var searchStart = 0
         while (true) {
             val start = trimmed.indexOf("{\"tool_name\"", searchStart)
@@ -873,9 +854,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                 return
             }
 
-            // 标记为工具调用中间消息
-            _state.update { s -> s.copy(messages = s.messages.map { if (it.id == currentMsgId) it.copy(isToolMessage = true) else it }) }
-
             val (prefixText, funcName, funcArgs) = toolCall
             val argPath = funcArgs["path"] ?: funcArgs["query"] ?: funcArgs["pattern"] ?: ""
 
@@ -918,7 +896,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         }
     }
 
-    // ---- 云端模型工具循环（OpenAI 兼容 API）----
+
 
     private suspend fun processWithCloudTools(
         text: String, msgId: String,
@@ -946,7 +924,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         var cloudRounds = 0
         _state.update { it.copy(modelActivity = ModelActivity.Thinking, activityDetail = "") }
 
-        // 构建对话历史：... 并在超出阈值时压缩
         val historyMessages = mutableListOf<ChatMessage>()
         for (msg in _state.value.messages) {
             if (msg.id == currentMsgId) continue
@@ -954,7 +931,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                 if (msg.content.isNotBlank() || msg.role == ChatRole.Model) historyMessages.add(msg)
             }
         }
-        // 上下文压缩：如果历史超出阈值，保留最近 KEEP_EXCHANGES 轮
         val compressed = compressMessages(historyMessages)
         historyMessages.clear()
         historyMessages.addAll(compressed)
@@ -1026,9 +1002,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                 return
             }
 
-            // 标记为工具调用中间消息
-            _state.update { s -> s.copy(messages = s.messages.map { if (it.id == currentMsgId) it.copy(isToolMessage = true) else it }) }
-
             // 将助手的工具调用加入历史（含 tool_call_id，供后续 tool 角色匹配）
             val toolCallId = "call_${java.util.UUID.randomUUID().toString().take(8)}"
             historyMessages.add(ChatMessage(
@@ -1073,7 +1046,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         }
     }
 
-    // 云端模型设置方法
     fun setCloudModelEnabled(enabled: Boolean) {
         viewModelScope.launch { preferencesRepo.setCloudModelEnabled(enabled) }
         _state.update { it.copy(cloudModelEnabled = enabled) }
@@ -1139,8 +1111,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         }
     }
 
-    // 关闭对话
-
     private fun closeConversation() {
         try { activeConversation?.close() } catch (_: Exception) {}
         activeConversation = null
@@ -1156,7 +1126,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
 
     fun newConversation() {
         sendJob?.cancel()
-        // 先计算要保存的对话（使用当前状态快照）
         val s = _state.value
         val updatedConversations = if (s.messages.isNotEmpty()) {
             val title = s.messages.firstOrNull { it.role == ChatRole.User }?.content?.take(30) ?: "新对话"
@@ -1168,12 +1137,10 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             if (exists) s.conversations.map { if (it.id == entry.id) entry else it }
             else listOf(entry) + s.conversations
         } else s.conversations
-        // 立即重置 UI 状态（同步，主线程，无阻塞）
         _state.update {
             it.copy(messages = emptyList(), inputText = "", isLoading = false,
                 conversations = updatedConversations, activeConversationId = null)
         }
-        // 后台清理：关闭旧会话（可能阻塞）+ 持久化
         viewModelScope.launch(Dispatchers.IO) {
             closeConversation()
             persistConversations(updatedConversations)

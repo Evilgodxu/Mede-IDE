@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import com.template.jh.R
 import com.template.jh.core.ai.ChatViewModel
+import com.template.jh.core.ai.FileOperationEvents
 import com.template.jh.core.storage.FileManager
 import com.template.jh.screens.home.components.AIChatPanel
 import com.template.jh.screens.home.components.MainContentArea
@@ -55,8 +56,9 @@ fun HomeScreen(
 
     var selectedTab by remember { mutableStateOf<SidebarTab?>(null) }
     var isSettingsOpen by remember { mutableStateOf(false) }
-    var isTerminalVisible by remember { mutableStateOf(false) }
     var autoOpened by remember { mutableStateOf(false) }
+    // TODO: 终端功能已移除，后续恢复时取消下方注释
+    // var isTerminalVisible by remember { mutableStateOf(false) }
     var cursorLine by remember { mutableIntStateOf(0) }
 
     val fileManager = org.koin.java.KoinJavaComponent.get<FileManager>(FileManager::class.java)
@@ -83,6 +85,35 @@ fun HomeScreen(
                 editorState.openTab(TabItem(path, fileName, TabType.Image))
             } else {
                 editorState.openFileTab(path)
+            }
+        }
+    }
+
+    // 同步编辑器状态
+    LaunchedEffect(Unit) {
+        FileOperationEvents.events.collect { event ->
+            when (event.operation) {
+                "modify", "overwrite" -> {
+                    val path = event.path
+                    if (path in editorState.editorContent) {
+                        val newContent = editorState.readFileFromSource(path)
+                        editorState.editorContent[path] = TextFieldValue(newContent)
+                        editorState.originalContents[path] = newContent
+                    }
+                    val modifiedPaths = editorState.tabs
+                        .filter { it.type == TabType.File && editorState.isFileModified(it.id) }
+                        .map { it.id }
+                    chatViewModel.setModifiedFilePaths(modifiedPaths)
+                }
+                "delete" -> {
+                    val idx = editorState.getTabIdxById(event.path)
+                    if (idx >= 0) editorState.forceCloseTab(idx)
+                    chatViewModel.setModifiedFilePaths(
+                        editorState.tabs
+                            .filter { it.type == TabType.File && editorState.isFileModified(it.id) }
+                            .map { it.id }
+                    )
+                }
             }
         }
     }
@@ -167,7 +198,8 @@ fun HomeScreen(
                 onLoadModel = { chatViewModel.loadModel(it) },
                 onBrowseModelFile = { filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
                 onSwitchCloudProfile = { chatViewModel.switchCloudProfile(it) },
-                onTerminalClick = { isTerminalVisible = !isTerminalVisible },
+                // TODO: 终端功能已移除，取消下行注释恢复
+                // onTerminalClick = { isTerminalVisible = !isTerminalVisible },
                 onCloseFolder = closeFolder,
                 onOpenFile = { fileOpenLauncher.launch(arrayOf("*/*")) },
                 onOpenFolder = { folderPickerLauncher.launch(null) },
@@ -243,8 +275,9 @@ fun HomeScreen(
                             editorState.closeTab(idx)
                         }
                     },
-                    isTerminalVisible = isTerminalVisible,
-                    onTerminalClose = { isTerminalVisible = false },
+                    // TODO: 终端功能已移除，取消下行注释恢复
+                    // isTerminalVisible = isTerminalVisible,
+                    // onTerminalClose = { isTerminalVisible = false },
                     onCloseAllTabs = { editorState.closeAllTabs(); isSettingsOpen = false; viewModel.saveOpenedTabs(emptyList()) },
                     onSaveCurrent = {
                         val tab = editorState.tabs.getOrNull(editorState.activeTabIndex)

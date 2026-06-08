@@ -1,9 +1,7 @@
 package com.template.jh.core.ai
 
-// 对话列表中展示的角色
 enum class DisplayRole { User, Model, ToolActivity }
 
-// 对话列表中展示的条目，与内部 ChatMessage 解耦
 data class DisplayItem(
     val id: String,
     val role: DisplayRole,
@@ -25,7 +23,6 @@ private fun thinkBlocks(text: String): Pair<List<String>, String> {
     return blocks to cleaned
 }
 
-// 从文本中移除工具调用相关的内容
 private fun stripToolCalls(text: String): String {
     var result = text
     // 移除独立行的工具调用 JSON
@@ -46,7 +43,6 @@ private fun stripToolCalls(text: String): String {
     return result
 }
 
-// 将原始消息列表转为对话展示条目
 fun toDisplayItems(messages: List<ChatMessage>): List<DisplayItem> {
     if (messages.isEmpty()) return emptyList()
 
@@ -92,7 +88,6 @@ fun toDisplayItems(messages: List<ChatMessage>): List<DisplayItem> {
     return result
 }
 
-// 合并连续的模型消息为一条 DisplayItem
 private fun mergeModelMessages(msgs: List<ChatMessage>): DisplayItem {
     val allThinkBlocks = mutableListOf<String>()
     val contentParts = mutableListOf<String>()
@@ -100,9 +95,6 @@ private fun mergeModelMessages(msgs: List<ChatMessage>): DisplayItem {
     for (msg in msgs) {
         val (blocks, cleaned) = thinkBlocks(msg.content)
         allThinkBlocks.addAll(blocks)
-
-        // 跳过工具调用中间消息的内容（它们包含 JSON + 结果）
-        if (msg.isToolMessage) continue
 
         val stripped = stripToolCalls(cleaned)
         if (stripped.isNotBlank()) contentParts.add(stripped)

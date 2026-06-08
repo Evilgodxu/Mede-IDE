@@ -13,23 +13,18 @@ import java.io.File
  */
 class FileManager(private val context: Context) {
 
-    // 当前项目根目录 DocumentFile
     private var rootDocFile: DocumentFile? = null
 
-    // 当前项目根目录 URI
     var projectUri: Uri? = null
         private set
 
-    // 可搜索的文本文件扩展名
     private val searchableExtensions = setOf(
         "kt", "kts", "java", "xml", "json", "yml", "yaml", "properties",
         "txt", "md", "gradle", "toml", "cfg", "conf", "ini",
         "html", "css", "js", "ts", "sql", "sh", "bat", "py",
     )
 
-    /**
-     * 设置项目根目录
-     */
+    // 设置项目根目录
     fun setProjectUri(uri: Uri) {
         // 持久化权限
         val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
@@ -39,9 +34,7 @@ class FileManager(private val context: Context) {
         rootDocFile = DocumentFile.fromTreeUri(context, uri)
     }
 
-    /**
-     * 清除项目根目录
-     */
+    // 清除项目根目录
     fun clearProjectUri() {
         projectUri = null
         rootDocFile = null
@@ -59,12 +52,11 @@ class FileManager(private val context: Context) {
         return try {
             var current = root
             for (segment in path.trim('/').split('/')) {
-                val seg = segment.trim()
-                if (seg.isEmpty()) continue
-                var found = current.findFile(seg)
+                if (segment.isEmpty()) continue
+                var found = current.findFile(segment)
                 if (found == null) {
                     found = current.listFiles().firstOrNull {
-                        it.name?.trim().equals(seg, ignoreCase = true)
+                        it.name.equals(segment, ignoreCase = true)
                     }
                 }
                 current = found ?: return null
@@ -90,7 +82,6 @@ class FileManager(private val context: Context) {
             val children = targetDoc.listFiles()
             if (children.isEmpty()) return "Empty directory."
 
-            // 排序：目录在前，按名称排序
             val sorted = children.sortedWith(
                 compareByDescending<DocumentFile> { it.isDirectory }
                     .thenBy { it.name?.lowercase() ?: "" }
@@ -142,6 +133,73 @@ class FileManager(private val context: Context) {
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    /**
+     * 生成多层目录树文本，供 AI 上下文自动注入
+     * @param maxDepth 最大递归深度
+     * @param maxItems 最大显示条目数（总节点数）
+     * @return 树形目录结构字符串，无项目返回空字符串
+     */
+    fun buildFileTreeString(maxDepth: Int = 3, maxItems: Int = 40): String {
+        val root = rootDocFile ?: return ""
+        return try {
+            val result = mutableListOf<String>()
+            var count = 0
+            buildTreeRecursive(root, "", 0, maxDepth, maxItems) { line ->
+                if (count < maxItems) {
+                    result.add(line); count++; true
+                } else false
+            }
+            if (result.isEmpty()) return "(empty project)"
+            val rootName = root.name?.takeIf { it.isNotBlank() } ?: "project"
+            buildString {
+                appendLine("$rootName/")
+                result.forEach { appendLine(it) }
+            }.trimEnd()
+        } catch (_: Exception) { "(error listing project structure)" }
+    }
+
+    // 递归构建目录树行，返回 true=继续 false=已满
+    private fun buildTreeRecursive(
+        dirDoc: DocumentFile,
+        prefix: String,
+        depth: Int,
+        maxDepth: Int,
+        maxItems: Int,
+        addLine: (String) -> Boolean,
+    ): Boolean {
+        if (depth >= maxDepth) return true
+
+        val children = dirDoc.listFiles()
+            .filter { doc ->
+                val name = doc.name ?: return@filter false
+                !name.startsWith(".") && name.lowercase() != "build"
+            }
+            .sortedWith(compareByDescending<DocumentFile> { it.isDirectory }.thenBy { it.name?.lowercase() ?: "" })
+
+        // 预先收集子目录子文件列表，用于判断每个节点是否是最后一个可显示节点
+        val visibleChildren = children.filter { c -> !(c.name?.startsWith(".") == true) }
+        val lastIdx = visibleChildren.size - 1
+        var idx = -1
+
+        for (doc in visibleChildren) {
+            idx++
+            val name = doc.name ?: continue
+            val connector = if (idx == lastIdx) "└── " else "├── "
+            if (!addLine("$prefix$connector$name${if (doc.isDirectory) "/" else sizeSuffix(doc)}")) return false
+            if (doc.isDirectory) {
+                val ext = if (idx == lastIdx) "    " else "│   "
+                if (!buildTreeRecursive(doc, "$prefix$ext", depth + 1, maxDepth, maxItems, addLine)) return false
+            }
+        }
+        return true
+    }
+
+    private fun sizeSuffix(doc: DocumentFile): String {
+        // 返回格式化文件大小后缀，如 " (1.5 MB)"
+        val len = doc.length()
+        return if (len > 0) " (${formatSize(len)})" else ""
     }
 
     /**
@@ -239,7 +297,6 @@ class FileManager(private val context: Context) {
             val fileName = trimmedPath.substringAfterLast('/')
             val parentPath = trimmedPath.substringBeforeLast('/', "")
 
-            // 确保父目录存在
             val parentDoc = if (parentPath.isEmpty()) {
                 root
             } else {
@@ -250,13 +307,12 @@ class FileManager(private val context: Context) {
             var existingFile = parentDoc.findFile(fileName)
             if (existingFile == null) {
                 existingFile = parentDoc.listFiles().firstOrNull {
-                    it.name.equals(fileName.trim(), ignoreCase = true)
+                    it.name.equals(fileName, ignoreCase = true)
                 }
             }
             val targetDoc = existingFile ?: parentDoc.createFile("application/octet-stream", fileName)
             ?: return "Failed to create file: $path"
 
-            // 写入内容
             context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
                 out.write(content.toByteArray(Charsets.UTF_8))
             } ?: return "Failed to write file: $path"
@@ -311,26 +367,17 @@ class FileManager(private val context: Context) {
         }
     }
 
-    /**
-     * 检查文件是否存在
-     */
+    // 检查文件是否存在
     fun exists(path: String): Boolean {
         return resolvePath(path.trim('/')) != null
     }
 
-    /**
-     * 判断路径是否为目录
-     */
+    // 判断路径是否为目录
     fun isDirectory(path: String): Boolean {
         return resolvePath(path.trim('/'))?.isDirectory ?: false
     }
 
-    // ---- 内部辅助方法 ----
-
-    /**
-     * 确保目录存在，不存在则逐级创建
-     * @return 目标目录的 DocumentFile，失败返回 null
-     */
+    // 确保目录存在，不存在则逐级创建
     private fun ensureDirectory(relativePath: String): DocumentFile? {
         val root = rootDocFile ?: return null
         if (relativePath.isBlank()) return root
@@ -338,15 +385,14 @@ class FileManager(private val context: Context) {
         return try {
             var current = root
             for (part in relativePath.trim().trim('/').split('/')) {
-                val seg = part.trim()
-                if (seg.isEmpty()) continue
-                var child = current.findFile(seg)
+                if (part.isEmpty()) continue
+                var child = current.findFile(part)
                 if (child == null) {
                     child = current.listFiles().firstOrNull {
-                        it.name?.trim().equals(seg, ignoreCase = true)
+                        it.name.equals(part, ignoreCase = true)
                     }
                 }
-                current = child ?: (current.createDirectory(seg) ?: return null)
+                current = child ?: (current.createDirectory(part) ?: return null)
             }
             current
         } catch (_: Exception) {
@@ -354,10 +400,7 @@ class FileManager(private val context: Context) {
         }
     }
 
-    /**
-     * 递归搜索文件内容
-     * 纯 DocumentFile API 实现
-     */
+    // 纯 DocumentFile API 实现
     private fun searchRecursive(
         dirDoc: DocumentFile,
         relativePath: String,
@@ -382,7 +425,6 @@ class FileManager(private val context: Context) {
                     searchRecursive(doc, currentPath, queryLower, extLower, results, searchedFiles)
                 }
             } else {
-                // 检查文件扩展名
                 val fileExt = name.substringAfterLast('.', "").lowercase()
                 if (extLower.isNotBlank()) {
                     if (fileExt != extLower) continue
@@ -390,12 +432,10 @@ class FileManager(private val context: Context) {
                     if (fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
                 }
 
-                // 跳过大文件
                 if (doc.length() > 512 * 1024) continue
 
                 searchedFiles.add(currentPath)
 
-                // 读取并搜索文件内容
                 try {
                     val text = context.contentResolver.openInputStream(doc.uri)
                         ?.bufferedReader()
@@ -555,9 +595,7 @@ class FileManager(private val context: Context) {
         return Regex(pattern).matches(filename)
     }
 
-    /**
-     * 语义向量检索 — 基于 TF-IDF + 余弦相似度
-     */
+    // 语义向量检索 — 基于 TF-IDF + 余弦相似度
     fun searchCodebase(query: String, targetDirectories: String = ""): String {
         val root = rootDocFile ?: return "No project folder is open."
         if (query.isBlank()) return "Search query is empty."
@@ -721,9 +759,7 @@ class FileManager(private val context: Context) {
         return lines.subList(start, end).joinToString("\n")
     }
 
-    /**
-     * 通知系统刷新文件，使文件管理器等外部应用可见
-     */
+    // 通知系统刷新文件，使文件管理器等外部应用可见
     private fun notifyFileSystemChange(path: String) {
         try {
             val filePath = try {
@@ -751,11 +787,7 @@ class FileManager(private val context: Context) {
         else -> "${"%.1f".format(bytes.toDouble() / (1024 * 1024))} MB"
     }
 
-    /**
-     * 删除文件或目录
-     * @param path 相对于项目根目录的路径
-     * @return 操作结果描述
-     */
+    // 删除文件或目录
     fun deleteFile(path: String): String {
         val root = rootDocFile ?: return "No project folder is open."
 
@@ -775,11 +807,7 @@ class FileManager(private val context: Context) {
         }
     }
 
-    /**
-     * 创建目录
-     * @param path 相对于项目根目录的目录路径
-     * @return 操作结果描述
-     */
+    // 创建目录
     fun createDirectory(path: String): String {
         val root = rootDocFile ?: return "No project folder is open."
 
@@ -787,7 +815,6 @@ class FileManager(private val context: Context) {
             val trimmedPath = path.trim().trim('/')
             if (trimmedPath.isEmpty()) return "Cannot create root directory"
 
-            // 检查是否已存在
             if (resolvePath(trimmedPath) != null) {
                 return "Directory already exists: $path"
             }
@@ -815,9 +842,7 @@ class FileManager(private val context: Context) {
 
 }
 
-/**
- * 文件节点数据类
- */
+// 文件节点数据类
 data class FileNode(
     val name: String,
     val path: String,

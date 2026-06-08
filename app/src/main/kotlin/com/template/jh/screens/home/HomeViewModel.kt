@@ -55,7 +55,7 @@ class HomeViewModel(
         }
         viewModelScope.launch {
             FileOperationEvents.events.collect { event ->
-                if (event.operation in listOf("create", "overwrite", "delete")) {
+                if (event.operation in listOf("create", "overwrite", "delete", "modify")) {
                     refreshRootFiles()
                 }
             }
@@ -65,7 +65,6 @@ class HomeViewModel(
     private val _files = MutableStateFlow<List<FileItem>>(emptyList())
     val files: StateFlow<List<FileItem>> = _files
 
-    // 打开文件夹 - 通过 FileManager 设置项目根
     fun openFolder(uri: Uri) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
@@ -83,7 +82,6 @@ class HomeViewModel(
         }
     }
 
-    // 懒加载子目录 - 使用 FileManager.listFilesAsNodes
     fun listChildren(parentRelativePath: String, onResult: (List<FileItem>) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -96,7 +94,6 @@ class HomeViewModel(
         }
     }
 
-    // 从根路径获取相对路径
     private fun safUriToRelative(uri: Uri): String {
         val rootUri = _folderState.value.folderUri ?: return ""
         val rootDocId = try {
@@ -128,7 +125,6 @@ class HomeViewModel(
         _files.value = emptyList()
     }
 
-    // ---- 设置操作（被 SettingsPane 调用） ----
     fun setThemeMode(mode: String) {
         viewModelScope.launch { userPreferencesRepository.setThemeMode(mode) }
     }
@@ -149,7 +145,6 @@ class HomeViewModel(
         viewModelScope.launch { userPreferencesRepository.setMcpServers(servers) }
     }
 
-    // 文件操作委托给 FileManager
     fun renameFile(uri: Uri, newName: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -166,7 +161,10 @@ class HomeViewModel(
             try {
                 val relativePath = safUriToRelative(uri)
                 if (relativePath.isNotEmpty()) {
-                    fileManager.deleteFile(relativePath)
+                    val result = fileManager.deleteFile(relativePath)
+                    if (!result.startsWith("Failed")) {
+                        FileOperationEvents.notify(relativePath, "delete")
+                    }
                 } else {
                     android.provider.DocumentsContract.deleteDocument(
                         getApplication<Application>().contentResolver, uri
@@ -182,9 +180,15 @@ class HomeViewModel(
             try {
                 val mimeType = if (isDirectory) android.provider.DocumentsContract.Document.MIME_TYPE_DIR
                     else "application/octet-stream"
-                android.provider.DocumentsContract.createDocument(
+                val created = android.provider.DocumentsContract.createDocument(
                     getApplication<Application>().contentResolver, parentUri, mimeType, name
                 )
+                if (created != null) {
+                    val path = safUriToRelative(created)
+                    if (path.isNotEmpty()) {
+                        FileOperationEvents.notify(path, if (isDirectory) "create" else "create")
+                    }
+                }
                 refreshRootFiles()
             } catch (_: Exception) {}
         }

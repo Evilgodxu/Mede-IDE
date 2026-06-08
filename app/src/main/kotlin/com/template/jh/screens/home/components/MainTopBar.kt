@@ -71,7 +71,6 @@ fun MainTopBar(
     onLoadModel: (String) -> Unit = {},
     onBrowseModelFile: () -> Unit = {},
     onSwitchCloudProfile: (String) -> Unit = {},
-    onTerminalClick: () -> Unit = {},
     onCloseFolder: () -> Unit = {},
     onOpenFile: () -> Unit = {},
     onOpenFolder: () -> Unit = {},
@@ -240,14 +239,12 @@ fun MainTopBar(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
 
-                    // 终端
+                    // TODO: 终端功能待实现
                     Text(
                         text = stringResource(R.string.menu_terminal),
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier
-                            .clickable { onTerminalClick() }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
 
                     Text(

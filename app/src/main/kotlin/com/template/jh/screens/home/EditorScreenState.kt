@@ -58,6 +58,19 @@ class EditorScreenState(
     fun closeTab(idx: Int): Boolean {
         val tab = tabs.getOrNull(idx) ?: return false
         if (tab.type == TabType.File && isFileModified(tab.id)) return false
+        doRemoveTab(idx)
+        return true
+    }
+
+    // 强制关闭标签页，不检查修改状态
+    fun forceCloseTab(idx: Int) {
+        val tab = tabs.getOrNull(idx) ?: return
+        doRemoveTab(idx)
+        editorContent.remove(tab.id)
+        originalContents.remove(tab.id)
+    }
+
+    private fun doRemoveTab(idx: Int) {
         tabs.removeAt(idx)
         activeTabIndex = when {
             tabs.isEmpty() -> -1
@@ -65,7 +78,6 @@ class EditorScreenState(
             else -> activeTabIndex.coerceIn(0, tabs.size - 1)
         }
         saveFileTabs()
-        return true
     }
 
     fun closeAllTabs() {
@@ -79,7 +91,7 @@ class EditorScreenState(
         if (path.startsWith("content://")) {
             return runCatching {
                 val context = fileManager.javaClass.getDeclaredField("context").apply { isAccessible = true }
-                    ?.let { field -> field.get(fileManager) as? android.content.Context }
+                    .let { field -> field.get(fileManager) as? android.content.Context }
                 if (context != null) {
                     context.contentResolver.openInputStream(android.net.Uri.parse(path))?.bufferedReader()?.readText()
                 } else null
@@ -100,7 +112,7 @@ class EditorScreenState(
         } else {
             runCatching {
                 val context = fileManager.javaClass.getDeclaredField("context").apply { isAccessible = true }
-                    ?.let { field -> field.get(fileManager) as? android.content.Context }
+                    .let { field -> field.get(fileManager) as? android.content.Context }
                 if (context != null) {
                     context.contentResolver.openOutputStream(android.net.Uri.parse(path), "wt")?.use {
                         it.write(content.toByteArray(Charsets.UTF_8))

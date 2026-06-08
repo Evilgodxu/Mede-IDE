@@ -14,7 +14,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-//   单一 ToolSet 类 → @Tool 方法 → @ToolParam 参数 → 返回简单类型
 class AIToolSet(
     private val context: Context,
     private val fileManager: FileManager? = null
@@ -27,8 +26,6 @@ class AIToolSet(
             field = value
             value?.let { fileManager?.setProjectUri(it) }
         }
-
-    // ---- 文件操作 ----
 
     @Tool(description = "List files and directories in the project folder. Returns directory contents with file sizes.")
     fun listFiles(
@@ -170,8 +167,6 @@ class AIToolSet(
         return result
     }
 
-    // ---- 终端命令 ----
-
     @Tool(description = "Run a shell command in the project directory. Use for adb, git, gradle commands.")
     fun runCommand(
         @ToolParam(description = "The command to execute, e.g. 'ls -la' or 'git status'") command: String,
@@ -179,7 +174,7 @@ class AIToolSet(
         Log.d("AIToolSet", "runCommand: $command")
         FileLogger.d("AIToolSet", "runCommand: $command")
         return try {
-            val dir = File(context.filesDir, "workspace").also { it.mkdirs() }
+            val dir = resolveProjectDir()
             val parts = parseCommandLine(command)
             val pb = ProcessBuilder(parts).directory(dir).redirectErrorStream(true)
             val proc = pb.start()
@@ -192,6 +187,30 @@ class AIToolSet(
             FileLogger.e("AIToolSet", "runCommand failed: ${e.message}", e)
             "Command failed: ${e.message}"
         }
+    }
+
+    // 从 SAF URI 解析项目根目录的真实文件路径，失败则回退到内部 workspace
+    private fun resolveProjectDir(): File {
+        // 尝试从 fileManager 的 projectUri 提取真实路径
+        val safUri = projectUri
+        if (safUri != null) {
+            try {
+                val docId = android.provider.DocumentsContract.getTreeDocumentId(safUri)
+                if (docId.startsWith("primary:")) {
+                    val realPath = docId.removePrefix("primary:")
+                    val dir = File(android.os.Environment.getExternalStorageDirectory(), realPath)
+                    if (dir.isDirectory) return dir
+                }
+                // 部分设备或二级存储（SD 卡）可能包含 /tree/ 路径格式
+                if (docId.startsWith("/tree/")) {
+                    val realPath = docId.removePrefix("/tree/").substringBefore(':')
+                    val dir = File(realPath)
+                    if (dir.isDirectory) return dir
+                }
+            } catch (_: Exception) { }
+        }
+        // 回退到应用内部目录
+        return File(context.filesDir, "workspace").also { it.mkdirs() }
     }
 
     /**
@@ -218,8 +237,6 @@ class AIToolSet(
         if (current.isNotEmpty()) args.add(current.toString())
         return args
     }
-
-    // ---- 联网搜索 ----
 
     @Tool(description = "Search the internet for current information. Use when you need up-to-date data or cannot answer from knowledge.")
     fun searchWeb(
@@ -249,9 +266,7 @@ class AIToolSet(
         }
     }
 
-    /**
-     * SearXNG 搜索 - 开源搜索引擎聚合器，稳定性更高
-     */
+    // SearXNG 搜索 - 开源搜索引擎聚合器，稳定性更高
     private fun searchViaSearxNG(query: String): String {
         val encoded = URLEncoder.encode(query, "UTF-8")
         // 多个公共 SearXNG 实例，按可靠性排序
@@ -442,8 +457,6 @@ class AIToolSet(
         return results
     }
 
-    // ---- Lint/诊断读取 ----
-
     @Tool(description = "Read build lint or compilation errors from the project. Runs gradle lint if needed.")
     fun readLints(): String {
         Log.d("AIToolSet", "readLints")
@@ -507,8 +520,6 @@ class AIToolSet(
     }
 
     private fun isWindows(): Boolean = System.getProperty("os.name")?.lowercase()?.contains("win") == true
-
-    // ---- 文件搜索 ----
 
     @Tool(description = "Search file contents using regex pattern. Returns matching files with line numbers and context. Use for finding code patterns, function definitions, imports, etc.")
     fun grep(
