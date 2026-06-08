@@ -141,19 +141,18 @@ fun AIChatPanel(
         }
     }
 
-    // 流式输出时持续轮询滚动到底部（替代 LaunchedEffect 取消重启模式）
+    // 流式输出时仅当有新内容时滚动到底部（替代 delay 轮询）
     LaunchedEffect(state.isLoading) {
         if (!state.isLoading) {
             val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
             if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
             return@LaunchedEffect
         }
-        while (isActive) {
-            if (!userScrolledUp) {
-                val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
-                if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
+        snapshotFlow { displayItems.size }.collect { size ->
+            if (!userScrolledUp && size > 0) {
+                val idx = size + (if (currentToolActivity != null) 1 else 0) - 1
+                try { listState.scrollToItem(idx) } catch (_: Exception) {}
             }
-            delay(50)
         }
     }
 
@@ -199,15 +198,7 @@ fun AIChatPanel(
 
         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-        val contextUsedTokens = remember(state.messages) {
-            var ascii = 0; var other = 0
-            for (msg in state.messages) {
-                for (c in msg.content) {
-                    if (c.code <= 127) ascii++ else other++
-                }
-            }
-            ascii / 4 + other / 2
-        }
+        val contextUsedTokens by viewModel.contextTokenCount.collectAsState()
         val contextMaxTokens = state.contextMaxTokens
         var showContextInfoDialog by remember { mutableStateOf(false) }
         val usageStats by viewModel.usageStats.collectAsState()

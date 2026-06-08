@@ -7,14 +7,13 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 
-private val keywordColor = Color(0xFF7F52FF)       // 关键字
-private val stringColor = Color(0xFF4CAF50)         // 字符串
-private val commentColor = Color(0xFF8B949E)        // 注释
-private val numberColor = Color(0xFF79C0FF)         // 数字
-private val annotationColor = Color(0xFFFFA726)     // 注解
+private val keywordColor = Color(0xFF7F52FF)
+private val stringColor = Color(0xFF4CAF50)
+private val commentColor = Color(0xFF8B949E)
+private val numberColor = Color(0xFF79C0FF)
+private val annotationColor = Color(0xFFFFA726)
 
 private val keywords = setOf(
-    // Kotlin
     "fun", "val", "var", "class", "object", "interface", "enum", "data",
     "sealed", "abstract", "open", "override", "private", "protected", "public",
     "internal", "companion", "init", "constructor", "this", "super",
@@ -24,16 +23,23 @@ private val keywords = setOf(
     "operator", "infix", "const", "lateinit", "by", "get", "set", "field", "it",
     "null", "true", "false", "Unit", "Any", "Nothing", "String", "Int", "Long",
     "Float", "Double", "Boolean", "Char", "Short", "Byte", "List", "Map", "Set",
-    // Java
     "public", "static", "void", "final", "extends", "implements", "new",
     "synchronized", "volatile", "transient", "native", "strictfp",
-    // XML
 )
+
+// 内容哈希缓存：避免同内容重复高亮
+private val syntaxCache = object : LinkedHashMap<Int, AnnotatedString>(16, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, AnnotatedString>?): Boolean {
+        return size > 8
+    }
+}
 
 fun highlightSyntax(text: String): AnnotatedString {
     if (text.isEmpty()) return AnnotatedString("")
+    val key = text.hashCode()
+    synchronized(syntaxCache) { syntaxCache[key]?.let { return it } }
 
-    return buildAnnotatedString {
+    val result = buildAnnotatedString {
         var i = 0
         val len = text.length
 
@@ -97,11 +103,13 @@ fun highlightSyntax(text: String): AnnotatedString {
                 continue
             }
 
-            // 其他字符
             append(ch)
             i++
         }
     }
+
+    synchronized(syntaxCache) { syntaxCache[key] = result }
+    return result
 }
 
 private fun findStringEnd(text: String, start: Int): Int {

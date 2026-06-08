@@ -25,8 +25,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.async
@@ -52,8 +54,20 @@ class ChatViewModel(
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
 
+    // 增量缓存：避免流式输出时全量重算 displayItems
+    @Volatile private var lastMessagesHash = 0
+    private val cachedDisplayItems = mutableListOf<DisplayItem>()
+
     val displayItems: StateFlow<List<DisplayItem>> = _state.map { s ->
-        toDisplayItems(s.messages)
+        val hash = s.messages.hashCode()
+        if (hash == lastMessagesHash && cachedDisplayItems.isNotEmpty()) {
+            return@map cachedDisplayItems.toList()
+        }
+        val items = toDisplayItems(s.messages)
+        lastMessagesHash = hash
+        cachedDisplayItems.clear()
+        cachedDisplayItems.addAll(items)
+        items
     }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), emptyList())
 
     val currentToolActivity: StateFlow<DisplayItem?> = _state.map { s ->
@@ -76,6 +90,17 @@ class ChatViewModel(
     val usageStats: StateFlow<UsageStats> = usageAnalyticsRepo.stats.stateIn(
         viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), UsageStats()
     )
+
+    /** 上下文 token 计数（仅在值变化时发射，避免流式输出时频繁重算） */
+    val contextTokenCount: StateFlow<Int> = _state.map { s ->
+        var ascii = 0; var other = 0
+        for (msg in s.messages) {
+            for (c in msg.content) {
+                if (c.code <= 127) ascii++ else other++
+            }
+        }
+        ascii / 4 + other / 2
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     private var sendJob: Job? = null
     @Volatile private var activeConversation: Conversation? = null
@@ -406,7 +431,7 @@ class ChatViewModel(
     fun optimizeInput() {
         val text = _state.value.inputText.trim()
         if (text.isEmpty() || !liteRTManager.isInitialized) return
-        if (_state.value.isOptimizing) return // 并发防护
+        if (_state.value.isOptimizing) return
         _state.update { it.copy(isOptimizing = true) }
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -417,7 +442,7 @@ class ChatViewModel(
                 ))
                 conv.use { c ->
                     val optimized = StringBuilder()
-                    c.sendMessageAsync(text).catch { t ->
+                    c.sendMessageAsync(Message.user(text)).catch { t ->
                         Log.e("ChatViewModel", "optimizeInput failed", t)
                         FileLogger.e("ChatViewModel", "optimizeInput failed: ${t.message}", t)
                     }.collect { chunk ->
@@ -438,32 +463,7 @@ class ChatViewModel(
     }
 
     private fun buildOptimizePrompt(): String {
-        return """你是一个专业的代码助手，负责优化用户输入的编程相关请求。
-
-优化目标：
-1. 修正错别字和语法错误（如"登陆"→"登录"、"函数"→"函数"）
-2. 使表达更简洁、专业、清晰
-3. 保持原意不变，不添加用户未要求的功能
-4. 确保技术术语准确（如 Activity、Fragment、Composable、ViewModel 等）
-5. 补全缺失的关键描述（如文件路径、组件名等上下文信息）
-
-代码处理的特殊规则：
-- 代码片段：保持格式、缩进和语法完全正确，不修改代码逻辑
-- 框架/API 名称：保持原始英文大小写（如 Jetpack Compose、ViewModel、OkHttp）
-- 文件路径：保持原样不修改
-- 功能描述：补充必要的技术细节使请求更明确
-
-输出规则：
-- 只返回优化后的文本内容，不要添加解释、前缀或后缀
-- 不要改变用户的原始意图
-- 如果输入已经是合格的请求，直接原样返回
-
-示例：
-输入："帮我写一个登陆页面，要有用户名密码输入框"
-输出："创建一个登录页面，包含用户名和密码输入框"
-
-输入："这个函数有bug，需要修复一下"
-输出："修复这个函数的缺陷""".trimIndent()
+        return "You are a text refining tool. ONLY fix typos and grammar in the input text. Output ONLY the corrected text, nothing else. Do not add, remove, rephrase, or explain anything. If no errors exist, output the exact input as-is."
     }
 
     private fun ensureConversation(autoToolCalling: Boolean = false): Conversation {
@@ -503,14 +503,6 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         sb.append("每次用户消息前注入 [当前编辑器上下文]，包含活动文件路径、光标行号、已打开文件列表。\n")
         sb.append("用户附加的文件内容会以 [文件: path] ```...``` 块拼接在消息末尾。\n")
         sb.append("文件路径相对于项目根目录，如: app/src/main/kotlin/com/example/MainActivity.kt\n\n")
-        val deepThink = runBlocking { preferencesRepo.deepThinkEnabled.first() }
-        if (deepThink) {
-            sb.append("## 深度思考（必须使用）\n")
-            sb.append("在使用工具之前，在 [think]你的思考过程[/think] 标签内逐步推理。\n")
-            sb.append("示例: [think]用户要创建登录页，先查看现有文件结构再决定如何实现。[/think]\n")
-            sb.append("思考内容仅你可见。\n\n")
-        }
-
         sb.append("## 可用工具\n")
         sb.append("每个工具有固定名称和参数，调用时必须严格按照下方格式。\n\n")
         sb.append("文件操作:\n")

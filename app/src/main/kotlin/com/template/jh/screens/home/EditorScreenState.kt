@@ -90,11 +90,7 @@ class EditorScreenState(
     fun readFileFromSource(path: String): String {
         if (path.startsWith("content://")) {
             return runCatching {
-                val context = fileManager.javaClass.getDeclaredField("context").apply { isAccessible = true }
-                    .let { field -> field.get(fileManager) as? android.content.Context }
-                if (context != null) {
-                    context.contentResolver.openInputStream(android.net.Uri.parse(path))?.bufferedReader()?.readText()
-                } else null
+                fileManager.contentResolver.openInputStream(android.net.Uri.parse(path))?.bufferedReader()?.readText()
             }.getOrDefault("") ?: ""
         }
         return fileManager.readFileRaw(path) ?: ""
@@ -111,12 +107,8 @@ class EditorScreenState(
             fileManager.writeFile(path, content)
         } else {
             runCatching {
-                val context = fileManager.javaClass.getDeclaredField("context").apply { isAccessible = true }
-                    .let { field -> field.get(fileManager) as? android.content.Context }
-                if (context != null) {
-                    context.contentResolver.openOutputStream(android.net.Uri.parse(path), "wt")?.use {
-                        it.write(content.toByteArray(Charsets.UTF_8))
-                    }
+                fileManager.contentResolver.openOutputStream(android.net.Uri.parse(path), "wt")?.use {
+                    it.write(content.toByteArray(Charsets.UTF_8))
                 }
             }
         }

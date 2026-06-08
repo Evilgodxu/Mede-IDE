@@ -10,9 +10,6 @@ import java.util.Collections
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 /**
  * 统一的文件管理器，使用 DocumentFile 公共 API 实现 SAF 操作
@@ -20,13 +17,18 @@ import kotlinx.coroutines.sync.withLock
  */
 class FileManager(private val context: Context) {
 
+    val contentResolver = context.contentResolver
+
     private var rootDocFile: DocumentFile? = null
 
     var projectUri: Uri? = null
         private set
 
     // 文件级互斥锁，确保同一文件的读写操作完全串行
-    private val fileLocks = ConcurrentHashMap<String, Mutex>()
+    private val fileLocks = ConcurrentHashMap<String, Any>()
+
+    // 路径缓存：key=normalized相对路径, value=DocumentFile
+    private val pathCache = ConcurrentHashMap<String, DocumentFile>()
 
     private val searchableExtensions = setOf(
         "kt", "kts", "java", "xml", "json", "yml", "yaml", "properties",
@@ -48,13 +50,18 @@ class FileManager(private val context: Context) {
         context.contentResolver.takePersistableUriPermission(uri, takeFlags)
         projectUri = uri
         rootDocFile = DocumentFile.fromTreeUri(context, uri)
+        invalidateCache()
     }
 
     // 清除项目根目录
     fun clearProjectUri() {
         projectUri = null
         rootDocFile = null
+        invalidateCache()
     }
+
+    /** 使路径缓存失效 */
+    private fun invalidateCache() { pathCache.clear() }
 
     /**
      * 根据相对路径获取 DocumentFile
@@ -65,9 +72,16 @@ class FileManager(private val context: Context) {
         val path = relativePath.trim()
         if (path.isBlank()) return root
 
+        val normalizedPath = path.trim('/')
+        return pathCache.getOrPut(normalizedPath) {
+            resolvePathUncached(root, normalizedPath)
+        }
+    }
+
+    private fun resolvePathUncached(root: DocumentFile, normalizedPath: String): DocumentFile? {
         return try {
             var current = root
-            for (segment in path.trim('/').split('/')) {
+            for (segment in normalizedPath.split('/')) {
                 if (segment.isEmpty()) continue
                 var found = current.findFile(segment)
                 if (found == null) {
@@ -310,49 +324,45 @@ class FileManager(private val context: Context) {
 
             // 原子写入：备份 → 写入 → 校验 → 回滚
             val normalizedKey = trimmedPath.lowercase()
-            val mutex = fileLocks.getOrPut(normalizedKey) { Mutex() }
-            runBlocking {
-                mutex.withLock {
-                    // 1. 备份原始内容
-                    val backup = if (existingFile != null) {
-                        try {
-                            context.contentResolver.openInputStream(targetDoc.uri)
-                                ?.bufferedReader()?.use { it.readText() }
-                        } catch (_: Exception) { null }
-                    } else null
-
+            val lock = fileLocks.getOrPut(normalizedKey) { Any() }
+            synchronized(lock) {
+                // 1. 备份原始内容
+                val backup = if (existingFile != null) {
                     try {
-                        // 2. 写入文件
-                        context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
-                            out.write(content.toByteArray(Charsets.UTF_8))
-                        } ?: throw RuntimeException("Failed to open output stream")
+                        context.contentResolver.openInputStream(targetDoc.uri)
+                            ?.bufferedReader()?.use { it.readText() }
+                    } catch (_: Exception) { null }
+                } else null
 
-                        // 3. 读回校验
-                        val written = try {
-                            context.contentResolver.openInputStream(targetDoc.uri)
-                                ?.bufferedReader()?.use { it.readText() }
-                        } catch (_: Exception) { null }
+                try {
+                    // 2. 写入文件
+                    context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
+                        out.write(content.toByteArray(Charsets.UTF_8))
+                    } ?: throw RuntimeException("Failed to open output stream")
 
-                        if (written == null || written.length != content.length || !written.contains(content.take(50))) {
-                            // 校验不通过，回滚
-                            if (backup != null) {
-                                context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
-                                    out.write(backup.toByteArray(Charsets.UTF_8))
-                                }
-                            }
-                            throw RuntimeException("Write verification failed, rolled back")
-                        }
-                    } catch (e: Exception) {
-                        // 写入过程异常，尝试回滚
+                    // 3. 读回校验
+                    val written = try {
+                        context.contentResolver.openInputStream(targetDoc.uri)
+                            ?.bufferedReader()?.use { it.readText() }
+                    } catch (_: Exception) { null }
+
+                    if (written == null || written.length != content.length || !written.contains(content.take(50))) {
                         if (backup != null) {
-                            try {
-                                context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
-                                    out.write(backup.toByteArray(Charsets.UTF_8))
-                                }
-                            } catch (_: Exception) { }
+                            context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
+                                out.write(backup.toByteArray(Charsets.UTF_8))
+                            }
                         }
-                        throw e
+                        throw RuntimeException("Write verification failed, rolled back")
                     }
+                } catch (e: Exception) {
+                    if (backup != null) {
+                        try {
+                            context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
+                                out.write(backup.toByteArray(Charsets.UTF_8))
+                            }
+                        } catch (_: Exception) { }
+                    }
+                    throw e
                 }
             }
 
@@ -757,6 +767,7 @@ class FileManager(private val context: Context) {
 
     // 通知系统刷新文件，使文件管理器等外部应用可见
     private fun notifyFileSystemChange(path: String) {
+        invalidateCache()
         try {
             val filePath = try {
                 // 尝试将 SAF 路径转为真实文件路径

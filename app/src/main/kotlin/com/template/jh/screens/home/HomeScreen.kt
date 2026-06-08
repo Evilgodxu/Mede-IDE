@@ -148,7 +148,6 @@ fun HomeScreen(
     }
 
     val lastFolderUri by viewModel.lastOpenedFolderUri.collectAsState()
-    val savedTabs by viewModel.openedFileTabs.collectAsState()
     LaunchedEffect(lastFolderUri) {
         val uri = lastFolderUri
         if (!autoOpened && !uri.isNullOrBlank()) {
@@ -156,7 +155,6 @@ fun HomeScreen(
             viewModel.openFolder(Uri.parse(uri))
             chatViewModel.setProjectRoot(Uri.parse(uri))
             selectedTab = SidebarTab.Explorer
-            savedTabs.forEach { path -> editorState.openFileTab(path) }
         }
     }
 
