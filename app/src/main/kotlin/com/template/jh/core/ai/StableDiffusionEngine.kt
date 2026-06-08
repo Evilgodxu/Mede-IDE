@@ -20,7 +20,6 @@ import java.util.concurrent.TimeUnit
  * Stable Diffusion 原生推理引擎
  * 通过 ProcessBuilder 启动 libstable_diffusion_core.so 作为 HTTP 服务
  * 通信方式: http://127.0.0.1:8081/generate (JSON POST)
- * 参考: local-dream-master BackendService.kt
  */
 class StableDiffusionEngine(private val context: Context) {
 
@@ -60,6 +59,8 @@ class StableDiffusionEngine(private val context: Context) {
 
     @Volatile private var process: Process? = null
     @Volatile private var serverRunning = false
+    @Volatile private var processExited = false
+    @Volatile private var processExitCode: Int? = null
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -72,10 +73,22 @@ class StableDiffusionEngine(private val context: Context) {
     /** 启动原生 HTTP 服务进程 */
     suspend fun start(modelDir: File, width: Int = 512, height: Int = 512): Boolean = withContext(Dispatchers.IO) {
         if (serverRunning) return@withContext true
+        processExited = false
+        processExitCode = null
+
         try {
             val executableFile = File(nativeDir ?: return@withContext false, EXECUTABLE)
             if (!executableFile.exists()) {
                 Log.e(TAG, "executable not found: ${executableFile.absolutePath}")
+                return@withContext false
+            }
+
+            // 检查模型文件完整性
+            val requiredFiles = listOf("clip.bin", "unet.bin", "vae_decoder.bin", "tokenizer.json")
+            val missingFiles = requiredFiles.filter { !File(modelDir, it).exists() }
+            if (missingFiles.isNotEmpty()) {
+                Log.e(TAG, "Missing model files: $missingFiles in ${modelDir.absolutePath}")
+                Log.e(TAG, "Model dir contents: ${modelDir.list()?.joinToString() ?: "empty"}")
                 return@withContext false
             }
 
@@ -118,19 +131,23 @@ class StableDiffusionEngine(private val context: Context) {
                 .directory(File(nativeDir!!))
                 .redirectErrorStream(true)
 
+            // 构建更完整的库搜索路径（参考 local-dream-master）
             val libPath = buildString {
                 append(runtimeDir.absolutePath)
                 append(":").append(nativeDir)
-                append(":/system/lib64:/vendor/lib64")
+                append(":/system/lib64:/vendor/lib64:/vendor/lib64/egl")
             }
             pb.environment()["LD_LIBRARY_PATH"] = libPath
             pb.environment()["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
 
-            process = pb.start()
-            Log.i(TAG, "backend process started")
+            Log.i(TAG, "COMMAND: ${command.joinToString(" ")}")
             Log.i(TAG, "LD_LIBRARY_PATH=$libPath")
+            Log.i(TAG, "Model dir: ${modelDir.absolutePath}")
+            Log.i(TAG, "Model files: ${modelDir.list()?.joinToString() ?: "empty"}")
 
-            // 监控线程
+            process = pb.start()
+
+            // 监控线程：读取 stdout 并捕获进程退出码
             Thread {
                 try {
                     process?.inputStream?.bufferedReader()?.use { reader ->
@@ -139,21 +156,33 @@ class StableDiffusionEngine(private val context: Context) {
                             Log.i(TAG, "Backend: $line")
                         }
                     }
-                } catch (_: Exception) {}
+                    // 流结束 → 进程已退出，记录退出码
+                    val code = process?.waitFor() ?: -1
+                    processExitCode = code
+                    processExited = true
+                    Log.w(TAG, "Backend process exited with code: $code")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Monitor error", e)
+                    processExited = true
+                }
             }.apply { isDaemon = true }.start()
 
-            // 等待服务启动
+            // 等待服务启动（同时检测进程退出）
             var retries = 0
             while (retries < 30) {
+                if (processExited) {
+                    Log.e(TAG, "Backend process exited prematurely (code: ${processExitCode}) before health check")
+                    return@withContext false
+                }
                 if (isRunning()) {
                     serverRunning = true
-                    Log.i(TAG, "backend ready")
+                    Log.i(TAG, "backend ready after ${retries + 1}s")
                     return@withContext true
                 }
                 delay(1000)
                 retries++
             }
-            Log.e(TAG, "backend start timeout")
+            Log.e(TAG, "backend start timeout (30s), processExited=$processExited exitCode=${processExitCode}")
             stop()
             return@withContext false
         } catch (e: Exception) {
@@ -183,7 +212,6 @@ class StableDiffusionEngine(private val context: Context) {
         height: Int,
         onProgress: ((Float) -> Unit)? = null,
     ): Bitmap = withContext(Dispatchers.IO) {
-        // 确保服务运行
         if (!serverRunning) {
             if (!start(modelDir, width, height)) {
                 throw IllegalStateException("Failed to start backend service")

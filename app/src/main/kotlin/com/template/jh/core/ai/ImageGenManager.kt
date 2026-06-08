@@ -173,6 +173,9 @@ class ImageGenManager(private val context: Context) {
             if (StableDiffusionEngine.isNativeAvailable()) {
                 val engine = StableDiffusionEngine.getInstance(context)
                 val modelDir = getModelDir(ANYTHING_V5_MODEL.fileName)
+                // 诊断日志: 打印模型目录内容
+                Log.d("ImageGenManager", "Model dir: ${modelDir.absolutePath}")
+                Log.d("ImageGenManager", "Model dir contents: ${modelDir.list()?.joinToString() ?: "empty"}")
                 // 检查模型文件是否存在
                 val hasModelFiles = modelDir.exists() && modelDir.listFiles()?.any {
                     it.name == "unet.bin" || it.name == "clip.bin"
@@ -575,9 +578,9 @@ class ImageGenManager(private val context: Context) {
         val ANYTHING_V5_MODEL = RecommendedImageModel(
             name = "Anything V5.0 (SD1.5)",
             size = "~1.1 GB",
-            url = "https://huggingface.co/xororz/sd-qnn/resolve/main/AnythingV5_qnn2.28_8gen1.zip",
+            url = "https://huggingface.co/xororz/sd-qnn/resolve/main/AnythingV5_qnn2.28_min.zip?download=true",
             description = "高质二次元风格·骁龙QNN (NPU)",
-            fileName = "AnythingV5_qnn2.28_8gen1.zip",
+            fileName = "AnythingV5_qnn2.28_min.zip",
             modelId = "AnythingV5_qnn2.28_8gen1",
         )
 
