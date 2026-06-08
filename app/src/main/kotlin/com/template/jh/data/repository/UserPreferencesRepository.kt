@@ -45,9 +45,6 @@ class UserPreferencesRepository(private val context: Context) {
         val CLOUD_MODEL_ENABLED = booleanPreferencesKey("cloud_model_enabled")
         val CLOUD_PROFILES_JSON = stringPreferencesKey("cloud_profiles_json")
         val ACTIVE_CLOUD_PROFILE_ID = stringPreferencesKey("active_cloud_profile_id")
-        // 图像生成配置
-        val IMAGE_GEN_PROFILES_JSON = stringPreferencesKey("image_gen_profiles_json")
-        val ACTIVE_IMAGE_GEN_PROFILE_ID = stringPreferencesKey("active_image_gen_profile_id")
     }
 
     val themeMode: Flow<String> = context.dataStore.data
@@ -83,28 +80,6 @@ class UserPreferencesRepository(private val context: Context) {
 
     val activeCloudProfileId: Flow<String> = context.dataStore.data
         .map { it[PreferencesKeys.ACTIVE_CLOUD_PROFILE_ID] ?: "" }
-
-    // 图像生成配置
-    val imageGenProfiles: Flow<List<com.template.jh.core.ai.CloudImageGenProfile>> = context.dataStore.data
-        .map { prefs ->
-            val json = prefs[PreferencesKeys.IMAGE_GEN_PROFILES_JSON] ?: return@map emptyList()
-            try {
-                val arr = JSONArray(json)
-                (0 until arr.length()).map { i ->
-                    val obj = arr.getJSONObject(i)
-                    com.template.jh.core.ai.CloudImageGenProfile(
-                        id = obj.optString("id", ""),
-                        name = obj.optString("name", ""),
-                        apiEndpoint = obj.optString("apiEndpoint", ""),
-                        apiKey = obj.optString("apiKey", ""),
-                        modelName = obj.optString("modelName", ""),
-                    )
-                }
-            } catch (_: Exception) { emptyList() }
-        }
-
-    val activeImageGenProfileId: Flow<String> = context.dataStore.data
-        .map { it[PreferencesKeys.ACTIVE_IMAGE_GEN_PROFILE_ID] ?: "" }
 
     val userName: Flow<String> = context.dataStore.data
         .map { it[PreferencesKeys.USER_NAME] ?: "" }
@@ -214,26 +189,6 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun setActiveCloudProfileId(id: String) {
         context.dataStore.edit { it[PreferencesKeys.ACTIVE_CLOUD_PROFILE_ID] = id }
-    }
-
-    suspend fun setImageGenProfiles(profiles: List<com.template.jh.core.ai.CloudImageGenProfile>) {
-        context.dataStore.edit { prefs ->
-            val arr = JSONArray()
-            profiles.forEach { p ->
-                val obj = org.json.JSONObject()
-                obj.put("id", p.id)
-                obj.put("name", p.name)
-                obj.put("apiEndpoint", p.apiEndpoint)
-                obj.put("apiKey", p.apiKey)
-                obj.put("modelName", p.modelName)
-                arr.put(obj)
-            }
-            prefs[PreferencesKeys.IMAGE_GEN_PROFILES_JSON] = arr.toString()
-        }
-    }
-
-    suspend fun setActiveImageGenProfileId(id: String) {
-        context.dataStore.edit { it[PreferencesKeys.ACTIVE_IMAGE_GEN_PROFILE_ID] = id }
     }
 
     suspend fun setUserName(name: String) {

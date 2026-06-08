@@ -87,7 +87,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.template.jh.R
 import com.template.jh.core.ai.ChatViewModel
-import com.template.jh.core.ai.ImageGenParams
 import com.template.jh.core.utils.LogCollector
 import com.template.jh.core.utils.FileLogger
 import com.template.jh.core.ai.DownloadStatus
@@ -272,7 +271,7 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
         }
 
         // 已检测模型
-        val hasDetectedModels = chatState.availableModels.isNotEmpty() || chatState.detectedImageModels.isNotEmpty()
+        val hasDetectedModels = chatState.availableModels.isNotEmpty()
         if (hasDetectedModels) {
             Text("已检测模型", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             chatState.availableModels.forEach { model ->
@@ -284,20 +283,6 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
                         Column(Modifier.weight(1f)) {
                             Text(model.name, style = MaterialTheme.typography.bodyMedium)
                             Text(model.sizeText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Text("已就绪", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50))
-                    }
-                }
-            }
-            chatState.detectedImageModels.forEach { model ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                ) {
-                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(model.name, style = MaterialTheme.typography.bodyMedium)
-                            Text(model.size, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Text("已就绪", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50))
                     }
@@ -373,10 +358,6 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
                 }
             }
         }
-
-        // 图像生成模型（AnythingV5）—— 与文本模型下载卡片结构一致
-        HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
-        ImageGenRecommendedCard(chatViewModel, chatState)
 
         // 云端模型配置
         HorizontalDivider(thickness = 2.dp, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
@@ -1718,187 +1699,5 @@ private fun CategoryPlaceholder(text: String) {
     Text(text = text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-// ---- 图像生成模型组件 ----
 
-@Composable
-private fun ImageGenRecommendedCard(
-    chatViewModel: ChatViewModel,
-    chatState: com.template.jh.core.ai.ChatUiState,
-) {
-    val genState = chatState.imageGenState
-    val anyV5 = com.template.jh.core.ai.ImageGenManager.ANYTHING_V5_MODEL
-
-    // 模型已解压到本地时在已检测模型列表中显示，隐藏下载面板
-    if (chatState.detectedImageModels.any { it.fileName == anyV5.fileName }) return
-
-    // 文件选择器：从外部选择生图模型压缩包
-    val zipPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let { chatViewModel.loadImageModelFromUri(it) }
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)),
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(anyV5.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    Text("${anyV5.size}  |  ${anyV5.description}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            // 下载进度（支持暂停/取消）
-            when {
-                genState.downloadStatus == DownloadStatus.Downloading || genState.downloadStatus == DownloadStatus.Paused -> {
-                    LinearProgressIndicator(progress = { genState.downloadProgress }, modifier = Modifier.fillMaxWidth())
-                    val isPaused = genState.downloadStatus == DownloadStatus.Paused
-                    Text("${if (isPaused) "已暂停" else "下载中"}… ${"%.0f".format(genState.downloadProgress * 100)}%",
-                        style = MaterialTheme.typography.labelSmall, color = if (isPaused) Color(0xFFFFA000) else MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        if (isPaused) {
-                            Button(onClick = { chatViewModel.resumeImageDownload() }, modifier = Modifier.weight(1f)) {
-                                Icon(Icons.Default.Download, null, Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("继续")
-                            }
-                        } else {
-                            Button(onClick = { chatViewModel.pauseImageDownload() }, modifier = Modifier.weight(1f)) {
-                                Icon(Icons.Default.Pause, null, Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("暂停")
-                            }
-                        }
-                        OutlinedButton(onClick = { chatViewModel.cancelImageDownload() }, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Default.Close, null, Modifier.size(14.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("取消")
-                        }
-                    }
-                }
-                genState.downloadStatus == DownloadStatus.Completed -> {
-                    Text("下载完成 ✓", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50))
-                }
-                genState.downloadStatus == DownloadStatus.Error -> {
-                    Text("下载失败: ${genState.downloadError}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                    Button(onClick = {
-                        chatViewModel.resetImageDownload()
-                        chatViewModel.downloadImageModel(anyV5.url, anyV5.fileName)
-                    }, modifier = Modifier.fillMaxWidth()) {
-                        Text("重试")
-                    }
-                }
-                else -> {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        Button(
-                            onClick = { chatViewModel.downloadImageModel(anyV5.url, anyV5.fileName) },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.Download, null, Modifier.size(14.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("下载模型")
-                        }
-                        OutlinedButton(
-                            onClick = { zipPickerLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*")) },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.FolderOpen, null, Modifier.size(14.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("本地选择")
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ImageGenParamsCard(
-    chatViewModel: ChatViewModel,
-    chatState: com.template.jh.core.ai.ChatUiState,
-) {
-    val curParams = chatState.imageGenState.params
-    var prompt by remember(curParams) { mutableStateOf(curParams.prompt) }
-    var negPrompt by remember(curParams) { mutableStateOf(curParams.negativePrompt) }
-    var steps by remember(curParams) { mutableIntStateOf(curParams.steps) }
-    var cfg by remember(curParams) { mutableFloatStateOf(curParams.cfgScale) }
-    var seed by remember(curParams) { mutableIntStateOf(curParams.seed) }
-    var width by remember(curParams) { mutableIntStateOf(curParams.width) }
-    var height by remember(curParams) { mutableIntStateOf(curParams.height) }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-    ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("生成参数", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-
-            OutlinedTextField(
-                value = prompt,
-                onValueChange = { prompt = it },
-                label = { Text("Prompt") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 2, maxLines = 4,
-            )
-
-            OutlinedTextField(
-                value = negPrompt,
-                onValueChange = { negPrompt = it },
-                label = { Text("Negative Prompt") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-
-            Text("Steps: $steps", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Slider(value = steps.toFloat(), onValueChange = { steps = it.toInt() }, valueRange = 10f..50f, steps = 39, modifier = Modifier.fillMaxWidth())
-
-            Text("CFG Scale: ${"%.1f".format(cfg)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Slider(value = cfg, onValueChange = { cfg = it }, valueRange = 1f..20f, modifier = Modifier.fillMaxWidth())
-
-            Text("Seed: ${if (seed < 0) "随机" else seed.toString()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Slider(value = if (seed < 0) 0f else seed.toFloat(), onValueChange = { seed = it.toInt() }, valueRange = 0f..99999f, steps = 99998, modifier = Modifier.fillMaxWidth())
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text("Width: $width", style = MaterialTheme.typography.labelSmall)
-                    Slider(value = width.toFloat(), onValueChange = { width = it.toInt() }, valueRange = 256f..1024f, steps = 6)
-                }
-                Column(Modifier.weight(1f)) {
-                    Text("Height: $height", style = MaterialTheme.typography.labelSmall)
-                    Slider(value = height.toFloat(), onValueChange = { height = it.toInt() }, valueRange = 256f..1024f, steps = 6)
-                }
-            }
-
-            Button(
-                onClick = {
-                    val params = ImageGenParams(
-                        prompt = prompt, negativePrompt = negPrompt,
-                        steps = steps, cfgScale = cfg, seed = seed,
-                        width = width, height = height,
-                    )
-                    chatViewModel.setImageGenParams(params)
-                    chatViewModel.submitImageGeneration(params)
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Default.Image, null, Modifier.size(14.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("生成图片")
-            }
-        }
-    }
-}
-
-// 扩展 Context 以支持从 Settings 打开图片 tab
-private fun android.content.Context.openImageTab(path: String, chatViewModel: ChatViewModel) {
-    // 通过 HomeScreen 已有的 openTab 机制触发
-    // 这里通过 ChatViewModel 发送事件，HomeScreen 监听
-    kotlinx.coroutines.MainScope().launch {
-        // 通知 HomeScreen 打开图片 tab
-        chatViewModel.requestOpenFile(path)
-    }
-}
 

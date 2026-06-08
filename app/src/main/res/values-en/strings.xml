@@ -180,20 +180,5 @@
     <!-- Task List -->
     <string name="task_list_title">Task List</string>
 
-    <!-- Image Generation -->
-    <string name="image_gen_title">Image Generation</string>
-    <string name="image_gen_model">AnythingV5 (SD1.5)</string>
-    <string name="image_gen_download">Download Model</string>
-    <string name="image_gen_params">Generation Parameters</string>
-    <string name="image_gen_prompt">Prompt</string>
-    <string name="image_gen_negative">Negative Prompt</string>
-    <string name="image_gen_steps">Steps</string>
-    <string name="image_gen_cfg">CFG Scale</string>
-    <string name="image_gen_seed">Seed</string>
-    <string name="image_gen_width">Width</string>
-    <string name="image_gen_height">Height</string>
-    <string name="image_gen_generate">Generate Image</string>
-    <string name="image_gen_no_images">No generated images yet</string>
-    <string name="image_gen_preview">Image Preview</string>
 
 </resources>

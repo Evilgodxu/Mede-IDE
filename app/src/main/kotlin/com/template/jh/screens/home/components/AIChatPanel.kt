@@ -248,8 +248,6 @@ private fun ModelActivity.displayLabel(): String = when (this) {
     ModelActivity.RunningCommand -> "正在执行命令"
     ModelActivity.GitOperation -> "正在执行 Git 操作"
     ModelActivity.ReadingLints -> "正在检查编译错误"
-    ModelActivity.GeneratingImage -> "正在生成图片"
-    ModelActivity.ListingImages -> "正在列出图片"
     ModelActivity.ExecutingTool -> "正在执行操作"
     ModelActivity.ProcessingResult -> "正在处理结果"
 }

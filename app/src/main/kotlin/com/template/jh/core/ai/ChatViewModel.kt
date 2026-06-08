@@ -38,15 +38,10 @@ class ChatViewModel(
     private val conversationRepo: ConversationRepository,
     private val preferencesRepo: UserPreferencesRepository,
     private val fileManager: com.template.jh.core.storage.FileManager,
-    private val imageGenManager: ImageGenManager? = null,
 ) : AndroidViewModel(application) {
 
     private val liteRTManager = LiteRTManager(application)
-    private val imageGenManagerInternal: ImageGenManager =
-        imageGenManager ?: ImageGenManager(application)
-    private val aiToolSet = AIToolSet(application, fileManager).also {
-        it.imageGenManager = imageGenManagerInternal
-    }
+    private val aiToolSet = AIToolSet(application, fileManager)
     private val cloudLLMClient = CloudLLMClient(application)
     private val userPreferencesRepo = preferencesRepo
 
@@ -160,22 +155,6 @@ class ChatViewModel(
                 _state.update { it.copy(notificationSettings = settings) }
             }
         }
-        // 图像生成状态收集
-        viewModelScope.launch {
-            imageGenManagerInternal.state.collect { genState ->
-                _state.update { it.copy(imageGenState = genState) }
-            }
-        }
-        viewModelScope.launch {
-            preferencesRepo.imageGenProfiles.collect { profiles ->
-                _state.update { it.copy(imageGenProfiles = profiles) }
-            }
-        }
-        viewModelScope.launch {
-            preferencesRepo.activeImageGenProfileId.collect { id ->
-                _state.update { it.copy(activeImageGenProfileId = id) }
-            }
-        }
     }
 
     fun setTaskCompletedSound(enabled: Boolean) {
@@ -232,8 +211,7 @@ class ChatViewModel(
     fun scanModels() {
         viewModelScope.launch(Dispatchers.IO) {
             val models = liteRTManager.scanModels()
-            val imageModels = imageGenManagerInternal.scanDetectedModels()
-            _state.update { it.copy(availableModels = models, detectedImageModels = imageModels) }
+            _state.update { it.copy(availableModels = models) }
         }
     }
 
@@ -500,9 +478,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         sb.append("搜索:\n")
         sb.append("  - grep(pattern, extension?, glob?, ignoreCase?, contextLines?): 正则搜索文件内容\n")
         sb.append("  - searchCodebase(query, targetDirectories?): 语义搜索代码\n\n")
-        sb.append("图像:\n")
-        sb.append("  - generateImage(prompt, negativePrompt?, steps?, cfgScale?, width?, height?)\n")
-        sb.append("  - listGeneratedImages(): 列出已生成图片\n\n")
         sb.append("其他:\n")
         sb.append("  - runCommand(command): 执行 shell 命令\n")
         sb.append("  - searchWeb(query): 互联网搜索\n")
@@ -592,15 +567,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             "gitBranch" -> aiToolSet.gitBranch(args["args"] ?: "")
             "gitDiff" -> aiToolSet.gitDiff(args["args"] ?: "")
             "readLints" -> aiToolSet.readLints()
-            "generateImage" -> aiToolSet.generateImage(
-                args["prompt"] ?: "",
-                args["negativePrompt"] ?: "",
-                args["steps"]?.toIntOrNull() ?: 20,
-                args["cfgScale"]?.toFloatOrNull() ?: 7.0f,
-                args["width"]?.toIntOrNull() ?: 512,
-                args["height"]?.toIntOrNull() ?: 512,
-            )
-            "listGeneratedImages" -> aiToolSet.listGeneratedImages()
             else -> "Unknown tool: $name"
         }
         FileLogger.d("ChatViewModel", "executeAiTool: $name returned ${result.take(200)}")
@@ -626,8 +592,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             "runCommand" -> ModelActivity.RunningCommand
             "gitStatus", "gitAdd", "gitCommit", "gitPush", "gitBranch", "gitDiff" -> ModelActivity.GitOperation
             "readLints" -> ModelActivity.ReadingLints
-            "generateImage" -> ModelActivity.GeneratingImage
-            "listGeneratedImages" -> ModelActivity.ListingImages
             else -> ModelActivity.ExecutingTool
         }
     }
@@ -936,90 +900,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             _state.update { it.copy(engineErrorMessage = if (result == "ok") "" else result) }
         }
     }
-
-    // ---- 图像生成方法 ----
-
-    fun setImageGenParams(params: ImageGenParams) {
-        imageGenManagerInternal.setParams(params)
-    }
-
-    fun downloadImageModel(url: String, fileName: String) {
-        viewModelScope.launch { imageGenManagerInternal.downloadModel(url, fileName) }
-    }
-
-    fun loadImageModelFromUri(uri: Uri) {
-        val fileName = uri.lastPathSegment?.substringAfterLast('/')
-            ?.takeIf { it.endsWith(".zip", true) }
-            ?: "external_model_${System.currentTimeMillis()}.zip"
-        viewModelScope.launch { imageGenManagerInternal.loadModelFromZipUri(uri, fileName) }
-    }
-
-    fun cancelImageDownload() { imageGenManagerInternal.cancelDownload() }
-    fun pauseImageDownload() { imageGenManagerInternal.pauseDownload() }
-    fun resumeImageDownload() { imageGenManagerInternal.resumeDownload() }
-    fun resetImageDownload() { imageGenManagerInternal.resetDownloadState() }
-
-    fun submitImageGeneration(params: ImageGenParams) {
-        viewModelScope.launch {
-            try {
-                val result = imageGenManagerInternal.generateImage(params)
-                _state.update { it.copy(engineErrorMessage = "图片已生成: $result") }
-            } catch (e: Exception) {
-                _state.update { it.copy(engineErrorMessage = "生成失败: ${e.message}") }
-            }
-        }
-    }
-
-    fun getImageOutputDir(): java.io.File = imageGenManagerInternal.getOutputDir()
-
-    fun refreshGeneratedImages() {
-        val images = imageGenManagerInternal.listGeneratedImages()
-        _state.update { it.copy(imageGenState = it.imageGenState.copy(generatedImages = images)) }
-    }
-
-    // 云端生图 API 配置
-    fun addImageGenProfile(name: String, apiEndpoint: String, apiKey: String, modelName: String) {
-        val newProfile = CloudImageGenProfile(
-            name = name.ifEmpty { modelName },
-            apiEndpoint = apiEndpoint,
-            apiKey = apiKey,
-            modelName = modelName,
-        )
-        viewModelScope.launch {
-            val current = preferencesRepo.imageGenProfiles.first()
-            val updated = current + newProfile
-            preferencesRepo.setImageGenProfiles(updated)
-        }
-    }
-
-    fun removeImageGenProfile(profileId: String) {
-        viewModelScope.launch {
-            val current = preferencesRepo.imageGenProfiles.first()
-            val updated = current.filter { it.id != profileId }
-            preferencesRepo.setImageGenProfiles(updated)
-            val activeId = preferencesRepo.activeImageGenProfileId.first()
-            if (activeId == profileId) {
-                val newActive = updated.firstOrNull()?.id ?: ""
-                preferencesRepo.setActiveImageGenProfileId(newActive)
-            }
-        }
-    }
-
-    fun updateImageGenProfile(profile: CloudImageGenProfile) {
-        viewModelScope.launch {
-            val current = preferencesRepo.imageGenProfiles.first()
-            val updated = current.map { if (it.id == profile.id) profile else it }
-            preferencesRepo.setImageGenProfiles(updated)
-        }
-    }
-
-    fun switchImageGenProfile(profileId: String) {
-        viewModelScope.launch {
-            preferencesRepo.setActiveImageGenProfileId(profileId)
-        }
-    }
-
-
 
     // 关闭对话
 

@@ -164,55 +164,6 @@ fun ImagePreview(
     }
 }
 
-@Composable
-fun GeneratedImagesList(
-    images: List<com.template.jh.core.ai.GenImageInfo>,
-    onImageClick: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-    ) {
-        if (images.isEmpty()) {
-            Text("暂无已生成的图片",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(16.dp))
-            return
-        }
-        Text("已生成的图片 (${images.size})",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 4.dp))
-        images.take(20).forEach { info ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-                onClick = { onImageClick(info.path) },
-            ) {
-                Row(
-                    Modifier.padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Default.Image, null,
-                        Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(info.name,
-                            style = MaterialTheme.typography.bodySmall)
-                        Text(formatFileSize(info.size),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-        }
-    }
-}
-
 private fun formatFileSize(bytes: Long): String = when {
     bytes < 1024 -> "$bytes B"
     bytes < 1024 * 1024 -> "${bytes / 1024} KB"

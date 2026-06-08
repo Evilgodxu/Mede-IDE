@@ -51,8 +51,6 @@ enum class ModelActivity {
     RunningCommand,
     GitOperation,
     ReadingLints,
-    GeneratingImage,
-    ListingImages,
     ExecutingTool,
     ProcessingResult,
 }
@@ -109,9 +107,4 @@ data class ChatUiState(
     val notificationSettings: com.template.jh.data.model.NotificationSettings = com.template.jh.data.model.NotificationSettings(),
     // 附着的图片 URI 列表
     val attachedImageUris: List<Uri> = emptyList(),
-    // 图像生成
-    val imageGenState: ImageGenState = ImageGenState(),
-    val imageGenProfiles: List<CloudImageGenProfile> = emptyList(),
-    val activeImageGenProfileId: String = "",
-    val detectedImageModels: List<RecommendedImageModel> = emptyList(),
 )

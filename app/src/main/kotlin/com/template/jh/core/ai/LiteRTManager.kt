@@ -385,15 +385,6 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
     }
 }
 
-// 图像生成模型推荐信息（独立于 LiteRT）
-data class ImageGenRecommendedModel(
-    val name: String,
-    val size: String,
-    val url: String,
-    val description: String,
-    val fileName: String,
-)
-
 data class ModelInfo(val path: String, val name: String, val size: Long) {
     val sizeText: String get() = when {
         size < 1024 -> "$size B"
