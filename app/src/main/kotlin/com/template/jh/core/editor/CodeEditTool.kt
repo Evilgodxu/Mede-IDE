@@ -32,6 +32,47 @@ object CodeEditTool {
         return ReplaceResult.Error(buildErrorMessage(originalText, oldString))
     }
 
+    /**
+     * 批量编辑 — 一次调用替换多处内容。
+     * 所有 edits 基于同一原始文件匹配（非顺序叠加），
+     * 从后往前应用以避免位置偏移。
+     * edits 之间不允许重叠。
+     */
+    fun batchReplace(originalText: String, edits: List<Edit>): ReplaceResult {
+        if (edits.isEmpty()) return ReplaceResult.Error("未提供编辑操作")
+
+        data class Match(val start: Int, val end: Int, val newText: String)
+        val matches = mutableListOf<Match>()
+
+        for ((i, edit) in edits.withIndex()) {
+            val label = "编辑 #${i + 1}"
+            val idx = originalText.indexOf(edit.oldText)
+            if (idx < 0) return ReplaceResult.Error("$label 失败: 找不到指定的代码块")
+            val count = countOccurrences(originalText, edit.oldText)
+            if (count > 1) return ReplaceResult.Error("$label 失败: 找到 $count 处匹配，请提供更长的唯一代码块")
+            matches.add(Match(idx, idx + edit.oldText.length, edit.newText))
+        }
+
+        // 检查重叠
+        matches.sortBy { it.start }
+        for (i in 0 until matches.size - 1) {
+            if (matches[i].end > matches[i + 1].start) {
+                return ReplaceResult.Error(
+                    "编辑 #${i + 1} 与 #${i + 2} 的代码块区间重叠（不相邻或嵌套），请分别调用"
+                )
+            }
+        }
+
+        // 从后往前应用，避免位置偏移
+        var result = originalText
+        for (m in matches.reversed()) {
+            result = result.substring(0, m.start) + m.newText + result.substring(m.end)
+        }
+
+        val msg = "${edits.size} 处编辑成功（基于原始文件匹配，按位置倒序应用）"
+        return ReplaceResult.Success(result, msg)
+    }
+
     private fun tryExactReplace(text: String, oldStr: String, newStr: String): ReplaceResult? {
         if (!text.contains(oldStr)) return null
         val count = countOccurrences(text, oldStr)
@@ -54,12 +95,10 @@ object CodeEditTool {
         for (i in 0..lines.size - oldLines.size) {
             if (linesMatchExact(lines, i, oldLines)) matches.add(i)
         }
-        if (matches.size != 1) return null
-        val result = lines.toMutableList()
-        val start = matches[0]
-        result.subList(start, start + oldLines.size).clear()
-        result.addAll(start, newStr.lines())
-        return ReplaceResult.Success(result.joinToString("\n"), "替换成功（上下文扩展定位）")
+        if (matches.isEmpty()) return null
+        val start = if (matches.size == 1) matches[0]
+            else disambiguateByContext(lines, matches, oldLines.size) ?: return null
+        return doLineReplace(lines, start, oldLines.size, newStr, "替换成功（上下文扩展定位）")
     }
 
     // 行级匹配（忽略每行末尾空白）
@@ -71,12 +110,44 @@ object CodeEditTool {
         for (i in 0..textLines.size - oldLines.size) {
             if (linesMatchLoose(textLines, i, oldLines)) matches.add(i)
         }
-        if (matches.size != 1) return null
-        val result = textLines.toMutableList()
-        val start = matches[0]
-        result.subList(start, start + oldLines.size).clear()
-        result.addAll(start, newStr.lines())
-        return ReplaceResult.Success(result.joinToString("\n"), "替换成功（忽略行尾空白）")
+        if (matches.isEmpty()) return null
+        val start = if (matches.size == 1) matches[0]
+            else disambiguateByContext(textLines, matches, oldLines.size) ?: return null
+        return doLineReplace(textLines, start, oldLines.size, newStr, "替换成功（忽略行尾空白）")
+    }
+
+    private fun doLineReplace(
+        lines: List<String>, start: Int, blockSize: Int, newStr: String, msg: String
+    ): ReplaceResult.Success {
+        val result = lines.toMutableList()
+        result.subList(start, start + blockSize).clear()
+        if (newStr.isNotEmpty()) {
+            result.addAll(start, newStr.lines())
+        }
+        return ReplaceResult.Success(result.joinToString("\n"), msg)
+    }
+
+    /** 当块级匹配出现多个相同位置时，用前后文行消除歧义 */
+    private fun disambiguateByContext(
+        lines: List<String>, positions: List<Int>, blockSize: Int
+    ): Int? {
+        for (ctxLines in 1..2) {
+            val keyToPos = positions.groupBy { pos ->
+                buildContextKey(lines, pos, blockSize, ctxLines)
+            }
+            keyToPos.entries.firstOrNull { it.value.size == 1 }?.let {
+                return it.value[0]
+            }
+        }
+        return null
+    }
+
+    private fun buildContextKey(lines: List<String>, pos: Int, blockSize: Int, ctxLines: Int): String {
+        val before = ((pos - ctxLines).coerceAtLeast(0) until pos)
+            .joinToString("|") { lines[it].trimEnd() }
+        val after = (pos + blockSize until (pos + blockSize + ctxLines).coerceAtMost(lines.size))
+            .joinToString("|") { lines[it].trimEnd() }
+        return "$before ⏎ $after"
     }
 
     private fun linesMatchExact(lines: List<String>, startIdx: Int, oldLines: List<String>): Boolean {
@@ -147,7 +218,9 @@ object CodeEditTool {
         }
     }
 
-    sealed class ReplaceResult {
+    data class Edit(val oldText: String, val newText: String)
+
+sealed class ReplaceResult {
         data class Success(val newText: String, val message: String) : ReplaceResult()
         data class Error(val message: String) : ReplaceResult()
     }

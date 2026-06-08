@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -248,6 +250,7 @@ class ChatViewModel(
         val placeholderMsg = ChatMessage(id = modelMsgId, role = ChatRole.Model, content = "", isStreaming = true)
         _state.update { it.copy(messages = it.messages + userMsg + placeholderMsg, inputText = "", attachedImageUris = emptyList(), attachedFileRefs = emptyList(), isLoading = true) }
         val ctx = getApplication<Application>()
+        sendJob?.cancel()
         sendJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 // 将图片 URI 复制到临时文件
@@ -303,10 +306,9 @@ class ChatViewModel(
     private fun extractFolderName(uri: Uri): String {
         return try {
             val docId = android.provider.DocumentsContract.getTreeDocumentId(uri)
-            java.net.URLDecoder.decode(docId.substringAfterLast('%'), "UTF-8")
-                .substringAfterLast('/')
-                .substringAfterLast(':')
-                .ifEmpty { "" }
+            // docId 可能是 URL 编码的，如 "primary%3Apath%2Fto%2Ffolder"
+            val decoded = java.net.URLDecoder.decode(docId, "UTF-8")
+            decoded.substringAfter(':').substringAfterLast('/')
         } catch (_: Exception) { "" }
     }
 
@@ -401,6 +403,7 @@ class ChatViewModel(
     fun optimizeInput() {
         val text = _state.value.inputText.trim()
         if (text.isEmpty() || !liteRTManager.isInitialized) return
+        if (_state.value.isOptimizing) return // 并发防护
         _state.update { it.copy(isOptimizing = true) }
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -409,41 +412,58 @@ class ChatViewModel(
                     samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
                     tools = emptyList(),
                 ))
-                var optimized = ""
                 conv.use { c ->
-                    c.sendMessageAsync(text).catch { }.collect { optimized += it.toString() }
-                    val result = optimized.trim()
-                    if (result.isNotEmpty()) _state.update { it.copy(inputText = result, isOptimizing = false) }
-                    else _state.update { it.copy(isOptimizing = false) }
+                    val optimized = StringBuilder()
+                    c.sendMessageAsync(text).catch { t ->
+                        Log.e("ChatViewModel", "optimizeInput failed", t)
+                        FileLogger.e("ChatViewModel", "optimizeInput failed: ${t.message}", t)
+                    }.collect { chunk ->
+                        optimized.append(chunk.toString())
+                    }
+                    val result = optimized.toString().trim()
+                    if (result.isNotEmpty() && result != text) {
+                        _state.update { it.copy(inputText = result) }
+                    }
                 }
-            } catch (_: Exception) { _state.update { it.copy(isOptimizing = false) } }
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "optimizeInput error", e)
+                FileLogger.e("ChatViewModel", "optimizeInput error: ${e.message}", e)
+            } finally {
+                _state.update { it.copy(isOptimizing = false) }
+            }
         }
     }
 
     private fun buildOptimizePrompt(): String {
-        return """你是一个专业的编程助手，负责优化用户的输入内容。
+        return """你是一个专业的代码助手，负责优化用户输入的编程相关请求。
 
 优化目标：
-1. 修正错别字和语法错误
-2. 使表达更简洁、专业
-3. 保持原意不变
-4. 如果是代码相关问题，确保术语准确
+1. 修正错别字和语法错误（如"登陆"→"登录"、"函数"→"函数"）
+2. 使表达更简洁、专业、清晰
+3. 保持原意不变，不添加用户未要求的功能
+4. 确保技术术语准确（如 Activity、Fragment、Composable、ViewModel 等）
+5. 补全缺失的关键描述（如文件路径、组件名等上下文信息）
 
-重要规则：
-- 只返回优化后的文本内容
-- 不要添加解释、前缀或后缀
+代码处理的特殊规则：
+- 代码片段：保持格式、缩进和语法完全正确，不修改代码逻辑
+- 框架/API 名称：保持原始英文大小写（如 Jetpack Compose、ViewModel、OkHttp）
+- 文件路径：保持原样不修改
+- 功能描述：补充必要的技术细节使请求更明确
+
+输出规则：
+- 只返回优化后的文本内容，不要添加解释、前缀或后缀
 - 不要改变用户的原始意图
-- 如果是代码片段，保持代码格式和缩进
+- 如果输入已经是合格的请求，直接原样返回
 
 示例：
 输入："帮我写一个登陆页面，要有用户名密码输入框"
 输出："创建一个登录页面，包含用户名和密码输入框"
 
 输入："这个函数有bug，需要修复一下"
-输出："该函数存在缺陷，需要进行修复""".trimIndent()
+输出："修复这个函数的缺陷""".trimIndent()
     }
 
-    private fun ensureConversation(): Conversation {
+    private fun ensureConversation(autoToolCalling: Boolean = false): Conversation {
         activeConversation?.let { return it }
         val initialMessages = pendingInitialMessages
         pendingInitialMessages = null
@@ -453,7 +473,7 @@ class ChatViewModel(
                 initialMessages = initialMessages ?: emptyList(),
                 samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
                 tools = listOf(tool(aiToolSet)),
-                automaticToolCalling = false,
+                automaticToolCalling = autoToolCalling,
             )
         )
         activeConversation = conv
@@ -493,7 +513,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         sb.append("  - listFiles(subPath?): 列出目录内容，subPath 为空列出根目录\n")
         sb.append("  - readFile(path, offset?, limit?): 读取文件内容（含行号），offset=起始行(1-based,默认1), limit=最大行数(默认1000)\n")
         sb.append("  - writeFile(path, content): 创建新文件或完全覆写已有文件\n")
-        sb.append("  - replaceInFile(path, old_string, new_string): 唯一编辑方式，old_string 必须唯一匹配含缩进\n")
+        sb.append("  - replaceInFile(path, old_string, new_string): 编辑文件（单处修改），old_string 必须唯一匹配含缩进\n")
+        sb.append("  - batchReplaceInFile(path, edits): 编辑文件（一次修改多处），edits 为 JSON 数组，每项含 old_string/new_string\n")
         sb.append("  - deleteFile(path): 删除文件或目录\n")
         sb.append("  - createDirectory(path): 创建目录\n\n")
         sb.append("搜索:\n")
@@ -504,9 +525,10 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         sb.append("  - searchWeb(query): 互联网搜索\n")
         sb.append("  - readLints: 读取编译/lint 错误\n\n")
         sb.append("## 修改文件策略\n")
-        sb.append("- 编辑文件唯一方式: replaceInFile，参数 path, old_string, new_string\n")
-        sb.append("- old_string 必须完全匹配（含缩进），需包含函数签名确保唯一性\n")
-        sb.append("- 流程: readFile 读取 → replaceInFile 替换 → readLints 检查\n\n")
+        sb.append("- 单处修改: replaceInFile(path, old_string, new_string)\n")
+        sb.append("- 多处不重叠修改（一次性）: batchReplaceInFile(path, edits) — edits 基于源文件匹配，按位置倒序应用\n")
+        sb.append("- old_string/new_string 必须完全匹配（含缩进），需包含函数签名确保唯一性\n")
+        sb.append("- 流程: readFile 读取 → replaceInFile/batchReplaceInFile 替换 → readLints 检查\n\n")
 
         sb.append("## 工具调用格式（必须严格遵守）\n")
         sb.append("需要执行操作时，单独一行输出标准 JSON，不要包裹在其他格式中：\n")
@@ -551,9 +573,12 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     }
 
     companion object {
-        private const val DEFAULT_CONTEXT_WINDOW = 128000    // 默认上下文窗口
-        private const val KEEP_EXCHANGES = 5                 // 保留最后 5 轮用户↔模型交换
-        private const val KEEP_PRIORITY_LINES = 200          // 保护早期含代码块/工具结果的最多行数
+        private const val DEFAULT_CONTEXT_WINDOW = 128000      // 默认上下文窗口
+        private const val KEEP_EXCHANGES = 5                   // 保留最后 5 轮用户↔模型交换
+        private const val KEEP_PRIORITY_LINES = 200            // 保护早期含代码块/工具结果的最多行数
+        private const val SUMMARIZE_INTERVAL = 10              // 云端每 10 轮触发渐进式摘要
+        private const val TOOL_TRUNCATE_LINES = 80             // 工具输出首尾各保留行数
+        private const val UTFS_BYTES_PER_TOKEN = 3.5f          // UTF-8 字节/token 估算系数
     }
 
     // 根据配置获取上下文窗口大小
@@ -565,83 +590,184 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     }
     private fun getCompressThreshold(): Int = (getContextWindow() * 0.75).toInt()
 
-    // 精确 token 估算
+    // 精确 token 估算（基于 UTF-8 字节长度）
     private fun estimateTokens(text: String): Int {
-        var ascii = 0
-        var other = 0
-        for (c in text) {
-            if (c.code <= 127) ascii++ else other++
-        }
-        return ascii / 4 + other / 2
+        if (text.isEmpty()) return 0
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        return (bytes.size / UTFS_BYTES_PER_TOKEN).toInt().coerceAtLeast(1)
     }
 
     private fun estimateContextTokens(messages: List<ChatMessage>): Int =
         messages.sumOf { estimateTokens(it.content) }
 
-    private fun compressMessages(messages: List<ChatMessage>): List<ChatMessage> {
+    // 工具输出截断：首尾各保留 TOOL_TRUNCATE_LINES 行
+    private fun truncateToolMessages(messages: List<ChatMessage>): List<ChatMessage> {
+        return messages.map { msg ->
+            if (msg.role == ChatRole.Tool) {
+                msg.copy(content = truncateToolContent(msg.content))
+            } else msg
+        }
+    }
+
+    private fun truncateToolContent(content: String): String {
+        val lines = content.lines()
+        if (lines.size <= TOOL_TRUNCATE_LINES * 2 + 1) return content
+        val head = lines.take(TOOL_TRUNCATE_LINES)
+        val tail = lines.takeLast(TOOL_TRUNCATE_LINES)
+        return buildString {
+            head.forEach { appendLine(it) }
+            appendLine("... (中间截断 ${lines.size - TOOL_TRUNCATE_LINES * 2} 行) ...")
+            tail.forEach { appendLine(it) }
+        }
+    }
+
+    // 云端 LLM 结构化摘要（仅 cloud 模型启用）
+    private suspend fun summarizeMessagesCloud(messages: List<ChatMessage>): String? {
+        if (messages.isEmpty()) return null
+        val profile = _state.value.cloudModelProfiles.find { it.id == _state.value.activeCloudProfileId }
+            ?: return null
+        val cfg = CloudModelConfig(
+            enabled = true,
+            apiEndpoint = profile.apiEndpoint,
+            apiKey = profile.apiKey,
+            modelName = profile.modelName,
+            maxTokens = profile.maxTokens,
+        )
+
+        val inputText = buildString {
+            appendLine("分析以下对话历史，提取关键信息。仅返回 JSON（无额外文字）：")
+            appendLine()
+            messages.forEach { msg ->
+                when (msg.role) {
+                    ChatRole.User -> appendLine("用户: ${msg.content.take(600)}")
+                    ChatRole.Model -> {
+                        if (!msg.content.startsWith("[上下文") && !msg.content.startsWith("{")) {
+                            appendLine("助手: ${msg.content.take(600)}")
+                        }
+                    }
+                    ChatRole.Tool -> appendLine("[工具结果: ${msg.content.take(200)}]")
+                    else -> {}
+                }
+            }
+        }
+
+        return try {
+            val (response, _) = cloudLLMClient.sendMessage(
+                config = cfg,
+                systemPrompt = buildString {
+                    appendLine("你是一个对话摘要助手。提取关键信息，仅输出 JSON（无其他内容）：")
+                    appendLine("{")
+                    appendLine("  \"user_goal\": \"用户核心目标\",")
+                    appendLine("  \"key_decisions\": [\"已做出的关键决策\"],")
+                    appendLine("  \"completed_steps\": [\"已完成的主要步骤\"],")
+                    appendLine("  \"pending_tasks\": [\"待办事项\"],")
+                    appendLine("  \"technical_context\": \"技术上下文摘要（文件路径、框架等）\",")
+                    appendLine("  \"user_preferences\": {\"key\": \"value\"}")
+                    appendLine("}")
+                },
+                messages = listOf(ChatMessage(role = ChatRole.User, content = inputText)),
+                onChunk = {},
+            )
+            val json = response.trim()
+                .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+            // 验证 JSON 合法性
+            org.json.JSONObject(json)
+            json
+        } catch (e: Exception) {
+            Log.w("ChatViewModel", "summarizeMessagesCloud failed: ${e.message}")
+            null
+        }
+    }
+
+    private suspend fun compressMessages(messages: List<ChatMessage>): List<ChatMessage> {
         val threshold = getCompressThreshold()
         val totalTokens = estimateContextTokens(messages)
         if (totalTokens <= threshold) return messages
 
-        // 第1遍：从后往前收集，保留最后 KEEP_EXCHANGES 个用户消息及其之后的完整响应
+        // Step 1: 截断工具输出（双路径通用）
+        val truncated = truncateToolMessages(messages)
+
+        // Step 2: 保留最后 KEEP_EXCHANGES 轮对话
         val recent = mutableListOf<ChatMessage>()
         var userCount = 0
-        for (i in messages.indices.reversed()) {
-            recent.add(0, messages[i])
-            if (messages[i].role == ChatRole.User) {
+        for (i in truncated.indices.reversed()) {
+            recent.add(0, truncated[i])
+            if (truncated[i].role == ChatRole.User) {
                 userCount++
                 if (userCount >= KEEP_EXCHANGES) break
             }
         }
 
-        // 第2遍：扫描早期消息，保护含代码块、工具结果的优先级消息
-        val keepEnd = messages.size - recent.size
-        val priorityEarly = messages.take(keepEnd).filter { msg ->
-            (msg.role == ChatRole.Tool) ||
-            msg.content.contains("```") ||
-            msg.content.contains("[工具调用:") ||
-            msg.content.contains("filePath") ||
-            msg.content.contains("\"path\":")
-        }
-        var priorityLines = 0
+        // Step 3: 处理早期消息（云端→摘要，本地→优先级保护）
+        val keepEnd = truncated.size - recent.size
+        val earlyMessages = truncated.take(keepEnd)
         val combined = mutableListOf<ChatMessage>()
-        // 优先加入最近的优先级消息（倒序）
-        for (msg in priorityEarly.reversed()) {
-            if (msg !in combined) {
-                combined.add(0, msg)
-                priorityLines += msg.content.lines().size
-                if (priorityLines > KEEP_PRIORITY_LINES) break
+        var summaryJson = ""
+
+        if (keepEnd > 0 && _state.value.cloudModelEnabled) {
+            // 云端路径：LLM 结构化摘要
+            summaryJson = summarizeMessagesCloud(earlyMessages) ?: ""
+            if (summaryJson.isNotBlank()) {
+                combined.add(ChatMessage(
+                    role = ChatRole.Model,
+                    content = "[上下文摘要]\n$summaryJson",
+                    timestamp = System.currentTimeMillis(),
+                ))
             }
         }
+
+        // 云端摘要失败 或 本地路径：退回到优先级保护
+        if (!_state.value.cloudModelEnabled || summaryJson.isBlank()) {
+            val priorityEarly = earlyMessages.filter { msg ->
+                (msg.role == ChatRole.Tool) ||
+                msg.content.contains("```") ||
+                msg.content.contains("[工具调用:") ||
+                msg.content.contains("filePath") ||
+                msg.content.contains("\"path\":")
+            }
+            var priorityLines = 0
+            for (msg in priorityEarly.reversed()) {
+                if (msg !in combined) {
+                    combined.add(0, msg)
+                    priorityLines += msg.content.lines().size
+                    if (priorityLines > KEEP_PRIORITY_LINES) break
+                }
+            }
+        }
+
         combined.addAll(recent)
 
+        // Step 4: 更新压缩状态
         val removedTokens = totalTokens - estimateContextTokens(combined)
         _state.update {
             it.copy(
                 contextCompressedTokens = it.contextCompressedTokens + removedTokens,
                 contextCompressedCount = it.contextCompressedCount + 1,
                 isContextCompressed = true,
+                contextSummary = if (summaryJson.isNotBlank()) summaryJson else it.contextSummary,
             )
         }
 
-        // 合并压缩通知为一条累计消息（避免多次压缩产生多条通知占据 token）
+        // Step 5: 插入/更新累计通知
         val existingSummaryIndex = combined.indexOfFirst {
             it.role == ChatRole.Model && it.content.startsWith("[上下文压缩累计]")
         }
         val summaryMsg = ChatMessage(
             role = ChatRole.Model,
-            content = "[上下文压缩累计] 累计移除 ${removedTokens / 1000}k tokens，保留最近 $KEEP_EXCHANGES 轮对话。",
+            content = buildString {
+                append("[上下文压缩累计] 累计移除 ${removedTokens / 1000}k tokens，")
+                append("保留最近 $KEEP_EXCHANGES 轮对话")
+                if (summaryJson.isNotBlank()) append("，早期对话已摘要压缩")
+                append("。")
+            },
             timestamp = System.currentTimeMillis(),
         )
         return if (existingSummaryIndex >= 0) {
-            // 替换旧的通知
             combined.toMutableList().also { list -> list[existingSummaryIndex] = summaryMsg }
         } else {
             listOf(summaryMsg) + combined
         }
     }
-
-    // 重置 LiteRT Conversation 以节省上下文
     private fun resetConversation() {
         activeConversation = null
     }
@@ -654,7 +780,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 ChatRole.System -> Message.system(msg.content)
                 ChatRole.Tool -> Message.tool(
                     com.google.ai.edge.litertlm.Contents.of(
-                        listOf(com.google.ai.edge.litertlm.Content.ToolResponse("", msg.content))
+                        listOf(com.google.ai.edge.litertlm.Content.ToolResponse(msg.toolCallId ?: "call_${msg.id.take(8)}", msg.content))
                     )
                 )
             }
@@ -690,57 +816,189 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         return true
     }
 
-    private fun extractJsonToolCall(text: String): Triple<String?, String, Map<String, String>>? {
+    /**
+     * 从模型响应中提取所有工具调用。
+     * 支持单次调用和批量调用（多个 JSON 在同一输出中）。
+     * @return 列表，每项为 (前置文本, 工具名, 参数) 或 null（无工具调用）
+     */
+    private fun extractJsonToolCalls(text: String): List<Triple<String?, String, Map<String, String>>>? {
         val trimmed = text.trim()
-        if (!trimmed.contains("{\"tool_name\"")) return null
 
+        // 格式 1: <tool_call>JSON</tool_call> XML 标签
+        val xmlCalls = Regex("""<tool_call[^>]*>(.*?)</tool_call>""", RegexOption.DOT_MATCHES_ALL)
+            .findAll(trimmed).flatMap { m -> parseToolJson(m.groupValues[1]) }.toList()
+        if (xmlCalls.isNotEmpty()) return xmlCalls
+
+        // 格式 2: ```json ... ``` / ```tool ... ``` 围栏块
+        val codeBlockCalls = Regex("""```(?:json|tool)?\s*\n?(.*?)\n?```""", RegexOption.DOT_MATCHES_ALL)
+            .findAll(trimmed).flatMap { m -> parseToolJson(m.groupValues[1]) }.toList()
+        if (codeBlockCalls.isNotEmpty()) return codeBlockCalls
+
+        // 检查 JSON 工具调用标记
+        val toolPatterns = listOf(
+            Regex("""\{\s*"tool_name"\s*:"""), Regex("""\{\s*"name"\s*:"""), Regex("""\{\s*"function"\s*:"""),
+        )
+        val hasAnyTool = toolPatterns.any { it.containsMatchIn(trimmed) }
+        if (!hasAnyTool) {
+            // 格式 3: bare LFM2 格式 functionName(param="value")
+            val lfmMatch = parseLfmFormat(trimmed)
+            if (lfmMatch != null) return listOf(lfmMatch)
+            // 格式 4: 已弃用函数调用格式 {"function":"name","arguments":{...}}
+            val funcCall = parseFunctionCallFormat(trimmed)
+            if (funcCall != null) return listOf(funcCall)
+            return null
+        }
+
+        // 扫描所有行内 JSON 工具调用
+        val calls = mutableListOf<Triple<String?, String, Map<String, String>>>()
         var searchStart = 0
         while (true) {
-            val start = trimmed.indexOf("{\"tool_name\"", searchStart)
-            if (start < 0) return null
-            if (isInsideThinkBlock(trimmed, start)) {
-                searchStart = start + 1
-                continue
-            }
-            // 新增：跳过嵌入行内文本的 JSON（非独立行）
-            if (!isStandaloneJson(trimmed, start)) {
-                searchStart = start + 1
-                continue
-            }
-            var depth = 0
-            var end = -1
+            val start = trimmed.indexOf('{', searchStart)
+            if (start < 0) break
+            if (isInsideThinkBlock(trimmed, start)) { searchStart = start + 1; continue }
+            if (!isStandaloneJson(trimmed, start)) { searchStart = start + 1; continue }
+            var depth = 0; var end = -1
             for (i in start until trimmed.length) {
                 when (trimmed[i]) { '{' -> depth++; '}' -> { depth--; if (depth == 0) { end = i; break } } }
             }
-            if (end < 0) return null
-            return try {
-                val json = org.json.JSONObject(trimmed.substring(start, end + 1))
-                val toolName = json.optString("tool_name", "")
-                if (toolName.isEmpty()) return null
-                val argsJson = json.optJSONObject("arguments") ?: org.json.JSONObject()
-                val args = mutableMapOf<String, String>()
-                for (k in argsJson.keys()) args[k] = argsJson.optString(k, "")
-                val prefix = trimmed.substring(0, start).trim().ifEmpty { null }
-                Triple(prefix, toolName, args)
-            } catch (_: Exception) { null }
+            if (end < 0) { searchStart = start + 1; continue }
+            val jsonStr = trimmed.substring(start, end + 1)
+            val repaired = repairJson(jsonStr)
+            val parsed = parseSingleToolJson(repaired)
+            if (parsed != null) {
+                val prefix = if (calls.isEmpty()) trimmed.substring(0, start).trim().ifEmpty { null } else null
+                calls.add(Triple(prefix, parsed.first, parsed.second))
+            }
+            searchStart = end + 1
         }
+        return calls.ifEmpty { null }
+    }
+
+    /** 简单修复常见 JSON 错误：未转义引号、尾随逗号 */
+    private fun repairJson(json: String): String {
+        var r = json
+            // 移除尾随逗号
+            .replace(Regex(""",\s*}"""), "}")
+            .replace(Regex(""",\s*]"""), "]")
+            // 修复 key 的未转义引号（仅行内模式）
+            .replace(Regex("""([{,])\s*(\w+)\s*:""")) { "${it.groupValues[1]}\"${it.groupValues[2]}\":" }
+        return r
+    }
+
+    /** 解析 LFM2 格式: functionName(param1="value1", param2=123) */
+    private fun parseLfmFormat(text: String): Triple<String?, String, Map<String, String>>? {
+        val knownTools = setOf("listFiles", "readFile", "writeFile", "replaceInFile",
+            "batchReplaceInFile", "deleteFile", "createDirectory", "runCommand",
+            "searchWeb", "readLints", "grep", "searchInFiles", "searchCodebase")
+        val lfmRegex = Regex("""(\w+)\s*\((.*?)\)""", RegexOption.DOT_MATCHES_ALL)
+        for (m in lfmRegex.findAll(text)) {
+            val name = m.groupValues[1]
+            if (name !in knownTools) continue
+            val rawArgs = m.groupValues[2]
+            val args = mutableMapOf<String, String>()
+            // 解析 key="value" 或 key=value（不带引号）
+            val argRegex = Regex("""(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))""")
+            for (am in argRegex.findAll(rawArgs)) {
+                val key = am.groupValues[1]
+                val value = am.groupValues[2].ifEmpty {
+                    am.groupValues[3].ifEmpty { am.groupValues[4] }
+                }
+                args[key] = value
+            }
+            return Triple(null, name, args)
+        }
+        return null
+    }
+
+    /** 解析 OpenAI 函数调用格式: {"function":"name","arguments":"{...}"} */
+    private fun parseFunctionCallFormat(text: String): Triple<String?, String, Map<String, String>>? {
+        try {
+            val json = org.json.JSONObject(text.trim())
+            val name = json.optString("function", "").ifEmpty { return null }
+            val argsRaw = json.optString("arguments", "")
+            val args = mutableMapOf<String, String>()
+            if (argsRaw.isNotBlank()) {
+                try {
+                    val argsJson = org.json.JSONObject(argsRaw)
+                    for (k in argsJson.keys()) args[k] = argsJson.get(k).toString()
+                } catch (_: Exception) { args["raw"] = argsRaw }
+            }
+            return Triple(null, name, args)
+        } catch (_: Exception) { return null }
+    }
+
+    private fun parseToolJson(text: String): Sequence<Triple<String?, String, Map<String, String>>> = sequence {
+        var pos = 0
+        while (true) {
+            val start = text.indexOf('{', pos)
+            if (start < 0) break
+            var depth = 0; var end = -1
+            for (i in start until text.length) {
+                when (text[i]) { '{' -> depth++; '}' -> { depth--; if (depth == 0) { end = i; break } } }
+            }
+            if (end < 0) break
+            val result = parseSingleToolJson(text.substring(start, end + 1))
+            if (result != null) yield(Triple(null, result.first, result.second))
+            pos = end + 1
+        }
+    }
+
+    private fun parseSingleToolJson(jsonStr: String): Pair<String, Map<String, String>>? {
+        return try {
+            val json = org.json.JSONObject(jsonStr)
+            val toolName = json.optString("tool_name", "")
+                .ifEmpty { json.optString("name", "") }
+            if (toolName.isEmpty()) return null
+            val argsJson = json.optJSONObject("arguments")
+                ?: json.optJSONObject("parameters")
+                ?: json.optJSONObject("params")
+                ?: org.json.JSONObject()
+            val args = mutableMapOf<String, String>()
+            for (k in argsJson.keys()) {
+                val v = argsJson.get(k)
+                args[k] = when (v) {
+                    is org.json.JSONObject, is org.json.JSONArray -> v.toString()
+                    else -> v.toString()
+                }
+            }
+            Pair(toolName, args)
+        } catch (_: Exception) { null }
     }
 
     private fun executeAiTool(name: String, args: Map<String, String>): String = try {
         Log.d("ChatViewModel", "executeAiTool: name=$name args=$args")
         FileLogger.d("ChatViewModel", "executeAiTool: name=$name args=$args")
+        // 参数名兼容 camelCase 和 snake_case
+        fun Map<String, String>.g(key: String, vararg aliases: String): String =
+            this[key] ?: aliases.firstNotNullOfOrNull { this[it] } ?: ""
+        fun Map<String, String>.gInt(key: String, vararg aliases: String, default: Int = 0): Int =
+            (this[key] ?: aliases.firstNotNullOfOrNull { this[it] })?.toIntOrNull() ?: default
+        fun Map<String, String>.gBool(key: String, vararg aliases: String, default: Boolean = true): Boolean =
+            (this[key] ?: aliases.firstNotNullOfOrNull { this[it] })?.toBooleanStrictOrNull() ?: default
+
         val result = when (name) {
-            "listFiles" -> aiToolSet.listFiles(args["subPath"] ?: args["path"] ?: "")
-            "readFile" -> aiToolSet.readFile(args["path"] ?: "", args["offset"]?.toIntOrNull() ?: 1, args["limit"]?.toIntOrNull() ?: 1000)
-            "writeFile" -> aiToolSet.writeFile(args["path"] ?: "", args["content"] ?: "")
-            "replaceInFile" -> aiToolSet.replaceInFile(args["path"] ?: "", args["old_string"] ?: "", args["new_string"] ?: "")
-            "grep" -> aiToolSet.grep(args["pattern"] ?: args["query"] ?: "", args["extension"] ?: "", args["glob"] ?: "", args["ignoreCase"]?.toBooleanStrictOrNull() ?: true, args["contextLines"]?.toIntOrNull() ?: 2)
-            "searchInFiles" -> aiToolSet.grep(args["query"] ?: args["pattern"] ?: "", args["extension"] ?: "", args["glob"] ?: "", args["ignoreCase"]?.toBooleanStrictOrNull() ?: true, args["contextLines"]?.toIntOrNull() ?: 2)
-            "searchCodebase" -> aiToolSet.searchCodebase(args["query"] ?: "", args["targetDirectories"] ?: "")
-            "runCommand" -> aiToolSet.runCommand(args["command"] ?: "")
-            "searchWeb" -> aiToolSet.searchWeb(args["query"] ?: "")
-            "deleteFile" -> aiToolSet.deleteFile(args["path"] ?: "")
-            "createDirectory" -> aiToolSet.createDirectory(args["path"] ?: "")
+            "listFiles" -> aiToolSet.listFiles(args.g("subPath", "sub_path", "path"))
+            "readFile" -> aiToolSet.readFile(
+                args.g("path"), args.gInt("offset", default = 1), args.gInt("limit", default = 1000))
+            "writeFile" -> aiToolSet.writeFile(args.g("path"), args.g("content"))
+            "replaceInFile" -> aiToolSet.replaceInFile(
+                args.g("path"), args.g("old_string", "oldString", "old_str"), args.g("new_string", "newString", "new_str"))
+            "batchReplaceInFile" -> aiToolSet.batchReplaceInFile(
+                args.g("path"), args.g("edits", "editsJson", "edits_json"))
+            "grep" -> aiToolSet.grep(
+                args.g("pattern", "query"),
+                args.g("extension", "ext"),
+                args.g("glob"),
+                args.gBool("ignoreCase", "ignore_case", "caseSensitive", "case_sensitive"),
+                args.gInt("contextLines", "context_lines", "context", default = 2))
+            "searchInFiles" -> aiToolSet.searchInFiles(
+                args.g("query"), args.g("extension", "ext"))
+            "searchCodebase" -> aiToolSet.searchCodebase(
+                args.g("query"), args.g("targetDirectories", "target_directories", "directories"))
+            "runCommand" -> aiToolSet.runCommand(args.g("command"))
+            "searchWeb" -> aiToolSet.searchWeb(args.g("query"))
+            "deleteFile" -> aiToolSet.deleteFile(args.g("path"))
+            "createDirectory" -> aiToolSet.createDirectory(args.g("path", "dirPath", "dir_path"))
             "readLints" -> aiToolSet.readLints()
             else -> "Unknown tool: $name"
         }
@@ -757,7 +1015,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             "listFiles" -> ModelActivity.ListingFiles
             "readFile" -> ModelActivity.ReadingFile
             "writeFile" -> ModelActivity.WritingFile
-            "replaceInFile" -> ModelActivity.EditingFile
+            "replaceInFile", "batchReplaceInFile" -> ModelActivity.EditingFile
             "deleteFile" -> ModelActivity.DeletingFile
             "createDirectory" -> ModelActivity.CreatingDirectory
             "grep", "searchInFiles" -> ModelActivity.SearchingCode
@@ -796,6 +1054,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         var currentMsgId = msgId
         var currentMessage = firstMessage
         var rounds = 0
+        var failedParses = 0
 
         while (true) {
             val fullResponse = StringBuilder()
@@ -834,9 +1093,56 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             }
 
             val response = fullResponse.toString().trim()
-            val toolCall = extractJsonToolCall(response)
 
-            if (toolCall == null) {
+            // 本地模型输出长度截断
+            if (response.length > liteRTManager.modelParams.maxOutputTokens * 4) {
+                val maxChars = liteRTManager.modelParams.maxOutputTokens * 4
+                val truncated = response.take(maxChars) + "\n\n[... 输出已被截断，达到 maxOutputTokens=${liteRTManager.modelParams.maxOutputTokens} tokens 限制 ...]"
+                updateModelMessage(currentMsgId, truncated, false)
+                // 重置 fullResponse 为截断后的完整内容
+                fullResponse.clear()
+                fullResponse.append(truncated)
+            }
+
+            // Quality monitor: 空响应检测
+            if (response.length < 3 && rounds > 0) {
+                FileLogger.w("ChatViewModel", "quality: empty/short response round=$rounds")
+                currentMessage = Message.user("[你似乎没有输出有效内容，请直接输出工具调用或最终答案]")
+                continue
+            }
+
+            val toolCalls = extractJsonToolCalls(response)
+
+            if (toolCalls == null) {
+                // Quality monitor: 检查是否疑似工具调用但解析失败
+                if (isToolLikeContent(response)) {
+                    if (failedParses < 3) {
+                        failedParses++
+                        FileLogger.w("ChatViewModel", "quality: suspicious unparsed content round=$rounds fail=$failedParses")
+                        val hint = when {
+                            response.contains("<tool") -> "使用 {\"tool_name\":\"...\"} 格式，不要用 XML 标签"
+                            response.contains("```") -> "不要在代码块中包裹工具调用，直接输出 JSON"
+                            response.contains("tool_name", ignoreCase = true) -> "确保 JSON 格式正确，使用 {\"tool_name\":\"...\",\"arguments\":{...}}"
+                            else -> "请严格按照 JSON 格式输出工具调用"
+                        }
+                        currentMessage = Message.user("[工具调用格式错误: $hint]")
+                        continue
+                    }
+                    FileLogger.w("ChatViewModel", "quality: falling back after $failedParses failed parses")
+                    val fallbackMsg = fallbackToAutoToolCalling(ctx, text, imagePaths, editorCtx, currentMsgId, startTime)
+                    if (fallbackMsg != null) updateModelMessage(currentMsgId, fallbackMsg, false)
+                    finalizeModelMessage(currentMsgId)
+                    recordUsage(LlmCallRecord(
+                        modelName = _state.value.modelName.ifEmpty { "local" },
+                        provider = "local",
+                        promptTokens = text.length / 2,
+                        completionTokens = totalOutputChars / 2,
+                        durationMs = System.currentTimeMillis() - startTime,
+                        success = true, errorMessage = null,
+                    ))
+                    _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
+                    return
+                }
                 // 无工具调用，视为最终回答
                 val duration = System.currentTimeMillis() - startTime
                 val totalTokens = totalOutputChars / 2
@@ -846,30 +1152,41 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                     promptTokens = text.length / 2,
                     completionTokens = totalTokens,
                     durationMs = duration,
-                    success = true,
-                    errorMessage = null,
+                    success = true, errorMessage = null,
                 ))
                 finalizeModelMessage(currentMsgId)
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 return
             }
 
-            val (prefixText, funcName, funcArgs) = toolCall
-            val argPath = funcArgs["path"] ?: funcArgs["query"] ?: funcArgs["pattern"] ?: ""
+            // 并行执行所有工具调用
+            val knownTools = setOf("listFiles", "readFile", "writeFile", "replaceInFile",
+                "batchReplaceInFile", "deleteFile", "createDirectory", "runCommand",
+                "searchWeb", "readLints", "grep", "searchInFiles", "searchCodebase")
 
-            // 更新活动状态：正在执行工具
-            val activity = toolNameToActivity(funcName, argPath)
-            _state.update { it.copy(modelActivity = activity, activityDetail = argPath) }
-
-            val toolResult = executeAiTool(funcName, funcArgs)
-            val toolDisplay = "\n\n$toolResult"
-
-            // 追加工具结果到当前消息气泡（始终追加，prefixText==null 时先替换为可读头部）
-            if (prefixText != null) {
-                updateModelMessage(currentMsgId, toolDisplay, true)
-            } else {
-                updateModelMessage(currentMsgId, "\n\n[工具调用: $funcName]\n\n$toolResult", false)
+            // 并行执行所有工具调用
+            val results = coroutineScope {
+                toolCalls.map { call ->
+                    val funcName = call.second
+                    val funcArgs = call.third
+                    async(Dispatchers.IO) {
+                        if (funcName !in knownTools) return@async "未知工具: $funcName"
+                        try { executeAiTool(funcName, funcArgs) }
+                        catch (e: Exception) { "$funcName 执行失败: ${e.message}" }
+                    }
+                }.map { it.await() }
             }
+
+            // 构建显示文本
+            val allDisplays = StringBuilder()
+            for (i in toolCalls.indices) {
+                val name = toolCalls[i].second
+                val res = results[i]
+                allDisplays.appendLine("[工具调用: $name]")
+                allDisplays.appendLine(res)
+                if (i < toolCalls.size - 1) allDisplays.appendLine()
+            }
+            updateModelMessage(currentMsgId, "\n\n${allDisplays.toString().trimEnd()}", false)
             finalizeModelMessage(currentMsgId)
 
             // 创建新消息气泡用于下一轮模型回复
@@ -883,8 +1200,9 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 )
             }
 
-            // 将工具结果作为 tool 消息发给模型继续对话
-            currentMessage = Message.tool(Contents.of(listOf(Content.ToolResponse("", toolResult))))
+            // 将工具结果合并为一条 tool 消息发给模型
+            val combinedResult = results.joinToString("\n\n")
+            currentMessage = Message.tool(Contents.of(listOf(Content.ToolResponse("call_${currentMsgId.take(8)}", combinedResult))))
 
             rounds++
             if (rounds % 3 == 0) {
@@ -897,6 +1215,73 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     }
 
 
+
+    private fun isToolLikeContent(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return false
+        val toolKeywords = listOf(
+            "listFiles", "readFile", "writeFile", "replaceInFile", "batchReplaceInFile",
+            "deleteFile", "createDirectory", "runCommand", "searchWeb",
+            "readLints", "grep", "searchInFiles", "searchCodebase",
+        )
+        if (toolKeywords.any { trimmed.contains(it) }) return true
+        val jsonPatterns = listOf(
+            Regex("""tool_name""", RegexOption.IGNORE_CASE),
+            Regex("""tool_call""", RegexOption.IGNORE_CASE),
+            Regex("""function_call""", RegexOption.IGNORE_CASE),
+            Regex("""\{[^}]*"name"\s*:"""),
+            Regex("""\{[^}]*"arguments"\s*:"""),
+        )
+        return jsonPatterns.any { it.containsMatchIn(trimmed) }
+    }
+
+    private suspend fun fallbackToAutoToolCalling(
+        ctx: Application,
+        text: String,
+        imagePaths: List<String>,
+        editorCtx: String,
+        msgId: String,
+        startTime: Long,
+    ): String? {
+        return try {
+            val stateMsgs = _state.value.messages
+            val historyMsgs = mutableListOf<Message>()
+            for (msg in stateMsgs) {
+                if (msg.id == msgId) continue
+                if (msg.id == msgId && msg.role == ChatRole.Model) continue
+                if (msg.role == ChatRole.User) {
+                    historyMsgs.add(Message.user(msg.content))
+                } else if (msg.role == ChatRole.Model && msg.content.isNotBlank()) {
+                    historyMsgs.add(Message.model(msg.content))
+                }
+            }
+            resetConversation()
+            pendingInitialMessages = historyMsgs
+            val fallbackConv = ensureConversation(autoToolCalling = true)
+
+            val userInput = if (editorCtx.isNotBlank()) "$editorCtx\n[用户消息]\n$text" else text
+            val msg: Message = if (imagePaths.isNotEmpty()) {
+                val contentList = mutableListOf<Content>().apply {
+                    add(Content.Text(userInput))
+                    imagePaths.forEach { add(Content.ImageFile(absolutePath = it)) }
+                }
+                Message.user(Contents.of(contentList))
+            } else {
+                Message.user(userInput)
+            }
+
+            val sb = StringBuilder()
+            fallbackConv.sendMessageAsync(msg).collect { chunk ->
+                sb.append(chunk.toString())
+            }
+            val result = sb.toString().trim()
+            if (result.isNotBlank()) result else null
+        } catch (e: Exception) {
+            Log.e("ChatViewModel", "fallbackToAutoToolCalling failed: ${e.message}", e)
+            FileLogger.e("ChatViewModel", "fallbackToAutoToolCalling failed: ${e.message}", e)
+            null
+        }
+    }
 
     private suspend fun processWithCloudTools(
         text: String, msgId: String,
@@ -918,6 +1303,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             apiEndpoint = profile.apiEndpoint,
             apiKey = profile.apiKey,
             modelName = profile.modelName,
+            maxTokens = profile.maxTokens,
         )
 
         var currentMsgId = msgId
@@ -925,9 +1311,16 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         _state.update { it.copy(modelActivity = ModelActivity.Thinking, activityDetail = "") }
 
         val historyMessages = mutableListOf<ChatMessage>()
+        var lastUserSkipped = false
         for (msg in _state.value.messages) {
             if (msg.id == currentMsgId) continue
             if (msg.role == ChatRole.User || msg.role == ChatRole.Model || msg.role == ChatRole.Tool) {
+                // 跳过 sendMessage() 已添加到 UI 状态的用户消息，
+                // 后续会重新构造带编辑器上下文的用户消息
+                if (msg.role == ChatRole.User && !lastUserSkipped) {
+                    lastUserSkipped = true
+                    continue
+                }
                 if (msg.content.isNotBlank() || msg.role == ChatRole.Model) historyMessages.add(msg)
             }
         }
@@ -938,6 +1331,15 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         val editorCtx = buildEditorContext()
         val userContent = if (editorCtx.isNotBlank()) "$editorCtx\n[用户消息]\n$text" else text
         historyMessages.add(ChatMessage(role = ChatRole.User, content = userContent))
+
+        // 注入已有上下文摘要（渐进式摘要的锚定状态）
+        val existingSummary = _state.value.contextSummary
+        if (existingSummary.isNotBlank() && historyMessages.none { it.content.startsWith("[上下文摘要]") }) {
+            historyMessages.add(0, ChatMessage(
+                role = ChatRole.Model,
+                content = "[上下文摘要]\n$existingSummary",
+            ))
+        }
 
         while (true) {
             cloudRounds++
@@ -993,8 +1395,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 return
             }
 
-            val toolCall = extractJsonToolCall(response)
-            if (toolCall == null) {
+            val toolCalls = extractJsonToolCalls(response)
+            if (toolCalls == null) {
                 // 最终回答：添加到历史并结束
                 historyMessages.add(ChatMessage(role = ChatRole.Model, content = response))
                 finalizeModelMessage(currentMsgId)
@@ -1002,34 +1404,63 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 return
             }
 
-            // 将助手的工具调用加入历史（含 tool_call_id，供后续 tool 角色匹配）
+            // 并行执行所有工具
+            val knownTools = setOf("listFiles", "readFile", "writeFile", "replaceInFile",
+                "batchReplaceInFile", "deleteFile", "createDirectory", "runCommand",
+                "searchWeb", "readLints", "grep", "searchInFiles", "searchCodebase")
+            val results = coroutineScope {
+                toolCalls.map { call ->
+                    val funcName = call.second
+                    val funcArgs = call.third
+                    async(Dispatchers.IO) {
+                        if (funcName !in knownTools) return@async "未知工具: $funcName"
+                        try { executeAiTool(funcName, funcArgs) }
+                        catch (e: Exception) { "$funcName 执行失败: ${e.message}" }
+                    }
+                }.map { it.await() }
+            }
+
+            // 将助手的所有工具调用加入历史
             val toolCallId = "call_${java.util.UUID.randomUUID().toString().take(8)}"
             historyMessages.add(ChatMessage(
                 role = ChatRole.Model, content = response,
                 toolCallId = toolCallId,
             ))
 
-            val (prefixText, funcName, funcArgs) = toolCall
-            val argPath = funcArgs["path"] ?: funcArgs["query"] ?: funcArgs["pattern"] ?: ""
-            _state.update { it.copy(modelActivity = toolNameToActivity(funcName, argPath), activityDetail = argPath) }
-
-            val toolResult = executeAiTool(funcName, funcArgs)
-            val toolDisplay = "\n\n$toolResult"
-
-            if (prefixText != null) {
-                updateModelMessage(currentMsgId, toolDisplay, true)
-            } else {
-                updateModelMessage(currentMsgId, "\n\n[工具调用: $funcName]\n\n$toolResult", false)
+            val combinedResult = results.joinToString("\n\n")
+            val display = StringBuilder()
+            for (i in toolCalls.indices) {
+                val name = toolCalls[i].second
+                display.appendLine("[工具调用: $name]")
+                display.appendLine(results[i])
+                if (i < toolCalls.size - 1) display.appendLine()
             }
+            updateModelMessage(currentMsgId, "\n\n${display.toString().trimEnd()}", false)
             finalizeModelMessage(currentMsgId)
 
             _state.update { it.copy(modelActivity = ModelActivity.ProcessingResult, activityDetail = "") }
 
-            // 将工具执行结果加入历史（role: tool，与上面 tool_call_id 匹配）
+            // 将合并的工具执行结果加入历史
             historyMessages.add(ChatMessage(
-                role = ChatRole.Tool, content = toolResult,
+                role = ChatRole.Tool, content = combinedResult,
                 toolCallId = toolCallId,
             ))
+
+            // 渐进式摘要：每 SUMMARIZE_INTERVAL 轮触发一次
+            if (cloudRounds % SUMMARIZE_INTERVAL == 0) {
+                val progressiveMsgs = historyMessages.toList()
+                val compressed = compressMessages(progressiveMsgs)
+                historyMessages.clear()
+                historyMessages.addAll(compressed)
+                // 确保已有的上下文摘要仍在消息列表头部
+                val summary = _state.value.contextSummary
+                if (summary.isNotBlank() && historyMessages.none { it.content.startsWith("[上下文摘要]") }) {
+                    historyMessages.add(0, ChatMessage(
+                        role = ChatRole.Model,
+                        content = "[上下文摘要]\n$summary",
+                    ))
+                }
+            }
 
             // 每隔 3 轮刷新编辑器上下文
             if (cloudRounds % 3 == 0) {
@@ -1103,7 +1534,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     fun verifyCloudConnection() {
         val profile = _state.value.cloudModelProfiles.find { it.id == _state.value.activeCloudProfileId }
         if (profile == null) { _state.update { it.copy(engineErrorMessage = "未选择云端模型配置") }; return }
-        val cfg = CloudModelConfig(true, profile.apiEndpoint, profile.apiKey, profile.modelName)
+        val cfg = CloudModelConfig(true, profile.apiEndpoint, profile.apiKey, profile.modelName, maxTokens = profile.maxTokens)
         _state.update { it.copy(engineErrorMessage = "验证中…") }
         viewModelScope.launch {
             val result = cloudLLMClient.verifyConnection(cfg)
@@ -1120,7 +1551,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     fun clearMessages() {
         sendJob?.cancel()
         _state.update { it.copy(messages = emptyList(), inputText = "",
-            isContextCompressed = false, contextCompressedTokens = 0, contextCompressedCount = 0) }
+            isContextCompressed = false, contextCompressedTokens = 0, contextCompressedCount = 0,
+            contextSummary = "") }
         viewModelScope.launch(Dispatchers.IO) { closeConversation() }
     }
 
@@ -1154,12 +1586,13 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 ChatRole.User -> Message.user(msg.content)
                 ChatRole.Model -> Message.model(msg.content)
                 ChatRole.System -> Message.system(msg.content)
-                ChatRole.Tool -> Message.tool(com.google.ai.edge.litertlm.Contents.of(listOf(com.google.ai.edge.litertlm.Content.ToolResponse("", msg.content))))
+                ChatRole.Tool -> Message.tool(com.google.ai.edge.litertlm.Contents.of(listOf(com.google.ai.edge.litertlm.Content.ToolResponse(msg.toolCallId ?: "call_${msg.id.take(8)}", msg.content))))
             }
         }
         _state.update { it.copy(messages = entry.messages, inputText = "", isLoading = false,
             activeConversationId = entry.id, isHistoryOpen = false,
-            isContextCompressed = false, contextCompressedTokens = 0, contextCompressedCount = 0) }
+            isContextCompressed = false, contextCompressedTokens = 0, contextCompressedCount = 0,
+            contextSummary = "") }
         viewModelScope.launch(Dispatchers.IO) { closeConversation() }
     }
 

@@ -17,6 +17,7 @@ data class CloudModelConfig(
     val apiEndpoint: String = "https://api.openai.com/v1",
     val apiKey: String = "",
     val modelName: String = "gpt-4o",
+    val maxTokens: Int = 8192,
 )
 
 // 云端模型配置档案（可保存多个，自由切换）
@@ -27,6 +28,7 @@ data class CloudModelProfile(
     val apiKey: String = "",
     val modelName: String = "gpt-4o",
     val contextWindow: Int = 128000,  // 模型上下文窗口大小（token），用于自适应压缩阈值
+    val maxTokens: Int = 8192,        // 模型输出最大 token 数
 )
 
 /** API 调用返回的用量信息 */
@@ -82,7 +84,7 @@ class CloudLLMClient(private val context: Context) {
             put("model", config.modelName)
             put("messages", msgs)
             put("stream", true)
-            put("max_tokens", 8192)
+            put("max_tokens", config.maxTokens)
             put("temperature", 0.7)
         }
 
@@ -97,7 +99,7 @@ class CloudLLMClient(private val context: Context) {
             doOutput = true
         }
 
-        val fullText = StringBuilder()
+            val fullText = StringBuilder()
         var usage = ApiUsage()
 
         try {
@@ -106,12 +108,17 @@ class CloudLLMClient(private val context: Context) {
             val responseCode = conn.responseCode
             if (responseCode != 200) {
                 val errorBody = try {
-                    conn.errorStream?.bufferedReader()?.readText() ?: conn.responseMessage
+                    conn.errorStream?.bufferedReader(Charsets.UTF_8)?.readText() ?: conn.responseMessage
                 } catch (_: Exception) { conn.responseMessage }
                 throw RuntimeException("API error $responseCode: $errorBody")
             }
 
-            BufferedReader(InputStreamReader(conn.inputStream, "UTF-8")).use { reader ->
+            val rawInput = if (conn.contentEncoding == "gzip") {
+                java.util.zip.GZIPInputStream(conn.inputStream)
+            } else {
+                conn.inputStream
+            }
+            BufferedReader(InputStreamReader(rawInput, "UTF-8")).use { reader ->
                 var line: String?
                 while (reader.readLine().also { line = it } != null) {
                     val l = line ?: continue
@@ -199,7 +206,12 @@ class CloudLLMClient(private val context: Context) {
         try {
             val code = conn.responseCode
             if (code != 200) return@withContext emptyList()
-            val response = conn.inputStream.bufferedReader().use { it.readText() }
+            val inputStream = if (conn.contentEncoding == "gzip") {
+                java.util.zip.GZIPInputStream(conn.inputStream)
+            } else {
+                conn.inputStream
+            }
+            val response = inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
             val json = JSONObject(response)
             val data = json.optJSONArray("data") ?: return@withContext emptyList()
             val models = mutableListOf<String>()

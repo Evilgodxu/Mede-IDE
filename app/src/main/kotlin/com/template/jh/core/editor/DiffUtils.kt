@@ -114,6 +114,8 @@ fun replaceInFile(originalText: String, operations: List<BlockReplaceOp>): Pair<
         if (result.contains(trimmed)) {
             val count = countOccurrences(result, trimmed)
             if (count == 1) { result = result.replaceFirst(trimmed, newStr); messages.add("✓ 替换 #${index + 1} 成功（自动去首尾空白）"); continue }
+            val expanded = tryExpandAndReplace(result, trimmed, newStr)
+            if (expanded != null) { result = expanded; messages.add("✓ 替换 #${index + 1} 成功（自动去首尾空白+上下文扩展）"); continue }
         }
         val lineMatch = tryLineBasedMatch(result, oldStr, newStr)
         if (lineMatch != null) { result = lineMatch; messages.add("✓ 替换 #${index + 1} 成功（忽略行尾空白）"); continue }
@@ -128,11 +130,14 @@ private fun tryLineBasedMatch(text: String, oldStr: String, newStr: String): Str
     if (oldLines.isEmpty()) return null
     val matches = mutableListOf<Int>()
     for (i in 0..textLines.size - oldLines.size) { if (linesMatchLoose(textLines, i, oldLines)) matches.add(i) }
-    if (matches.size != 1) return null
+    if (matches.isEmpty()) return null
+    val start = if (matches.size == 1) matches[0]
+        else disambiguateByContext(textLines, matches, oldLines.size) ?: return null
     val result = textLines.toMutableList()
-    val start = matches[0]
     result.subList(start, start + oldLines.size).clear()
-    result.addAll(start, newStr.lines())
+    if (newStr.isNotEmpty()) {
+        result.addAll(start, newStr.lines())
+    }
     return result.joinToString("\n")
 }
 
@@ -172,12 +177,37 @@ private fun tryExpandAndReplace(text: String, oldStr: String, newStr: String): S
     val lines = text.lines(); val oldLines = oldStr.lines()
     val matches = mutableListOf<Int>()
     for (i in 0..lines.size - oldLines.size) { if (linesMatch(lines, i, oldLines)) matches.add(i) }
-    if (matches.size != 1) return null
+    if (matches.isEmpty()) return null
+    val start = if (matches.size == 1) matches[0]
+        else disambiguateByContext(lines, matches, oldLines.size) ?: return null
     val result = lines.toMutableList()
-    val start = matches[0]
     result.subList(start, start + oldLines.size).clear()
-    result.addAll(start, newStr.lines())
+    if (newStr.isNotEmpty()) {
+        result.addAll(start, newStr.lines())
+    }
     return result.joinToString("\n")
+}
+
+private fun disambiguateByContext(
+    lines: List<String>, positions: List<Int>, blockSize: Int
+): Int? {
+    for (ctxLines in 1..2) {
+        val keyToPos = positions.groupBy { pos ->
+            buildContextKey(lines, pos, blockSize, ctxLines)
+        }
+        keyToPos.entries.firstOrNull { it.value.size == 1 }?.let {
+            return it.value[0]
+        }
+    }
+    return null
+}
+
+private fun buildContextKey(lines: List<String>, pos: Int, blockSize: Int, ctxLines: Int): String {
+    val before = ((pos - ctxLines).coerceAtLeast(0) until pos)
+        .joinToString("|") { lines[it].trimEnd() }
+    val after = (pos + blockSize until (pos + blockSize + ctxLines).coerceAtMost(lines.size))
+        .joinToString("|") { lines[it].trimEnd() }
+    return "$before ⏎ $after"
 }
 
 private fun linesMatch(lines: List<String>, startIdx: Int, oldLines: List<String>): Boolean {

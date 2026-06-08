@@ -6,6 +6,13 @@ import android.net.Uri
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
+import java.util.Collections
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 统一的文件管理器，使用 DocumentFile 公共 API 实现 SAF 操作
@@ -18,10 +25,19 @@ class FileManager(private val context: Context) {
     var projectUri: Uri? = null
         private set
 
+    // 文件级互斥锁，确保同一文件的读写操作完全串行
+    private val fileLocks = ConcurrentHashMap<String, Mutex>()
+
     private val searchableExtensions = setOf(
         "kt", "kts", "java", "xml", "json", "yml", "yaml", "properties",
         "txt", "md", "gradle", "toml", "cfg", "conf", "ini",
         "html", "css", "js", "ts", "sql", "sh", "bat", "py",
+    )
+
+    // 搜索时跳过的目录名（小写）
+    private val skippedDirNames = setOf(
+        "build", ".gradle", ".git", "node_modules", ".idea", "target",
+        "out", "captures", ".git", ".svn", ".hg", ".m2", "gradle",
     )
 
     // 设置项目根目录
@@ -87,7 +103,8 @@ class FileManager(private val context: Context) {
                     .thenBy { it.name?.lowercase() ?: "" }
             )
 
-            val displayPath = if (subPath.isBlank()) "project root" else subPath.trim('/')
+            val rootName = rootDocFile?.name?.takeIf { it.isNotBlank() } ?: "project root"
+            val displayPath = if (subPath.isBlank()) rootName else subPath.trim('/')
             buildString {
                 appendLine("$displayPath/")
                 sorted.forEach { doc ->
@@ -179,11 +196,10 @@ class FileManager(private val context: Context) {
             .sortedWith(compareByDescending<DocumentFile> { it.isDirectory }.thenBy { it.name?.lowercase() ?: "" })
 
         // 预先收集子目录子文件列表，用于判断每个节点是否是最后一个可显示节点
-        val visibleChildren = children.filter { c -> !(c.name?.startsWith(".") == true) }
-        val lastIdx = visibleChildren.size - 1
+        val lastIdx = children.size - 1
         var idx = -1
 
-        for (doc in visibleChildren) {
+        for (doc in children) {
             idx++
             val name = doc.name ?: continue
             val connector = if (idx == lastIdx) "└── " else "├── "
@@ -218,32 +234,6 @@ class FileManager(private val context: Context) {
         } catch (_: Exception) {
             null
         }
-    }
-
-    /**
-     * 读取文件内容（带行号）
-     * @param path 相对于项目根目录的文件路径
-     * @param offset 起始行号（1-based）
-     * @param limit 最大读取行数
-     * @return 带行号的文件内容
-     */
-    fun readFileWithLineNumbers(path: String, offset: Int = 1, limit: Int = 1000): String {
-        val text = readFileRaw(path) ?: return "File not found: $path"
-        val allLines = text.lines()
-        val startIdx = (offset - 1).coerceIn(0, allLines.size)
-        val endIdx = (startIdx + limit).coerceAtMost(allLines.size)
-        val lines = allLines.subList(startIdx, endIdx)
-        
-        val lineNumWidth = allLines.size.toString().length
-        return buildString {
-            if (startIdx > 0 || endIdx < allLines.size) {
-                appendLine("// Showing lines ${startIdx + 1}-$endIdx of ${allLines.size}")
-            }
-            lines.forEachIndexed { i, line ->
-                val lineNum = startIdx + i + 1
-                appendLine("${lineNum.toString().padStart(lineNumWidth)}: $line")
-            }
-        }.trimEnd()
     }
 
     /**
@@ -283,7 +273,7 @@ class FileManager(private val context: Context) {
     }
 
     /**
-     * 写入文件内容
+     * 写入文件内容（带备份回滚 + 文件互斥锁）
      * @param path 相对于项目根目录的文件路径
      * @param content 要写入的内容
      * @return 操作结果描述
@@ -292,18 +282,19 @@ class FileManager(private val context: Context) {
         val root = rootDocFile ?: return "No project folder is open."
 
         return try {
-            val cleanPath = path.trim()
-            val trimmedPath = cleanPath.trim('/')
+            // 路径安全检查
+            val pathErr = validatePath(path)
+            if (pathErr != null) return pathErr
+
+            val trimmedPath = path.trim().trim('/')
             val fileName = trimmedPath.substringAfterLast('/')
             val parentPath = trimmedPath.substringBeforeLast('/', "")
 
-            val parentDoc = if (parentPath.isEmpty()) {
-                root
-            } else {
+            val parentDoc = if (parentPath.isEmpty()) root else {
                 ensureDirectory(parentPath) ?: return "Failed to create parent directory: $parentPath"
             }
 
-            // 查找或创建文件（兼容 findFile 失效的存储后端，兼容名称含空白）
+            // 查找或创建文件
             var existingFile = parentDoc.findFile(fileName)
             if (existingFile == null) {
                 existingFile = parentDoc.listFiles().firstOrNull {
@@ -311,18 +302,78 @@ class FileManager(private val context: Context) {
                 }
             }
             val targetDoc = existingFile ?: parentDoc.createFile("application/octet-stream", fileName)
-            ?: return "Failed to create file: $path"
-
-            context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
-                out.write(content.toByteArray(Charsets.UTF_8))
-            } ?: return "Failed to write file: $path"
+                ?: return "Failed to create file: $path"
 
             val opName = if (existingFile != null) "overwrite" else "create"
+
+            // 原子写入：备份 → 写入 → 校验 → 回滚
+            val normalizedKey = trimmedPath.lowercase()
+            val mutex = fileLocks.getOrPut(normalizedKey) { Mutex() }
+            runBlocking {
+                mutex.withLock {
+                    // 1. 备份原始内容
+                    val backup = if (existingFile != null) {
+                        try {
+                            context.contentResolver.openInputStream(targetDoc.uri)
+                                ?.bufferedReader()?.use { it.readText() }
+                        } catch (_: Exception) { null }
+                    } else null
+
+                    try {
+                        // 2. 写入文件
+                        context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
+                            out.write(content.toByteArray(Charsets.UTF_8))
+                        } ?: throw RuntimeException("Failed to open output stream")
+
+                        // 3. 读回校验
+                        val written = try {
+                            context.contentResolver.openInputStream(targetDoc.uri)
+                                ?.bufferedReader()?.use { it.readText() }
+                        } catch (_: Exception) { null }
+
+                        if (written == null || written.length != content.length || !written.contains(content.take(50))) {
+                            // 校验不通过，回滚
+                            if (backup != null) {
+                                context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
+                                    out.write(backup.toByteArray(Charsets.UTF_8))
+                                }
+                            }
+                            throw RuntimeException("Write verification failed, rolled back")
+                        }
+                    } catch (e: Exception) {
+                        // 写入过程异常，尝试回滚
+                        if (backup != null) {
+                            try {
+                                context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
+                                    out.write(backup.toByteArray(Charsets.UTF_8))
+                                }
+                            } catch (_: Exception) { }
+                        }
+                        throw e
+                    }
+                }
+            }
+
             notifyFileSystemChange(path)
             "File written: $path (${content.lines().size} lines, $opName)"
         } catch (e: Exception) {
             "Failed to write file: ${e.message}"
         }
+    }
+
+    /**
+     * 校验相对路径是否安全（防路径遍历攻击）
+     * @return 错误消息，null 表示安全
+     */
+    fun validatePath(relativePath: String): String? {
+        val trimmed = relativePath.trim()
+        if (trimmed.isEmpty() || trimmed == "/") return null
+        // 拆分后逐段检查，拒绝 .. 路径遍历
+        val segments = trimmed.trim('/').split('/')
+        for (seg in segments) {
+            if (seg == "..") return "Path traversal detected: '$relativePath' (contains '..')"
+        }
+        return null
     }
 
     /**
@@ -477,13 +528,9 @@ class FileManager(private val context: Context) {
         if (pattern.isBlank()) return "Search pattern is empty."
 
         return try {
-            val results = mutableListOf<GrepResult>()
-            val searchedFiles = mutableListOf<String>()
-            val regex = if (ignoreCase) {
-                Regex(pattern, RegexOption.IGNORE_CASE)
-            } else {
-                Regex(pattern)
-            }
+            val results = Collections.synchronizedList<GrepResult>(mutableListOf())
+            val searchedFiles = Collections.synchronizedList<String>(mutableListOf())
+            val regex = if (ignoreCase) Regex(pattern, RegexOption.IGNORE_CASE) else Regex(pattern)
             val extLower = extension.lowercase().trimStart('.')
 
             grepRecursive(root, "", regex, extLower, glob, results, searchedFiles, contextLines)
@@ -514,6 +561,13 @@ class FileManager(private val context: Context) {
         }
     }
 
+    companion object {
+        private val grepPool = Executors.newWorkStealingPool(
+            Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
+        )
+    }
+
+    // grep 内部结果类型
     private data class GrepResult(
         val filePath: String,
         val lineNumber: Int,
@@ -534,18 +588,22 @@ class FileManager(private val context: Context) {
 
         val children = dirDoc.listFiles()
 
+        // 收集子目录和文件，跳过噪声目录
+        val subDirs = mutableListOf<DocumentFile>()
+        val fileTasks = mutableListOf<DocumentFile>()
+
         for (doc in children) {
             val name = doc.name ?: continue
-            if (name.startsWith(".")) continue
+            if (name.startsWith(".") && name.lowercase() !in skippedDirNames) continue
 
             val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
 
             if (glob.isNotBlank() && !matchesGlob(name, glob)) continue
 
             if (doc.isDirectory) {
-                if (currentPath.count { it == '/' } < 10) {
-                    grepRecursive(doc, currentPath, regex, extLower, glob, results, searchedFiles, contextLines)
-                }
+                if (name.lowercase() in skippedDirNames) continue
+                if (currentPath.count { it == '/' } >= 10) continue
+                subDirs.add(doc)
             } else {
                 val fileExt = name.substringAfterLast('.', "").lowercase()
                 if (extLower.isNotBlank()) {
@@ -553,35 +611,47 @@ class FileManager(private val context: Context) {
                 } else {
                     if (fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
                 }
-
-                if (doc.length() > 512 * 1024) continue
-
-                searchedFiles.add(currentPath)
-
-                try {
-                    val text = context.contentResolver.openInputStream(doc.uri)
-                        ?.bufferedReader()
-                        ?.use { it.readText() }
-                        ?: continue
-
-                    val lines = text.lines()
-                    lines.forEachIndexed { idx, line ->
-                        if (regex.containsMatchIn(line)) {
-                            val lineNum = idx + 1
-                            val startContext = maxOf(0, idx - contextLines)
-                            val endContext = minOf(lines.size - 1, idx + contextLines)
-                            
-                            val context = (startContext..endContext).map { i ->
-                                Triple(i + 1, lines[i].take(120), i == idx)
-                            }
-                            
-                            results.add(GrepResult(currentPath, lineNum, context))
-                        }
-                    }
-                } catch (_: Exception) { }
-
-                if (results.size >= 50) return
+                if (doc.length() > 512 * 1024 || doc.length() == 0L) continue
+                fileTasks.add(doc)
             }
+        }
+
+        // 并行搜索文件
+        if (fileTasks.isNotEmpty()) {
+            val futures = fileTasks.map { doc ->
+                CompletableFuture.runAsync({
+                    if (results.size >= 50) return@runAsync
+                    val name = doc.name ?: return@runAsync
+                    val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+                    searchedFiles.add(currentPath)
+                    try {
+                        val text = context.contentResolver.openInputStream(doc.uri)
+                            ?.bufferedReader()?.use { it.readText() } ?: return@runAsync
+                        val lines = text.lines()
+                        for ((idx, line) in lines.withIndex()) {
+                            if (results.size >= 50) break
+                            if (regex.containsMatchIn(line)) {
+                                val lineNum = idx + 1
+                                val startIdx = maxOf(0, idx - contextLines)
+                                val endIdx = minOf(lines.size - 1, idx + contextLines)
+                                val ctx = (startIdx..endIdx).map { i ->
+                                    Triple(i + 1, lines[i].take(120), i == idx)
+                                }
+                                results.add(GrepResult(currentPath, lineNum, ctx))
+                            }
+                        }
+                    } catch (_: Exception) { }
+                }, grepPool)
+            }
+            CompletableFuture.allOf(*futures.toTypedArray()).join()
+        }
+
+        // 顺序递归子目录
+        for (subDir in subDirs) {
+            if (results.size >= 50) return
+            val name = subDir.name ?: continue
+            val nextPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+            grepRecursive(subDir, nextPath, regex, extLower, glob, results, searchedFiles, contextLines)
         }
     }
 
@@ -681,82 +751,6 @@ class FileManager(private val context: Context) {
                 } catch (_: Exception) { }
             }
         }
-    }
-
-    private fun extractSearchTerms(query: String): List<String> {
-        val stopWords = setOf(
-            "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-            "have", "has", "had", "do", "does", "did", "will", "would", "could",
-            "should", "may", "might", "must", "shall", "can", "need", "dare",
-            "ought", "used", "to", "of", "in", "for", "on", "with", "at", "by",
-            "from", "as", "into", "through", "during", "before", "after", "above",
-            "below", "between", "under", "again", "further", "then", "once", "here",
-            "there", "when", "where", "why", "how", "all", "each", "few", "more",
-            "most", "other", "some", "such", "no", "nor", "not", "only", "own",
-            "same", "so", "than", "too", "very", "just", "and", "but", "if", "or",
-            "because", "until", "while", "what", "which", "who", "whom", "this",
-            "that", "these", "those", "am", "it", "its", "i", "me", "my", "myself",
-            "we", "our", "you", "your", "he", "him", "his", "she", "her", "they",
-            "them", "their", "where", "how", "does", "work", "implemented", "find",
-            "look", "search", "get", "set", "use", "using"
-        )
-
-        return query.lowercase()
-            .replace(Regex("[^a-z0-9_\\s]"), " ")
-            .split(Regex("\\s+"))
-            .filter { it.length > 2 && it !in stopWords }
-            .distinct()
-    }
-
-    private fun calculateRelevanceScore(content: String, query: String, terms: List<String>): Double {
-        val contentLower = content.lowercase()
-        var score = 0.0
-
-        if (contentLower.contains(query.lowercase())) {
-            score += 0.5
-        }
-
-        terms.forEach { term ->
-            val count = contentLower.split(term).size - 1
-            score += count * 0.1
-
-            val patterns = listOf(
-                "fun\\s+$term",
-                "class\\s+$term",
-                "interface\\s+$term",
-                "object\\s+$term",
-                "val\\s+$term",
-                "var\\s+$term",
-                "def\\s+$term",
-                "function\\s+$term"
-            )
-            patterns.forEach { pattern ->
-                if (Regex(pattern, RegexOption.IGNORE_CASE).containsMatchIn(content)) {
-                    score += 0.3
-                }
-            }
-        }
-
-        return (score / (1 + contentLower.length / 1000.0)).coerceIn(0.0, 1.0)
-    }
-
-    private fun extractRelevantSnippet(content: String, terms: List<String>): String {
-        val lines = content.lines()
-        if (terms.isEmpty()) return lines.take(3).joinToString("\n")
-
-        val scoredLines = lines.mapIndexed { idx, line ->
-            val lineLower = line.lowercase()
-            val score = terms.count { lineLower.contains(it) }
-            Triple(idx, line, score)
-        }.filter { it.third > 0 }
-            .sortedByDescending { it.third }
-
-        if (scoredLines.isEmpty()) return lines.take(3).joinToString("\n")
-
-        val bestLine = scoredLines.first()
-        val start = maxOf(0, bestLine.first - 2)
-        val end = minOf(lines.size, bestLine.first + 3)
-        return lines.subList(start, end).joinToString("\n")
     }
 
     // 通知系统刷新文件，使文件管理器等外部应用可见

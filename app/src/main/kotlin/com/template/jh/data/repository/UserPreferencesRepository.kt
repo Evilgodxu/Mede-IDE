@@ -67,6 +67,8 @@ class UserPreferencesRepository(private val context: Context) {
                         apiEndpoint = obj.optString("apiEndpoint", "https://api.openai.com/v1"),
                         apiKey = obj.optString("apiKey", ""),
                         modelName = obj.optString("modelName", "gpt-4o"),
+                        contextWindow = obj.optInt("contextWindow", 128000),
+                        maxTokens = obj.optInt("maxTokens", 8192),
                     )
                 }
             } catch (_: Exception) { emptyList() }
@@ -165,6 +167,8 @@ class UserPreferencesRepository(private val context: Context) {
                 obj.put("apiEndpoint", p.apiEndpoint)
                 obj.put("apiKey", p.apiKey)
                 obj.put("modelName", p.modelName)
+                obj.put("contextWindow", p.contextWindow)
+                obj.put("maxTokens", p.maxTokens)
                 arr.put(obj)
             }
             prefs[PreferencesKeys.CLOUD_PROFILES_JSON] = arr.toString()

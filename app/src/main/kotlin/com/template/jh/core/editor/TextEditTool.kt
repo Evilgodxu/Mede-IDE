@@ -26,11 +26,19 @@ object TextEditTool {
             if (!originalText.contains(trimmedOld)) {
                 return originalText to false
             }
-            return originalText.replaceFirst(trimmedOld, newString) to true
+            // 检查去空白后的唯一性，再决定是否直接替换
+            val count = countOccurrences(originalText, trimmedOld)
+            if (count == 1) {
+                return originalText.replaceFirst(trimmedOld, newString) to true
+            }
+            // 多次匹配时尝试行级扩展
+            val expanded = tryExpandAndReplace(originalText, trimmedOld, newString)
+            if (expanded != null) return expanded to true
+            return originalText to false
         }
 
         // 统计出现次数（确保唯一性）
-        val count = originalText.split(oldString).size - 1
+        val count = countOccurrences(originalText, oldString)
         if (count > 1) {
             // 尝试扩展上下文以获得唯一匹配
             val result = tryExpandAndReplace(originalText, oldString, newString)
@@ -42,6 +50,16 @@ object TextEditTool {
 
         // 执行替换
         return originalText.replaceFirst(oldString, newString) to true
+    }
+
+    private fun countOccurrences(text: String, pattern: String): Int {
+        var count = 0
+        var idx = text.indexOf(pattern)
+        while (idx != -1) {
+            count++
+            idx = text.indexOf(pattern, idx + 1)
+        }
+        return count
     }
 
     /**
@@ -78,17 +96,17 @@ object TextEditTool {
             }
         }
 
-        // 必须有且只有一个匹配
-        if (matches.size != 1) return null
+        if (matches.isEmpty()) return null
+        val start = if (matches.size == 1) matches[0]
+            else disambiguateByContext(lines, matches, oldLines.size) ?: return null
 
         // 执行替换
         val result = lines.toMutableList()
-        val startIdx = matches[0]
-        val endIdx = startIdx + oldLines.size
-
-        result.subList(startIdx, endIdx).clear()
-        result.addAll(startIdx, newStr.lines())
-
+        val endIdx = start + oldLines.size
+        result.subList(start, endIdx).clear()
+        if (newStr.isNotEmpty()) {
+            result.addAll(start, newStr.lines())
+        }
         return result.joinToString("\n")
     }
 
@@ -100,6 +118,29 @@ object TextEditTool {
             }
         }
         return true
+    }
+
+    /** 当块级匹配出现多个相同位置时，用前后文行消除歧义 */
+    private fun disambiguateByContext(
+        lines: List<String>, positions: List<Int>, blockSize: Int
+    ): Int? {
+        for (ctxLines in 1..2) {
+            val keyToPos = positions.groupBy { pos ->
+                buildContextKey(lines, pos, blockSize, ctxLines)
+            }
+            keyToPos.entries.firstOrNull { it.value.size == 1 }?.let {
+                return it.value[0]
+            }
+        }
+        return null
+    }
+
+    private fun buildContextKey(lines: List<String>, pos: Int, blockSize: Int, ctxLines: Int): String {
+        val before = ((pos - ctxLines).coerceAtLeast(0) until pos)
+            .joinToString("|") { lines[it].trimEnd() }
+        val after = (pos + blockSize until (pos + blockSize + ctxLines).coerceAtMost(lines.size))
+            .joinToString("|") { lines[it].trimEnd() }
+        return "$before ⏎ $after"
     }
 
     /**

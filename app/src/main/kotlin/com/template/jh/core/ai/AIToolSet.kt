@@ -19,6 +19,12 @@ class AIToolSet(
     private val fileManager: FileManager? = null
 ) : ToolSet {
 
+    // Checkpoint：每个文件每会话仅备份一次
+    private val checkpointed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val checkpointDir: File by lazy {
+        File(context.filesDir, "checkpoints").also { it.mkdirs() }
+    }
+
     // SAF 项目根 URI（用户通过文件夹选择器打开的目录）
     // 优先使用外部传入的 fileManager，否则使用内部 projectUri
     @Volatile var projectUri: Uri? = null
@@ -44,7 +50,13 @@ class AIToolSet(
         return fileManager?.readFileRaw(path)
     }
 
-    @Tool(description = "Read content of any text file in the project with line numbers. Use for source code, config files, build scripts, etc. Supports pagination. Always call this before editing a file with replaceInFile.")
+    companion object {
+        // 自动截断阈值：超过此行数且未明确指定 limit 时，仅显示前 N 行
+        private const val MAX_AUTO_LINES = 60
+        private const val TRUNCATE_WARNING_LINES = 150
+    }
+
+    @Tool(description = "Read content of any text file in the project. Returns exact file content without line numbers - you can copy code directly for use in replaceInFile. Supports pagination (use offset/limit). Files larger than 150 lines are auto-truncated to 60 lines to protect context window — use grep for deeper search.")
     fun readFile(
         @ToolParam(description = "File path relative to project root, e.g. 'app/src/main.kt' or 'build.gradle.kts'") path: String,
         @ToolParam(description = "Starting line number (1-based). Default 1.") offset: Int = 1,
@@ -52,15 +64,41 @@ class AIToolSet(
     ): String {
         Log.d("AIToolSet", "readFile: path=$path offset=$offset limit=$limit")
         FileLogger.d("AIToolSet", "readFile: path=$path offset=$offset limit=$limit")
-        val result = fileManager?.readFileWithLineNumbers(path, offset, limit)
-            ?: "No project folder is open."
-        if (result.startsWith("Failed") || result.startsWith("No project")) {
-            FileLogger.w("AIToolSet", "readFile failed: ${result.take(200)}")
+        val raw = readFileRaw(path)
+        if (raw == null) {
+            val err = if (fileManager == null) "No project folder is open." else "File not found: $path"
+            FileLogger.w("AIToolSet", "readFile failed: $err")
+            return err
         }
-        return result
+        val allLines = raw.lines()
+        val totalLines = allLines.size
+
+        // 上下文溢出保护：大文件且未明确指定 limit 时自动截断
+        val effectiveLimit = if (limit >= MAX_AUTO_LINES && totalLines > TRUNCATE_WARNING_LINES) {
+            if (offset <= 1) MAX_AUTO_LINES.coerceAtMost(limit) else limit
+        } else limit
+
+        val startIdx = (offset - 1).coerceIn(0, totalLines)
+        val endIdx = (startIdx + effectiveLimit).coerceAtMost(totalLines)
+        if (startIdx >= totalLines) {
+            return "File $path has $totalLines lines. Cannot start at line $offset."
+        }
+        val msg = buildString {
+            if (startIdx > 0 || endIdx < totalLines) {
+                appendLine("// lines ${startIdx + 1}-$endIdx of $totalLines")
+            }
+            allLines.subList(startIdx, endIdx).forEach { appendLine(it) }
+            if (endIdx < totalLines) {
+                appendLine()
+                appendLine("// Warning: File has $totalLines lines — only showing first ${endIdx - startIdx}.")
+                appendLine("// Use grep to search by content, or readFile with offset/limit for pagination.")
+            }
+        }.trimEnd()
+        FileLogger.d("AIToolSet", "readFile: returned ${msg.lines().size} lines for $path")
+        return msg
     }
 
-    @Tool(description = "Create a new file. WARNING: For existing files, use replaceInFile instead. Only use this when creating new files or completely rewriting (>80% changed).")
+    @Tool(description = "Create a NEW file only. REFUSES to overwrite existing files — use replaceInFile or batchReplaceInFile to modify existing files.")
     fun writeFile(
         @ToolParam(description = "File path relative to project root, e.g. 'src/App.kt'") path: String,
         @ToolParam(description = "The complete text content to write to the file") content: String,
@@ -71,14 +109,35 @@ class AIToolSet(
             FileLogger.w("AIToolSet", "writeFile: no project folder open")
             return "No project folder is open."
         }
+        // Write-guard: 文件已存在时拒绝写入
+        if (fm.exists(path)) {
+            val msg = ("Write refused — $path already exists.\n" +
+                "Write is for creating NEW files only.\n" +
+                "To modify an existing file, use replaceInFile or batchReplaceInFile with the exact code block.\n" +
+                "Read the file first if you don't know its current content.")
+            FileLogger.w("AIToolSet", "writeFile blocked by write-guard: $path exists")
+            return msg
+        }
         val result = fm.writeFile(path, content)
         if (!result.startsWith("Failed") && !result.startsWith("No project")) {
-            FileOperationEvents.notify(path, if (fm.exists(path)) "overwrite" else "create")
+            FileOperationEvents.notify(path, "create")
             FileLogger.d("AIToolSet", "writeFile succeeded: $result")
         } else {
             FileLogger.w("AIToolSet", "writeFile failed: $result")
         }
         return result
+    }
+
+    /** 修改前备份文件快照（每文件每会话仅一次） */
+    private fun checkpoint(path: String) {
+        if (!checkpointed.add(path)) return // 已备份过
+        try {
+            val raw = readFileRaw(path) ?: return
+            val name = path.replace("/", "_").replace("\\", "_")
+            val backupFile = File(checkpointDir, "$name.bak")
+            backupFile.writeText(raw)
+            FileLogger.d("AIToolSet", "checkpoint saved: $path -> ${backupFile.name}")
+        } catch (_: Exception) { }
     }
 
     // 代码编辑工具 - 类似 SearchReplace，只修改指定内容
@@ -102,6 +161,7 @@ class AIToolSet(
                 FileLogger.w("AIToolSet", "replaceInFile: file not found: $path")
                 return "Cannot replace: file not found. Use writeFile to create first."
             }
+            checkpoint(path)
 
             when (val result = CodeEditTool.replace(original, old_string, new_string)) {
                 is CodeEditTool.ReplaceResult.Success -> {
@@ -124,6 +184,68 @@ class AIToolSet(
             Log.e("AIToolSet", "replaceInFile failed: ${e.message}", e)
             FileLogger.e("AIToolSet", "replaceInFile failed: ${e.message}", e)
             "Replace failed: ${e.message}"
+        }
+    }
+
+    // 批量编辑 — 一次调用替换多处不重叠的内容
+    @Tool(description = "Edit an existing file at multiple non-overlapping locations in one call. Provide an array of edits, each with old_string and new_string. All edits are matched against the ORIGINAL file (not sequentially applied). Edits must not overlap or nest. For a single edit, use replaceInFile instead.")
+    fun batchReplaceInFile(
+        @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
+        @ToolParam(description = "JSON array of edits: [{\"old_string\":\"exact code\",\"new_string\":\"replacement\"}, ...]. Each old_string must be unique in the file.") editsJson: String,
+    ): String {
+        val fm = fileManager ?: run {
+            FileLogger.w("AIToolSet", "batchReplaceInFile: no project folder open")
+            return "No project folder is open."
+        }
+        return try {
+            Log.d("AIToolSet", "batchReplaceInFile: path=$path editsLen=${editsJson.length}")
+            FileLogger.d("AIToolSet", "batchReplaceInFile: path=$path editsLen=${editsJson.length}")
+            val original = readFileRaw(path)
+            if (original == null) {
+                Log.w("AIToolSet", "batchReplaceInFile: file not found: $path")
+                FileLogger.w("AIToolSet", "batchReplaceInFile: file not found: $path")
+                return "Cannot edit: file not found. Use writeFile to create first."
+            }
+            checkpoint(path)
+
+            // 解析 JSON edits 数组
+            val jsonArr = org.json.JSONArray(editsJson)
+            val edits = mutableListOf<CodeEditTool.Edit>()
+            for (i in 0 until jsonArr.length()) {
+                val obj = jsonArr.getJSONObject(i)
+                val oldStr = obj.optString("old_string", "") ?: ""
+                val newStr = obj.optString("new_string", "") ?: ""
+                if (oldStr.isEmpty()) return "Edit #${i + 1}: missing old_string"
+                edits.add(CodeEditTool.Edit(oldStr, newStr))
+            }
+
+            if (edits.isEmpty()) return "No edits provided."
+
+            when (val result = CodeEditTool.batchReplace(original, edits)) {
+                is CodeEditTool.ReplaceResult.Success -> {
+                    val writeResult = fm.writeFile(path, result.newText)
+                    if (writeResult.startsWith("Failed") || writeResult.startsWith("No project")) {
+                        FileLogger.e("AIToolSet", "batchReplaceInFile: replace OK but write failed: $writeResult")
+                        return "Edit succeeded but write failed: $writeResult"
+                    }
+                    FileOperationEvents.notify(path, "modify")
+                    FileLogger.d("AIToolSet", "batchReplaceInFile succeeded: $path")
+                    "Batch edit succeeded: $path. ${result.message}"
+                }
+                is CodeEditTool.ReplaceResult.Error -> {
+                    FileLogger.w("AIToolSet", "batchReplaceInFile: rejected: ${result.message.take(200)}")
+                    "Batch edit failed:\n${result.message}"
+                }
+            }
+        } catch (e: org.json.JSONException) {
+            val err = "Invalid edits JSON: ${e.message}"
+            Log.e("AIToolSet", "batchReplaceInFile: $err")
+            FileLogger.e("AIToolSet", "batchReplaceInFile: $err")
+            "Batch edit failed: $err"
+        } catch (e: Exception) {
+            Log.e("AIToolSet", "batchReplaceInFile failed: ${e.message}", e)
+            FileLogger.e("AIToolSet", "batchReplaceInFile failed: ${e.message}", e)
+            "Batch edit failed: ${e.message}"
         }
     }
 
@@ -537,6 +659,23 @@ class AIToolSet(
             FileLogger.w("AIToolSet", "grep failed: ${result.take(200)}")
         } else {
             FileLogger.d("AIToolSet", "grep: found ${result.lines().size} lines of results")
+        }
+        return result
+    }
+
+    @Tool(description = "Search file contents by exact substring match. Use grep instead when you need regex patterns.")
+    fun searchInFiles(
+        @ToolParam(description = "Text to search for (exact match, case insensitive)") query: String,
+        @ToolParam(description = "File extension filter, e.g. 'kt' for Kotlin files only. Leave empty for all text files.") extension: String = "",
+    ): String {
+        Log.d("AIToolSet", "searchInFiles: query=$query ext=$extension")
+        FileLogger.d("AIToolSet", "searchInFiles: query=$query ext=$extension")
+        val result = fileManager?.searchInFiles(query, extension)
+            ?: "No project folder is open."
+        if (result.startsWith("Failed") || result.startsWith("No project")) {
+            FileLogger.w("AIToolSet", "searchInFiles failed: ${result.take(200)}")
+        } else {
+            FileLogger.d("AIToolSet", "searchInFiles: found ${result.lines().size} lines of results")
         }
         return result
     }

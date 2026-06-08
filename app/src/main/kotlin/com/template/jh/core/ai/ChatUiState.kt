@@ -99,5 +99,6 @@ data class ChatUiState(
     val isContextCompressed: Boolean = false,
     val contextCompressedTokens: Int = 0,  // 本次对话累计压缩的 token 数
     val contextCompressedCount: Int = 0,   // 压缩次数
+    val contextSummary: String = "",       // 云端 LLM 生成的上下文结构化摘要 JSON
     val attachedImageUris: List<Uri> = emptyList(),
 )

@@ -91,7 +91,7 @@ class VectorIndex {
         // 收集并排序结果
         val results = mutableListOf<SearchMatch>()
         while (heap.isNotEmpty()) {
-            val (idx, score) = heap.poll()
+            val (idx, score) = heap.poll()!!
             val chunk = chunks[idx]
             val snippet = extractSnippet(chunk)
             results.add(SearchMatch(

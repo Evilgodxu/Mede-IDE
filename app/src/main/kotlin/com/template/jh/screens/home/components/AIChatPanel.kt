@@ -4,7 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
-import android.provider.MediaStore
+
+
 import androidx.compose.foundation.Image
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -36,7 +37,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.derivedStateOf
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.delay
@@ -121,40 +121,38 @@ fun AIChatPanel(
     val displayItems by viewModel.displayItems.collectAsState()
     val currentToolActivity by viewModel.currentToolActivity.collectAsState()
     val listState = rememberLazyListState()
+    var userScrolledUp by remember { mutableStateOf(false) }
 
-    // 展示条目总数（含工具操作指示）
-    val totalDisplayCount = displayItems.size + (if (currentToolActivity != null) 1 else 0)
-
-    // 最后一条展示条目内容长度，用于触发流式滚动
-    val lastItemContentLength by remember(totalDisplayCount) {
-        derivedStateOf {
-            displayItems.lastOrNull()?.content?.length ?: 0
+    // 检测用户手动向上滚动（基于布局信息，比 firstVisibleItemIndex 更准确）
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val totalItems = info.totalItemsCount
+            lastVisible to totalItems
+        }.collect { (lastVisible, totalItems) ->
+            if (state.isLoading && totalItems > 0) {
+                userScrolledUp = lastVisible < totalItems - 2
+            } else {
+                userScrolledUp = false
+            }
         }
     }
 
-    var userScrolledUp by remember { mutableStateOf(false) }
-
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex }
-            .collect { firstIdx ->
-                if (!state.isLoading) return@collect
-                val lastIdx = totalDisplayCount - 1
-                val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-                userScrolledUp = lastVisible < lastIdx - 1
+    // 流式输出时持续轮询滚动到底部（替代 LaunchedEffect 取消重启模式）
+    LaunchedEffect(state.isLoading) {
+        if (!state.isLoading) {
+            val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
+            if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
+            return@LaunchedEffect
+        }
+        while (isActive) {
+            if (!userScrolledUp) {
+                val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
+                if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
             }
-    }
-
-    LaunchedEffect(totalDisplayCount) {
-        if (totalDisplayCount == 0) return@LaunchedEffect
-        val lastIndex = totalDisplayCount - 1
-        listState.scrollToItem(lastIndex)
-    }
-
-    LaunchedEffect(lastItemContentLength, state.isLoading) {
-        if (totalDisplayCount == 0 || !state.isLoading) return@LaunchedEffect
-        if (userScrolledUp) return@LaunchedEffect
-        val lastIndex = totalDisplayCount - 1
-        try { listState.scrollToItem(lastIndex) } catch (_: Exception) {}
+            delay(50)
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -193,7 +191,7 @@ fun AIChatPanel(
                         Spacer(Modifier.height(0.dp))
                     }
                 }
-                item { Spacer(Modifier.height(4.dp)) }
+                item { Spacer(Modifier.height(1.dp)) }
             }
         }
 
@@ -253,6 +251,7 @@ fun AIChatPanel(
                 isContextCompressed = state.isContextCompressed,
                 contextCompressedTokens = state.contextCompressedTokens,
                 contextCompressedCount = state.contextCompressedCount,
+                contextSummary = state.contextSummary,
                 onDismiss = { showContextInfoDialog = false },
             )
         }
@@ -602,8 +601,6 @@ private fun ChatInputBar(
             Box(
                 modifier = Modifier
                     .size(22.dp)
-                    .clip(CircleShape)
-                    .background(Color.White)
                     .clickable { onContextInfoClick() },
                 contentAlignment = Alignment.Center,
             ) {
@@ -660,13 +657,8 @@ private fun ChatInputBar(
 
 // 从 content URI 加载缩略图（Compose 中缓存）
 private fun loadThumbnail(context: Context, uri: android.net.Uri): Bitmap? = try {
-    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-        val size = android.util.Size(200, 200)
-        context.contentResolver.loadThumbnail(uri, size, null)
-    } else {
-        @Suppress("DEPRECATION")
-        MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
-    }
+    val size = android.util.Size(200, 200)
+    context.contentResolver.loadThumbnail(uri, size, null)
 } catch (_: Exception) { null }
 
 // 语音输入按钮组件 - 使用 SpeechRecognizer，支持连续识别
@@ -751,12 +743,21 @@ private class VoiceRecognizerManager(private val context: Context) {
     private var onResultCallback: ((String) -> Unit)? = null
     private var onListeningCallback: ((Boolean) -> Unit)? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var retryCount = 0
+    private var maxRetries = 3
 
     fun start(
         isListeningState: (Boolean) -> Unit,
         onTextRecognized: (String) -> Unit,
     ) {
         destroy()
+        retryCount = 0
+        // 检查语音识别服务是否可用
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(context)) {
+            isListeningState(false)
+            android.widget.Toast.makeText(context, "设备不支持语音识别", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         isActive = true
         accumulatedText = ""
         onResultCallback = onTextRecognized
@@ -767,8 +768,10 @@ private class VoiceRecognizerManager(private val context: Context) {
     fun stop() {
         isActive = false
         recognizer?.stopListening()
+        recognizer?.cancel()
         recognizer?.destroy()
         recognizer = null
+        handler.removeCallbacksAndMessages(null)
         onListeningCallback?.invoke(false)
         if (accumulatedText.isNotBlank()) {
             onResultCallback?.invoke(accumulatedText)
@@ -778,7 +781,9 @@ private class VoiceRecognizerManager(private val context: Context) {
 
     fun destroy() {
         isActive = false
+        retryCount = 0
         handler.removeCallbacksAndMessages(null)
+        recognizer?.cancel()
         recognizer?.destroy()
         recognizer = null
     }
@@ -790,6 +795,7 @@ private class VoiceRecognizerManager(private val context: Context) {
             recognizer = r
             r.setRecognitionListener(object : android.speech.RecognitionListener {
                 override fun onReadyForSpeech(params: android.os.Bundle?) {
+                    retryCount = 0
                     onListeningCallback?.invoke(true)
                 }
                 override fun onBeginningOfSpeech() {}
@@ -801,12 +807,38 @@ private class VoiceRecognizerManager(private val context: Context) {
                 override fun onError(error: Int) {
                     android.util.Log.d("VoiceRecognizer", "onError: $error")
                     onListeningCallback?.invoke(false)
-                    // ERROR_SPEECH_TIMEOUT (6) / ERROR_NO_MATCH (7): 静默重启
-                    if (isActive && (error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == android.speech.SpeechRecognizer.ERROR_NO_MATCH)) {
-                        handler.postDelayed({ startRecognizer() }, 300)
-                    } else {
-                        r.destroy()
-                        if (recognizer == r) recognizer = null
+                    when (error) {
+                        android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
+                        android.speech.SpeechRecognizer.ERROR_NO_MATCH -> {
+                            // 静默超时/无匹配：快速重启
+                            if (isActive) handler.postDelayed({ startRecognizer() }, 200)
+                        }
+                        android.speech.SpeechRecognizer.ERROR_NETWORK,
+                        android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> {
+                            // 网络错误：有限重试
+                            if (isActive && retryCount < maxRetries) {
+                                retryCount++
+                                val delay = (retryCount * 1000L).coerceAtMost(3000L)
+                                handler.postDelayed({ startRecognizer() }, delay)
+                            } else {
+                                r.destroy(); if (recognizer == r) recognizer = null
+                                onResultCallback?.invoke(accumulatedText.takeIf { it.isNotBlank() } ?: "语音识别网络错误")
+                            }
+                        }
+                        android.speech.SpeechRecognizer.ERROR_AUDIO,
+                        android.speech.SpeechRecognizer.ERROR_CLIENT -> {
+                            // 音频/客户端错误：不可恢复，直接终止
+                            r.destroy(); if (recognizer == r) recognizer = null
+                        }
+                        else -> {
+                            // 其他错误：有限重试
+                            if (isActive && retryCount < maxRetries) {
+                                retryCount++
+                                handler.postDelayed({ startRecognizer() }, 1000)
+                            } else {
+                                r.destroy(); if (recognizer == r) recognizer = null
+                            }
+                        }
                     }
                 }
                 override fun onResults(results: android.os.Bundle?) {
@@ -817,18 +849,16 @@ private class VoiceRecognizerManager(private val context: Context) {
                         onResultCallback?.invoke(accumulatedText)
                         accumulatedText = ""
                     }
-                    // 连续识别模式：不销毁，等待分段结果
-                    if (isActive) {
-                        onListeningCallback?.invoke(true)
-                    } else {
-                        r.destroy()
-                        if (recognizer == r) recognizer = null
+                    // 连续识别模式：不移除 recognizer，等待下一段
+                    if (!isActive) {
+                        r.destroy(); if (recognizer == r) recognizer = null
                     }
                 }
                 override fun onPartialResults(partialResults: android.os.Bundle?) {
                     val matches = partialResults?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
                     val text = matches?.firstOrNull()
                     if (text != null && text.isNotBlank()) {
+                        // 部分结果只做实时预览（不累加到 accumulatedText）
                         onResultCallback?.invoke(text)
                     }
                 }
@@ -839,10 +869,9 @@ private class VoiceRecognizerManager(private val context: Context) {
                 putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
                 putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-                // 延长静音超时（毫秒）
                 putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
                 putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
-                // API 34+ 分段会话
+                // API 34+: 分段会话（SEGMENTED_SESSION 官方常量）
                 if (android.os.Build.VERSION.SDK_INT >= 34) {
                     putExtra("android.speech.extra.SEGMENTED_SESSION", true)
                 }
@@ -850,7 +879,7 @@ private class VoiceRecognizerManager(private val context: Context) {
             r.startListening(intent)
         } catch (e: Exception) {
             onListeningCallback?.invoke(false)
-            android.widget.Toast.makeText(context, "语音识别不可用: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(context, "语音识别启动失败", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 }
@@ -926,6 +955,7 @@ private fun ContextInfoDialog(
     isContextCompressed: Boolean = false,
     contextCompressedTokens: Int = 0,
     contextCompressedCount: Int = 0,
+    contextSummary: String = "",
     onDismiss: () -> Unit,
 ) {
     val ratio = if (maxTokens > 0) (usedTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
@@ -988,6 +1018,19 @@ private fun ContextInfoDialog(
                         text = "已压缩 $contextCompressedCount 次，累计移除 ${contextCompressedTokens / 1000}k+ token",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val summary = contextSummary
+                if (summary.isNotBlank()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("上下文摘要", fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelMedium, color = Color(0xFF7B1FA2))
+                    Text(
+                        text = summary.take(200),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 6,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 if (openedFilePaths.isNotEmpty()) {

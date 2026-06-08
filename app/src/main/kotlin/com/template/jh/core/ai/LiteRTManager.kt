@@ -55,15 +55,17 @@ data class DownloadState(
 
 // 模型推理参数
 data class ModelParams(
-    val topK: Int = 40,
-    val topP: Double = 0.95,
-    val temperature: Double = 0.8,
+    val topK: Int = 20,
+    val topP: Double = 0.9,
+    val temperature: Double = 0.2,
     val seed: Int = 0,
+    val maxOutputTokens: Int = 4096,
 ) {
     init {
         require(topK > 0) { "topK must be positive, got $topK" }
         require(topP in 0.0..1.0) { "topP must be 0~1, got $topP" }
         require(temperature >= 0) { "temperature must be >= 0, got $temperature" }
+        require(maxOutputTokens in 256..65536) { "maxOutputTokens must be 256~65536, got $maxOutputTokens" }
     }
     fun toSamplerConfig() = SamplerConfig(topK = topK, topP = topP, temperature = temperature, seed = seed)
 }
@@ -250,7 +252,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         try {
             withContext(Dispatchers.IO) {
                 closeEngine()
-                val config = EngineConfig(modelPath = modelPath, backend = Backend.CPU(), maxNumImages = maxNumImages, cacheDir = context.cacheDir.absolutePath)
+                val config = EngineConfig(modelPath = modelPath, backend = Backend.CPU(), visionBackend = Backend.CPU(), maxNumImages = maxNumImages, cacheDir = context.cacheDir.absolutePath)
                 val newEngine = Engine(config)
                 newEngine.initialize()
                 engine = newEngine
@@ -336,9 +338,8 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
 
         // MediaStore 补充查询（Android 10+ Downloads 集合）
         try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                context.contentResolver.query(
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            context.contentResolver.query(
                     MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                     arrayOf(MediaStore.Downloads.DISPLAY_NAME, MediaStore.Downloads.SIZE, MediaStore.Downloads.RELATIVE_PATH),
                     "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
@@ -359,7 +360,6 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
                         }
                     }
                 }
-            }
         } catch (_: Exception) {}
 
         return models

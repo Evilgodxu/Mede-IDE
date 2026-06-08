@@ -17,6 +17,21 @@ private val toolJsonRegex = Regex(
 )
 private val toolCallMarkerRegex = Regex("""\[工具调用:\s*\w+\]""")
 
+/**
+ * 移除用户消息中注入给 AI 模型看的控制前缀，仅保留用户实际输入内容。
+ */
+private fun stripUserControlPrefixes(text: String): String {
+    // 移除开头的 [用户请求] 或 [用户消息] 标记行
+    val cleaned = text.replace(Regex("^\\[用户请求]\\s*"), "")
+        .replace(Regex("^\\[用户消息]\\s*"), "")
+        .trimStart('\n', '\r')
+        // 移除末尾的 [已附加 X 张图片] 及 [用户指定的文件...] 块
+        .replace(Regex("\\n\\[已附加.*]$"), "")
+        .replace(Regex("\\n\\[用户指定的文件.*"), "")
+        .trim()
+    return cleaned
+}
+
 private fun thinkBlocks(text: String): Pair<List<String>, String> {
     val blocks = thinkRegex.findAll(text).map { it.groupValues[1].trim() }.toList()
     val cleaned = text.replace(thinkRegex, "").trim()
@@ -57,7 +72,7 @@ fun toDisplayItems(messages: List<ChatMessage>): List<DisplayItem> {
                 result.add(DisplayItem(
                     id = msg.id,
                     role = DisplayRole.User,
-                    content = msg.content,
+                    content = stripUserControlPrefixes(msg.content),
                     thinkBlocks = emptyList(),
                     isStreaming = false,
                     timestamp = msg.timestamp,
