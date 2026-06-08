@@ -17,6 +17,9 @@ import com.template.jh.data.model.Rule
 import com.template.jh.data.model.RuleType
 import com.template.jh.data.model.TaskItem
 import com.template.jh.data.model.TaskStatus
+import com.template.jh.core.analytics.LlmCallRecord
+import com.template.jh.core.analytics.UsageStats
+import com.template.jh.data.repository.UsageAnalyticsRepository
 import com.template.jh.data.repository.UserPreferencesRepository
 import com.template.jh.core.utils.FileLogger
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +30,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -38,6 +42,7 @@ class ChatViewModel(
     private val conversationRepo: ConversationRepository,
     private val preferencesRepo: UserPreferencesRepository,
     private val fileManager: com.template.jh.core.storage.FileManager,
+    private val usageAnalyticsRepo: UsageAnalyticsRepository,
 ) : AndroidViewModel(application) {
 
     private val liteRTManager = LiteRTManager(application)
@@ -47,6 +52,9 @@ class ChatViewModel(
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
+    val usageStats: StateFlow<UsageStats> = usageAnalyticsRepo.stats.stateIn(
+        viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), UsageStats()
+    )
 
     private var sendJob: Job? = null
     @Volatile private var activeConversation: Conversation? = null
@@ -102,37 +110,7 @@ class ChatViewModel(
         }
         viewModelScope.launch {
             FileOperationEvents.events.collect { event ->
-                val opType = when (event.operation) {
-                    "create" -> FileOpType.Create
-                    "modify" -> FileOpType.Modify
-                    "overwrite" -> FileOpType.Overwrite
-                    "delete" -> FileOpType.Delete
-                    else -> return@collect
-                }
-                val meta = FileOperationMeta(
-                    filePath = event.path,
-                    opType = opType,
-                    lineChanges = event.lineChanges,
-                )
-                val cardMsg = ChatMessage(
-                    role = ChatRole.System,
-                    content = "",
-                    fileOp = meta,
-                )
-                val change = FileChangeItem(
-                    filePath = event.path,
-                    opType = opType,
-                    lineChanges = event.lineChanges,
-                )
-                _state.update { state ->
-                    val updatedChanges = state.fileChanges.filterNot {
-                        it.filePath == event.path && it.opType == opType
-                    } + change
-                    state.copy(
-                        messages = state.messages + cardMsg,
-                        fileChanges = updatedChanges,
-                    )
-                }
+                // 文件操作事件由 EditorScreenState 的 createReviewForEvent 处理
             }
         }
         viewModelScope.launch {
@@ -299,7 +277,7 @@ class ChatViewModel(
         FileOperationEvents.notifyRejectAll(filePath)
     }
 
-    fun toggleTaskList() { _state.update { it.copy(isTaskListOpen = !it.isTaskListOpen) } }
+
 
     fun clearCompletedTasks() {
         _state.update { it.copy(taskList = it.taskList.filter { t -> t.status == TaskStatus.Running || t.status == TaskStatus.Pending || t.status == TaskStatus.WaitingAuth }) }
@@ -351,6 +329,15 @@ class ChatViewModel(
     // 注册文件引用：短名称 → 完整路径（用于 @filename 自动解析）
     fun registerFileRef(shortName: String, fullPath: String) {
         _state.update { it.copy(fileRefMap = it.fileRefMap + (shortName to fullPath)) }
+    }
+
+    // 用量统计
+    fun resetUsageStats() {
+        viewModelScope.launch { usageAnalyticsRepo.resetStats() }
+    }
+
+    private suspend fun recordUsage(call: LlmCallRecord) {
+        usageAnalyticsRepo.recordCall(call)
     }
 
     // 构建编辑器上下文块：当前活动文件 + 光标行 + 已打开文件列表 + 修改状态
@@ -512,19 +499,17 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         sb.append("文件操作:\n")
         sb.append("  - listFiles(path?): 列出目录内容，path 为空列出根目录\n")
         sb.append("  - readFile(path, offset?, limit?): 读取文件内容（含行号），offset=起始行(1-based,默认1), limit=最大行数(默认1000)\n")
-        sb.append("  - viewFile(path, offset?, limit?): 查看大文件指定范围，limit 最大 500\n")
         sb.append("  - writeFile(path, content): 创建新文件或完全覆写已有文件\n")
         sb.append("  - replaceInFile(path, old_string, new_string): 唯一编辑方式，old_string 必须唯一匹配含缩进\n")
         sb.append("  - deleteFile(path): 删除文件或目录\n")
         sb.append("  - createDirectory(path): 创建目录\n\n")
         sb.append("搜索:\n")
         sb.append("  - grep(pattern, extension?, glob?, ignoreCase?, contextLines?): 正则搜索文件内容\n")
-        sb.append("  - searchCodebase(query, targetDirectories?): 语义搜索代码\n\n")
+        sb.append("  - searchCodebase(query, targetDirectories?): 语义向量检索（TF-IDF），按含义查找代码实现\n\n")
         sb.append("其他:\n")
-        sb.append("  - runCommand(command): 执行 shell 命令\n")
+        sb.append("  - runCommand(command): 执行 shell 命令（adb、git、gradle 等）\n")
         sb.append("  - searchWeb(query): 互联网搜索\n")
-        sb.append("  - gitStatus, gitAdd(paths?), gitCommit(message), gitPush(remote?, branch?), gitBranch(args?), gitDiff(args?)\n")
-        sb.append("  - readLints: 读取编译错误\n\n")
+        sb.append("  - readLints: 读取编译/lint 错误\n\n")
         sb.append("## 修改文件策略\n")
         sb.append("- 编辑文件唯一方式: replaceInFile，参数 path, old_string, new_string\n")
         sb.append("- old_string 必须完全匹配（含缩进），需包含函数签名确保唯一性\n")
@@ -538,7 +523,8 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         sb.append("  {\"tool_name\":\"readFile\",\"arguments\":{\"path\":\"app/src/main.kt\",\"limit\":\"50\"}}\n")
         sb.append("  {\"tool_name\":\"createDirectory\",\"arguments\":{\"path\":\"app/src/utils\"}}\n")
         sb.append("  {\"tool_name\":\"grep\",\"arguments\":{\"pattern\":\"fun\\\\s+\\\\w+\",\"extension\":\"kt\"}}\n")
-        sb.append("  {\"tool_name\":\"writeFile\",\"arguments\":{\"path\":\"app/test.txt\",\"content\":\"hello\"}}\n\n")
+        sb.append("  {\"tool_name\":\"writeFile\",\"arguments\":{\"path\":\"app/test.txt\",\"content\":\"hello\"}}\n")
+        sb.append("  {\"tool_name\":\"runCommand\",\"arguments\":{\"command\":\"git status\"}}\n\n")
         sb.append("工具执行结果会自动返回。根据结果决定下一步：继续调用工具或给出最终回答。\n")
         sb.append("任务完成后直接输出最终回答，不要再输出 JSON 工具调用。\n\n")
         val userName = runBlocking { preferencesRepo.userName.first() }
@@ -592,7 +578,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         val result = when (name) {
             "listFiles" -> aiToolSet.listFiles(args["subPath"] ?: args["path"] ?: "")
             "readFile" -> aiToolSet.readFile(args["path"] ?: "", args["offset"]?.toIntOrNull() ?: 1, args["limit"]?.toIntOrNull() ?: 1000)
-            "viewFile" -> aiToolSet.viewFile(args["path"] ?: "", args["offset"]?.toIntOrNull() ?: 1, args["limit"]?.toIntOrNull() ?: 100)
             "writeFile" -> aiToolSet.writeFile(args["path"] ?: "", args["content"] ?: "")
             "replaceInFile" -> aiToolSet.replaceInFile(args["path"] ?: "", args["old_string"] ?: "", args["new_string"] ?: "")
             "grep" -> aiToolSet.grep(args["pattern"] ?: args["query"] ?: "", args["extension"] ?: "", args["glob"] ?: "", args["ignoreCase"]?.toBooleanStrictOrNull() ?: true, args["contextLines"]?.toIntOrNull() ?: 2)
@@ -602,12 +587,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             "searchWeb" -> aiToolSet.searchWeb(args["query"] ?: "")
             "deleteFile" -> aiToolSet.deleteFile(args["path"] ?: "")
             "createDirectory" -> aiToolSet.createDirectory(args["path"] ?: "")
-            "gitStatus" -> aiToolSet.gitStatus()
-            "gitAdd" -> aiToolSet.gitAdd(args["paths"] ?: ".")
-            "gitCommit" -> aiToolSet.gitCommit(args["message"] ?: "")
-            "gitPush" -> aiToolSet.gitPush(args["remote"] ?: "origin", args["branch"] ?: "main")
-            "gitBranch" -> aiToolSet.gitBranch(args["args"] ?: "")
-            "gitDiff" -> aiToolSet.gitDiff(args["args"] ?: "")
             "readLints" -> aiToolSet.readLints()
             else -> "Unknown tool: $name"
         }
@@ -623,7 +602,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         return when (name) {
             "listFiles" -> ModelActivity.ListingFiles
             "readFile" -> ModelActivity.ReadingFile
-            "viewFile" -> ModelActivity.ReadingFile
             "writeFile" -> ModelActivity.WritingFile
             "replaceInFile" -> ModelActivity.EditingFile
             "deleteFile" -> ModelActivity.DeletingFile
@@ -632,7 +610,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             "searchCodebase" -> ModelActivity.SearchingCode
             "searchWeb" -> ModelActivity.SearchingWeb
             "runCommand" -> ModelActivity.RunningCommand
-            "gitStatus", "gitAdd", "gitCommit", "gitPush", "gitBranch", "gitDiff" -> ModelActivity.GitOperation
             "readLints" -> ModelActivity.ReadingLints
             else -> ModelActivity.ExecutingTool
         }
@@ -646,6 +623,8 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         val conv = activeConversation ?: return
         val editorCtx = buildEditorContext()
         val hasImages = imagePaths.isNotEmpty()
+        val startTime = System.currentTimeMillis()
+        var totalOutputChars = 0
 
         val userInput = if (editorCtx.isNotBlank()) "$editorCtx\n[用户消息]\n$text" else text
         val firstMessage: Message = if (hasImages) {
@@ -677,12 +656,23 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                 }.collect { chunk ->
                     val c = chunk.toString()
                     fullResponse.append(c)
+                    totalOutputChars += c.length
                     updateModelMessage(currentMsgId, c, true)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 throw e
             } catch (e: Exception) {
+                val duration = System.currentTimeMillis() - startTime
+                recordUsage(LlmCallRecord(
+                    modelName = _state.value.modelName.ifEmpty { "local" },
+                    provider = "local",
+                    promptTokens = text.length / 2,
+                    completionTokens = totalOutputChars / 2,
+                    durationMs = duration,
+                    success = false,
+                    errorMessage = e.message,
+                ))
                 Log.e("ChatViewModel", "processWithJsonTools failed", e)
                 FileLogger.e("ChatViewModel", "processWithJsonTools failed: ${e.message}", e)
                 updateModelMessage(currentMsgId, "\n\n[错误: ${e.message}]", false)
@@ -698,6 +688,17 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
 
             if (toolCall == null) {
                 // 无工具调用，视为最终回答
+                val duration = System.currentTimeMillis() - startTime
+                val totalTokens = totalOutputChars / 2
+                recordUsage(LlmCallRecord(
+                    modelName = _state.value.modelName.ifEmpty { "local" },
+                    provider = "local",
+                    promptTokens = text.length / 2,
+                    completionTokens = totalTokens,
+                    durationMs = duration,
+                    success = true,
+                    errorMessage = null,
+                ))
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Completed)
                 ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, notif)
@@ -718,9 +719,12 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             val toolResult = executeAiTool(funcName, funcArgs)
             val toolDisplay = "\n\n$toolResult"
 
-            // 追加工具结果到当前消息气泡
-            if (prefixText != null) updateModelMessage(currentMsgId, toolDisplay, true)
-            else updateModelMessage(currentMsgId, toolDisplay, false)
+            // 追加工具结果到当前消息气泡（始终追加，prefixText==null 时先替换为可读头部）
+            if (prefixText != null) {
+                updateModelMessage(currentMsgId, toolDisplay, true)
+            } else {
+                updateModelMessage(currentMsgId, "\n\n[工具调用: $funcName]\n\n$toolResult", false)
+            }
             finalizeModelMessage(currentMsgId)
 
             // 创建新消息气泡用于下一轮模型回复
@@ -793,8 +797,10 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         while (true) {
             cloudRounds++
             val fullResponse = StringBuilder()
+            val roundStartTime = System.currentTimeMillis()
+            var apiUsage = com.template.jh.core.ai.ApiUsage()
             try {
-                cloudLLMClient.sendMessage(
+                val (resp, usage) = cloudLLMClient.sendMessage(
                     config = cfg,
                     systemPrompt = buildSystemInstruction(),
                     messages = historyMessages,
@@ -803,16 +809,39 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                         updateModelMessage(currentMsgId, chunk, true)
                     },
                 )
+                apiUsage = usage
             } catch (e: Exception) {
+                val duration = System.currentTimeMillis() - roundStartTime
+                val errMsg = e.message ?: "Unknown error"
                 Log.e("ChatViewModel", "cloudSendMessage failed", e)
-                FileLogger.e("ChatViewModel", "cloudSendMessage failed: ${e.message}", e)
-                updateModelMessage(currentMsgId, "\n\n[云端模型错误: ${e.message}]", false)
+                FileLogger.e("ChatViewModel", "cloudSendMessage failed: ${errMsg}", e)
+                recordUsage(LlmCallRecord(
+                    modelName = cfg.modelName,
+                    provider = "cloud",
+                    promptTokens = 0,
+                    completionTokens = 0,
+                    durationMs = duration,
+                    success = false,
+                    errorMessage = errMsg,
+                ))
+                updateModelMessage(currentMsgId, "\n\n[云端模型错误: ${errMsg}]", false)
                 finalizeModelMessage(currentMsgId)
                 updateTaskStatus(taskId, TaskStatus.Failed)
                 ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, notif)
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 return
             }
+
+            val duration = System.currentTimeMillis() - roundStartTime
+            recordUsage(LlmCallRecord(
+                modelName = cfg.modelName,
+                provider = "cloud",
+                promptTokens = apiUsage.promptTokens,
+                completionTokens = apiUsage.completionTokens,
+                durationMs = duration,
+                success = true,
+                errorMessage = null,
+            ))
 
             val response = fullResponse.toString().trim()
             if (response.isBlank()) {
@@ -851,8 +880,11 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             val toolResult = executeAiTool(funcName, funcArgs)
             val toolDisplay = "\n\n$toolResult"
 
-            if (prefixText != null) updateModelMessage(currentMsgId, toolDisplay, true)
-            else updateModelMessage(currentMsgId, toolDisplay, false)
+            if (prefixText != null) {
+                updateModelMessage(currentMsgId, toolDisplay, true)
+            } else {
+                updateModelMessage(currentMsgId, "\n\n[工具调用: $funcName]\n\n$toolResult", false)
+            }
             finalizeModelMessage(currentMsgId)
 
             _state.update { it.copy(modelActivity = ModelActivity.ProcessingResult, activityDetail = "") }
@@ -953,7 +985,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
 
     fun clearMessages() {
         sendJob?.cancel()
-        _state.update { it.copy(messages = emptyList(), inputText = "", taskList = emptyList(), fileChanges = emptyList()) }
+        _state.update { it.copy(messages = emptyList(), inputText = "", taskList = emptyList()) }
         viewModelScope.launch(Dispatchers.IO) { closeConversation() }
     }
 
@@ -975,7 +1007,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         _state.update {
             it.copy(messages = emptyList(), inputText = "", isLoading = false,
                 conversations = updatedConversations, activeConversationId = null,
-                taskList = emptyList(), fileChanges = emptyList())
+                taskList = emptyList())
         }
         // 后台清理：关闭旧会话（可能阻塞）+ 持久化
         viewModelScope.launch(Dispatchers.IO) {

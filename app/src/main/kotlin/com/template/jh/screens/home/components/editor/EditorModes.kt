@@ -35,7 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.template.jh.core.editor.DiffHighlightTransformation
 import com.template.jh.core.editor.LineChangeType
-import kotlinx.coroutines.coroutineScope
+
 
 // ===== 普通编辑模式 =====
 @Composable
@@ -56,84 +56,78 @@ fun NormalEditMode(
     onDoubleTap: () -> Unit,
     onLongPress: (String, Offset) -> Unit,
     onExitEditMode: () -> Unit,
+    onLineTap: ((Int) -> Unit)? = null,
 ) {
     val lineCount = text.text.lines().size.coerceAtLeast(1)
     val lines = text.text.lines()
 
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                coroutineScope {
-                    var zoom = 1f
+            .padding(vertical = verticalPadding)
+    ) {
+        EditorLineNumbers(
+            lineCount = lineCount,
+            lineDiffs = lineDiffs,
+            fontSizeSp = fontSizeSp,
+            lineHeightSp = lineHeightSp,
+            lineHeightDp = lineHeightDp,
+            lineNumWidth = lineNumWidth,
+            scrollState = scrollState,
+            onLineTap = onLineTap,
+        )
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .verticalScroll(scrollState)
+                .horizontalScroll(hScrollState)
+                .pointerInput(Unit) {
                     detectTransformGestures { _, _, gestureZoom, _ ->
-                        zoom = gestureZoom; onZoom(zoom)
+                        onZoom(gestureZoom)
                     }
                 }
-            }
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(vertical = verticalPadding)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = { onDoubleTap() },
+                        onLongPress = { offset ->
+                            val lineIndex = (offset.y / lineHeightDp.toPx()).toInt()
+                            if (lineIndex in lines.indices) onLongPress(lines[lineIndex], offset)
+                        }
+                    )
+                }
         ) {
-            EditorLineNumbers(
-                lineCount = lineCount,
-                lineDiffs = lineDiffs,
-                fontSizeSp = fontSizeSp,
-                lineHeightSp = lineHeightSp,
-                lineHeightDp = lineHeightDp,
-                lineNumWidth = lineNumWidth,
-                scrollState = scrollState,
-            )
-
-            Box(
+            BasicTextField(
+                value = text,
+                onValueChange = onTextChange,
+                readOnly = readOnly,
+                textStyle = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = fontSizeSp.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    lineHeight = lineHeightSp.sp,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                visualTransformation = SyntaxHighlightTransformation(),
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .verticalScroll(scrollState)
-                    .horizontalScroll(hScrollState)
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onDoubleTap = { onDoubleTap() },
-                            onLongPress = { offset ->
-                                val lineIndex = (offset.y / lineHeightDp.toPx()).toInt()
-                                if (lineIndex in lines.indices) onLongPress(lines[lineIndex], offset)
-                            }
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp),
+                decorationBox = { innerTextField ->
+                    if (text.text.isEmpty()) {
+                        Text(
+                            "// 开始输入代码…",
+                            style = TextStyle(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = fontSizeSp.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                lineHeight = lineHeightSp.sp,
+                            ),
                         )
                     }
-            ) {
-                BasicTextField(
-                    value = text,
-                    onValueChange = onTextChange,
-                    readOnly = readOnly,
-                    textStyle = TextStyle(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = fontSizeSp.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        lineHeight = lineHeightSp.sp,
-                    ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    visualTransformation = SyntaxHighlightTransformation(),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 12.dp),
-                    decorationBox = { innerTextField ->
-                        if (text.text.isEmpty()) {
-                            Text(
-                                "// 开始输入代码…",
-                                style = TextStyle(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = fontSizeSp.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                                    lineHeight = lineHeightSp.sp,
-                                ),
-                            )
-                        }
-                        innerTextField()
-                    },
-                )
-            }
+                    innerTextField()
+                },
+            )
         }
     }
 }
@@ -154,6 +148,7 @@ fun ReviewPreviewMode(
     onDoubleTap: () -> Unit,
     onLongPress: (String, Offset) -> Unit,
     onZoom: (Float) -> Unit,
+    onLineTap: ((Int) -> Unit)? = null,
 ) {
     val lines = newContent.lines()
     val lineCount = lines.size.coerceAtLeast(1)
@@ -162,11 +157,6 @@ fun ReviewPreviewMode(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                coroutineScope {
-                    detectTransformGestures { _, _, gestureZoom, _ -> onZoom(gestureZoom) }
-                }
-            }
     ) {
         Row(
             modifier = Modifier
@@ -181,6 +171,7 @@ fun ReviewPreviewMode(
                 lineHeightDp = lineHeightDp,
                 lineNumWidth = lineNumWidth,
                 scrollState = scrollState,
+                onLineTap = onLineTap,
             )
 
             SelectionContainer {
@@ -190,6 +181,11 @@ fun ReviewPreviewMode(
                         .fillMaxHeight()
                         .verticalScroll(scrollState)
                         .horizontalScroll(hScrollState)
+                        .pointerInput(Unit) {
+                            detectTransformGestures { _, _, gestureZoom, _ ->
+                                onZoom(gestureZoom)
+                            }
+                        }
                         .pointerInput(Unit) {
                             detectTapGestures(
                                 onDoubleTap = { onDoubleTap() },
@@ -252,6 +248,7 @@ fun ReviewEditMode(
     onZoom: (Float) -> Unit,
     onDoubleTap: () -> Unit,
     onLongPress: (String, Offset) -> Unit,
+    onLineTap: ((Int) -> Unit)? = null,
 ) {
     val lineCount = text.text.lines().size.coerceAtLeast(1)
     val lines = text.text.lines()
@@ -259,11 +256,6 @@ fun ReviewEditMode(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                coroutineScope {
-                    detectTransformGestures { _, _, gestureZoom, _ -> onZoom(gestureZoom) }
-                }
-            }
     ) {
         Row(
             modifier = Modifier
@@ -278,6 +270,7 @@ fun ReviewEditMode(
                 lineHeightDp = lineHeightDp,
                 lineNumWidth = lineNumWidth,
                 scrollState = scrollState,
+                onLineTap = onLineTap,
             )
 
             Box(
@@ -286,6 +279,11 @@ fun ReviewEditMode(
                     .fillMaxHeight()
                     .verticalScroll(scrollState)
                     .horizontalScroll(hScrollState)
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, _, gestureZoom, _ ->
+                            onZoom(gestureZoom)
+                        }
+                    }
                     .pointerInput(Unit) {
                         detectTapGestures(
                             onDoubleTap = { onDoubleTap() },

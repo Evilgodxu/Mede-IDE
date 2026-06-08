@@ -30,15 +30,23 @@ import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.template.jh.core.editor.CodeReviewState
 import com.template.jh.core.editor.LineChangeType
+import com.template.jh.screens.home.components.ReviewNavigator
 import kotlinx.coroutines.launch
 
 /**
- * 代码编辑器编排层 - 单一职责：模式选择、状态协调、手势分发
+ * 代码编辑器编排层 - 触屏优先设计
+ *
+ * 触屏优化：
+ * 1. 底部浮动操作栏替代 PC 物理按键（Tab/Shift+Tab/Ctrl+/）
+ * 2. 行号点击选中整行
+ * 3. 长按菜单增强（全选/剪切/粘贴）
+ * 4. 内联手势（双击编辑、捏合缩放、长按菜单）限于内容区域不干扰覆盖层
  *
  * 内部分为三种渲染模式：
  * 1. ReviewPreviewMode - 审查预览
@@ -91,6 +99,11 @@ fun CodeEditor(
     val hasReviewState = reviewState != null && reviewState.changeBlocks.isNotEmpty()
     val hasLegacyPending = pendingFilePath != null && originalContent != null
     val isReviewMode = hasReviewState || hasLegacyPending
+    val isNormalEditable = !readOnly && !isReviewMode
+
+    // 触屏工具状态
+    var showEditActions by remember { mutableStateOf(false) }
+    var hasSelection by remember { mutableStateOf(false) }
 
     // 光标位置跟踪
     val cursorLine = remember(text.selection) {
@@ -99,12 +112,26 @@ fun CodeEditor(
     LaunchedEffect(cursorLine) {
         onCursorChange?.invoke(cursorLine)
     }
+    // 监测是否有选中文本
+    LaunchedEffect(text.selection) {
+        hasSelection = text.selection.start != text.selection.end
+    }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface)
-    ) {
+    Column(modifier = modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface)
+        ) {
+        // 行号点击 → 选中整行
+        val onLineTap: (Int) -> Unit = { lineIndex ->
+            val lines = text.text.lines()
+            val start = if (lineIndex == 0) 0 else text.text.indexOf('\n', lines.take(lineIndex).sumOf { it.length + 1 } - 1) + 1
+            val end = if (lineIndex >= lines.size - 1) text.text.length else text.text.indexOf('\n', start)
+            onTextChange(text.copy(selection = TextRange(start, end)))
+        }
+
         // 主内容区域 - 选择三种模式之一
         when {
             isReviewMode && !isEditMode -> ReviewPreviewMode(
@@ -124,7 +151,8 @@ fun CodeEditor(
                     menuOffset = offset
                     showContextMenu = true
                 },
-                onZoom = { zoom -> fontSizeSp = (fontSizeSp * zoom).coerceIn(8f, 32f) },
+                onZoom = { zoom -> fontSizeSp = (fontSizeSp * zoom).coerceIn(8f, 40f) },
+                onLineTap = onLineTap,
             )
             isReviewMode && isEditMode -> ReviewEditMode(
                 text = text,
@@ -138,13 +166,14 @@ fun CodeEditor(
                 hScrollState = hScrollState,
                 verticalPadding = verticalPadding,
                 onExitEditMode = { isEditMode = false },
-                onZoom = { zoom -> fontSizeSp = (fontSizeSp * zoom).coerceIn(8f, 32f) },
+                onZoom = { zoom -> fontSizeSp = (fontSizeSp * zoom).coerceIn(8f, 40f) },
                 onDoubleTap = { isEditMode = true },
                 onLongPress = { sel, offset ->
                     selectedText = sel
                     menuOffset = offset
                     showContextMenu = true
                 },
+                onLineTap = onLineTap,
             )
             else -> NormalEditMode(
                 text = text,
@@ -159,7 +188,7 @@ fun CodeEditor(
                 verticalPadding = verticalPadding,
                 readOnly = readOnly,
                 isEditMode = isEditMode,
-                onZoom = { zoom -> fontSizeSp = (fontSizeSp * zoom).coerceIn(8f, 32f) },
+                onZoom = { zoom -> fontSizeSp = (fontSizeSp * zoom).coerceIn(8f, 40f) },
                 onDoubleTap = { if (!readOnly) isEditMode = true },
                 onLongPress = { sel, offset ->
                     selectedText = sel
@@ -167,15 +196,16 @@ fun CodeEditor(
                     showContextMenu = true
                 },
                 onExitEditMode = { isEditMode = false },
+                onLineTap = onLineTap,
             )
         }
 
-        // 右上角导航器（审查模式）
+        // 右上角导航器（审查模式）- 使用大触摸目标的新版
         if (isReviewMode) {
             Column(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 4.dp, end = 4.dp),
+                    .padding(top = 8.dp, end = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
                 horizontalAlignment = Alignment.End,
             ) {
@@ -186,13 +216,13 @@ fun CodeEditor(
                                 MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
                                 RoundedCornerShape(12.dp)
                             )
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                             .clickable { isEditMode = false },
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             "编辑中",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onPrimary,
                         )
                     }
@@ -201,8 +231,7 @@ fun CodeEditor(
                 val navReviewState = reviewState
                 if (hasReviewState && navReviewState != null) {
                     ReviewNavigator(
-                        totalChanges = navReviewState.totalCount,
-                        currentIndex = navReviewState.currentBlockIndex,
+                        reviewState = navReviewState,
                         onPrev = { onJumpToPrevChange?.invoke() },
                         onNext = { onJumpToNextChange?.invoke() },
                         onAcceptCurrent = {
@@ -225,28 +254,85 @@ fun CodeEditor(
             }
         }
 
-        // 长按菜单
+        // 长按菜单 - 触屏增强版
         DropdownMenu(
             expanded = showContextMenu,
             onDismissRequest = { showContextMenu = false },
             offset = androidx.compose.ui.unit.DpOffset(menuOffset.x.dp, menuOffset.y.dp),
         ) {
             DropdownMenuItem(
-                text = { Text("添加到对话") },
+                text = { Text("剪切") },
                 onClick = {
-                    onAddToChat?.invoke(selectedText)
+                    scope.launch {
+                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("", selectedText)))
+                        val newText = text.text.replaceRange(text.selection.start, text.selection.end, "")
+                        onTextChange(TextFieldValue(newText, TextRange(text.selection.start)))
+                    }
                     showContextMenu = false
-                }
+                },
+                enabled = hasSelection && !readOnly,
             )
             DropdownMenuItem(
                 text = { Text("复制") },
                 onClick = {
                     scope.launch {
-                        clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(ClipData.newPlainText("", selectedText)))
+                        clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("", selectedText)))
                     }
                     showContextMenu = false
-                }
+                },
+                enabled = hasSelection,
+            )
+            DropdownMenuItem(
+                text = { Text("粘贴") },
+                onClick = {
+                    scope.launch {
+                        val clip = clipboard.getClipEntry()?.clipData?.getItemAt(0)?.text ?: return@launch
+                        val cur = text.selection
+                        val newText = text.text.replaceRange(cur.start, cur.end, clip)
+                        val newCursor = cur.start + clip.length
+                        onTextChange(TextFieldValue(newText, TextRange(newCursor)))
+                    }
+                    showContextMenu = false
+                },
+                enabled = !readOnly,
+            )
+            DropdownMenuItem(
+                text = { Text("全选") },
+                onClick = {
+                    onTextChange(text.copy(selection = TextRange(0, text.text.length)))
+                    showContextMenu = false
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("添加到对话") },
+                onClick = {
+                    onAddToChat?.invoke(selectedText)
+                    showContextMenu = false
+                },
+                enabled = hasSelection,
             )
         }
-    }
-}
+    } // end of inner Box
+
+    // === 底部浮动操作栏（触屏专有，替代 PC 物理按键） ===
+    if (isNormalEditable || isReviewMode && text.text.isNotEmpty()) {
+        EditorFloatingToolbar(
+            onIndent = {
+                onTextChange(text.indent())
+            },
+            onDedent = {
+                onTextChange(text.dedent())
+            },
+            onToggleComment = {
+                onTextChange(text.toggleComment())
+            },
+            onZoomIn = {
+                fontSizeSp = (fontSizeSp * 1.2f).coerceAtMost(40f)
+            },
+            onZoomOut = {
+                fontSizeSp = (fontSizeSp / 1.2f).coerceAtLeast(8f)
+            },
+        )
+    } // end of if (toolbar condition)
+} // end of Column
+} // end of CodeEditor

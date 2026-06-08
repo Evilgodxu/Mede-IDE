@@ -47,10 +47,10 @@ class AIToolSet(
         return fileManager?.readFileRaw(path)
     }
 
-    @Tool(description = "Read the content of a file in the project. Must be called before modifying a file. Returns content with line numbers. Supports pagination with offset and limit.")
+    @Tool(description = "Read content of any text file in the project with line numbers. Use for source code, config files, build scripts, etc. Supports pagination. Always call this before editing a file with replaceInFile.")
     fun readFile(
-        @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
-        @ToolParam(description = "Line number to start reading from (1-based). Default 1.") offset: Int = 1,
+        @ToolParam(description = "File path relative to project root, e.g. 'app/src/main.kt' or 'build.gradle.kts'") path: String,
+        @ToolParam(description = "Starting line number (1-based). Default 1.") offset: Int = 1,
         @ToolParam(description = "Maximum number of lines to read. Default 1000.") limit: Int = 1000,
     ): String {
         Log.d("AIToolSet", "readFile: path=$path offset=$offset limit=$limit")
@@ -59,23 +59,6 @@ class AIToolSet(
             ?: "No project folder is open."
         if (result.startsWith("Failed") || result.startsWith("No project")) {
             FileLogger.w("AIToolSet", "readFile failed: ${result.take(200)}")
-        }
-        return result
-    }
-
-    @Tool(description = "View a specific range of lines from a file. Optimized for viewing large files without loading entire content. Returns content with line numbers.")
-    fun viewFile(
-        @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
-        @ToolParam(description = "Line number to start reading from (1-based). Default 1.") offset: Int = 1,
-        @ToolParam(description = "Maximum number of lines to read. Default 100, max 500.") limit: Int = 100,
-    ): String {
-        Log.d("AIToolSet", "viewFile: path=$path offset=$offset limit=$limit")
-        FileLogger.d("AIToolSet", "viewFile: path=$path offset=$offset limit=$limit")
-        val effectiveLimit = limit.coerceIn(1, 500)
-        val result = fileManager?.viewFile(path, offset, effectiveLimit) 
-            ?: "No project folder is open."
-        if (result.startsWith("Failed") || result.startsWith("No project")) {
-            FileLogger.w("AIToolSet", "viewFile failed: ${result.take(200)}")
         }
         return result
     }
@@ -205,7 +188,7 @@ class AIToolSet(
         FileLogger.d("AIToolSet", "runCommand: $command")
         return try {
             val dir = File(context.filesDir, "workspace").also { it.mkdirs() }
-            val parts = command.split(" ")
+            val parts = parseCommandLine(command)
             val pb = ProcessBuilder(parts).directory(dir).redirectErrorStream(true)
             val proc = pb.start()
             val text = proc.inputStream.bufferedReader().readText()
@@ -217,6 +200,31 @@ class AIToolSet(
             FileLogger.e("AIToolSet", "runCommand failed: ${e.message}", e)
             "Command failed: ${e.message}"
         }
+    }
+
+    /**
+     * 解析命令行字符串，尊重引号分组。
+     * 支持双引号和单引号包裹的参数（如 git commit -m "my message"）。
+     */
+    private fun parseCommandLine(input: String): List<String> {
+        val args = mutableListOf<String>()
+        val current = StringBuilder()
+        var inQuote: Char? = null
+        var escaped = false
+        for (c in input) {
+            when {
+                escaped -> { current.append(c); escaped = false }
+                c == '\\' -> escaped = true
+                inQuote != null && c == inQuote -> inQuote = null
+                inQuote == null && (c == '"' || c == '\'') -> inQuote = c
+                inQuote == null && c.isWhitespace() -> {
+                    if (current.isNotEmpty()) { args.add(current.toString()); current.clear() }
+                }
+                else -> current.append(c)
+            }
+        }
+        if (current.isNotEmpty()) args.add(current.toString())
+        return args
     }
 
     // ---- 联网搜索 ----
@@ -442,65 +450,6 @@ class AIToolSet(
         return results
     }
 
-    // ---- Git 集成 ----
-
-    @Tool(description = "Show git status (short format). Returns staged/unstaged changes.")
-    fun gitStatus(): String = runGit("status", "--short")
-
-    @Tool(description = "Stage files for commit. Use '.' to stage all.")
-    fun gitAdd(
-        @ToolParam(description = "File paths to stage, space-separated. Use '.' for all") paths: String = ".",
-    ): String {
-        val args = paths.split(" ").filter { it.isNotBlank() }
-        return runGit("add", *args.toTypedArray())
-    }
-
-    @Tool(description = "Commit staged changes with a message.")
-    fun gitCommit(
-        @ToolParam(description = "Commit message") message: String,
-    ): String = runGit("commit", "-m", message)
-
-    @Tool(description = "Push commits to remote repository.")
-    fun gitPush(
-        @ToolParam(description = "Remote name, default 'origin'") remote: String = "origin",
-        @ToolParam(description = "Branch name, e.g. 'main' or 'master'") branch: String = "main",
-    ): String = runGit("push", remote, branch)
-
-    @Tool(description = "List local branches. Add '-a' to show remote branches too.")
-    fun gitBranch(
-        @ToolParam(description = "Extra args, e.g. '-a' for all, '-D name' to delete") args: String = "",
-    ): String {
-        val extra = args.split(" ").filter { it.isNotBlank() }
-        return runGit("branch", *extra.toTypedArray())
-    }
-
-    @Tool(description = "Show diff of staged/unstaged changes.")
-    fun gitDiff(
-        @ToolParam(description = "Args: '--staged' for staged only, 'HEAD~1' for last commit") args: String = "",
-    ): String {
-        val extra = args.split(" ").filter { it.isNotBlank() }
-        return runGit("diff", *extra.toTypedArray())
-    }
-
-    private fun runGit(vararg args: String): String {
-        Log.d("AIToolSet", "runGit: git ${args.joinToString(" ")}")
-        FileLogger.d("AIToolSet", "runGit: git ${args.joinToString(" ")}")
-        val dir = File(context.filesDir, "workspace").also { it.mkdirs() }
-        return try {
-            val fullArgs = listOf("git") + args.toList()
-            val pb = ProcessBuilder(fullArgs).directory(dir).redirectErrorStream(true)
-            val proc = pb.start()
-            val text = proc.inputStream.bufferedReader().readText()
-            proc.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
-            proc.destroy()
-            if (text.isBlank()) "已完成，无输出。" else text.take(5000)
-        } catch (e: Exception) {
-            Log.e("AIToolSet", "runGit failed: git ${args.joinToString(" ")}: ${e.message}", e)
-            FileLogger.e("AIToolSet", "runGit: git ${args.joinToString(" ")} failed: ${e.message}", e)
-            "命令失败: ${e.message}"
-        }
-    }
-
     // ---- Lint/诊断读取 ----
 
     @Tool(description = "Read build lint or compilation errors from the project. Runs gradle lint if needed.")
@@ -589,7 +538,7 @@ class AIToolSet(
         return result
     }
 
-    @Tool(description = "Search codebase by meaning/semantics. Finds code by describing what you're looking for rather than exact text. Use for exploring unfamiliar code or finding implementations by behavior.")
+    @Tool(description = "Search codebase by meaning/semantics using TF-IDF vector search with cosine similarity. Converts query into a sparse vector and finds nearest-neighbor code chunks across the project. Use for exploring unfamiliar code or finding implementations by behavior. Prefer over grep when you don't know exact terms.")
     fun searchCodebase(
         @ToolParam(description = "Natural language query describing what you're looking for, e.g. 'Where is user authentication implemented?' or 'How does error handling work?'") query: String,
         @ToolParam(description = "Specific directories to search within, relative to project root. Leave empty to search entire project.") targetDirectories: String = "",

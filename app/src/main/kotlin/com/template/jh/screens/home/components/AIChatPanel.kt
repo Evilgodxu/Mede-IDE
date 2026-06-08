@@ -103,6 +103,7 @@ import com.template.jh.core.ai.ChatRole
 import com.template.jh.core.ai.ModelActivity
 import com.template.jh.core.ai.ConversationEntry
 import com.template.jh.core.ai.EngineStatus
+import com.template.jh.core.analytics.UsageStats
 
 // AI 协作面板
 @Composable
@@ -170,8 +171,6 @@ fun AIChatPanel(
             visible = state.isLoading && state.modelActivity != ModelActivity.Idle,
         )
 
-        // 任务清单面板已移除
-
         if (state.messages.isEmpty() && state.engineStatus != EngineStatus.Loading) {
             Box(modifier = Modifier.weight(1f)) { EmptyChatState(state.engineStatus) }
         } else {
@@ -180,15 +179,14 @@ fun AIChatPanel(
                 state = listState, verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(state.messages, key = { it.id }) { msg ->
-                    // 跳过工具调用中间消息
-                    if (msg.isToolMessage) return@items
-                    ChatBubble(
-                        message = msg,
-                        isActiveStreaming = msg.isStreaming,
-                        onFileCardClick = { path -> viewModel.requestOpenFile(path) },
-                        onAcceptAllChanges = { path -> viewModel.acceptAllChanges(path) },
-                        onRejectAllChanges = { path -> viewModel.rejectAllChanges(path) },
-                    )
+                    if (msg.isToolMessage) {
+                        ToolCallBubble(message = msg)
+                    } else {
+                        ChatBubble(
+                            message = msg,
+                            isActiveStreaming = msg.isStreaming,
+                        )
+                    }
                 }
             }
         }
@@ -200,6 +198,8 @@ fun AIChatPanel(
         }
         val contextMaxTokens = 128000
         var showContextInfoDialog by remember { mutableStateOf(false) }
+        val usageStats by viewModel.usageStats.collectAsState()
+        var showUsageStatsDialog by remember { mutableStateOf(false) }
 
         // 图片选择启动器
         val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -223,6 +223,8 @@ fun AIChatPanel(
             contextMaxTokens = contextMaxTokens,
             onContextInfoClick = { showContextInfoDialog = true },
             onImagePick = { imagePickerLauncher.launch("image/*") },
+            usageStats = usageStats,
+            onUsageStatsClick = { showUsageStatsDialog = true },
         )
 
         if (showContextInfoDialog) {
@@ -232,6 +234,13 @@ fun AIChatPanel(
                 messagesCount = state.messages.size,
                 openedFilePaths = state.openedFilePaths,
                 onDismiss = { showContextInfoDialog = false },
+            )
+        }
+        if (showUsageStatsDialog) {
+            UsageStatsDialog(
+                stats = usageStats,
+                onDismiss = { showUsageStatsDialog = false },
+                onReset = { viewModel.resetUsageStats() },
             )
         }
     }
@@ -359,22 +368,7 @@ private fun EmptyChatState(engineStatus: EngineStatus) {
 private fun ChatBubble(
     message: ChatMessage,
     isActiveStreaming: Boolean = false,
-    onFileCardClick: ((String) -> Unit)? = null,
-    onAcceptAllChanges: ((String) -> Unit)? = null,
-    onRejectAllChanges: ((String) -> Unit)? = null,
 ) {
-    // 文件操作卡片
-    message.fileOp?.let { op ->
-        FileOperationCard(
-            op = op,
-            onFileCardClick = onFileCardClick,
-            showReviewButtons = op.opType == com.template.jh.core.ai.FileOpType.Modify,
-            onAcceptAll = { onAcceptAllChanges?.invoke(op.filePath) },
-            onRejectAll = { onRejectAllChanges?.invoke(op.filePath) }
-        )
-        return
-    }
-
     val isUser = message.role == ChatRole.User
     val bgColor = if (isUser) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     val shape = RoundedCornerShape(topStart = if (isUser) 12.dp else 4.dp, topEnd = 12.dp, bottomStart = 12.dp, bottomEnd = if (isUser) 4.dp else 12.dp)
@@ -449,6 +443,127 @@ private fun ChatBubble(
     }
 }
 
+/**
+ * 工具调用气泡：显示模型推理文本 + 工具名 + 可折叠的工具结果
+ */
+@Composable
+private fun ToolCallBubble(message: ChatMessage) {
+    val context = LocalContext.current
+    val (prefixText, toolName, toolResult) = remember(message.content) { parseToolMessage(message.content) }
+    var showResult by remember { mutableStateOf(false) }
+
+    val shape = RoundedCornerShape(topStart = 4.dp, topEnd = 12.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
+    val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = Alignment.Start) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)) {
+            Text("AI", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(4.dp))
+            Box(
+                Modifier
+                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 1.dp)
+            ) {
+                Text("🛠 工具调用", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+        }
+
+        if (prefixText.isNotBlank()) {
+            Box(
+                Modifier
+                    .widthIn(max = 360.dp)
+                    .clip(shape)
+                    .background(bgColor)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("消息内容", message.content))
+                        },
+                    )
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(prefixText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+
+        if (toolName.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Box(
+                Modifier
+                    .widthIn(max = 360.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f))
+                    .clickable { showResult = !showResult }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("⚡ $toolName", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (showResult) "▼" else "▶", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                    if (!showResult) {
+                        Text(" 结果", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.6f))
+                    }
+                }
+            }
+
+            if (showResult && toolResult.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Box(
+                    Modifier
+                        .widthIn(max = 360.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    val truncated = if (toolResult.length > 500) toolResult.take(500) + "\n..." else toolResult
+                    Text(truncated, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 解析工具消息内容，分离前缀文本、工具名、工具结果。
+ */
+private fun parseToolMessage(content: String): Triple<String, String, String> {
+    val jsonStart = content.indexOf("""{"tool_name":""")
+    if (jsonStart < 0) {
+        val markerIdx = content.indexOf("[工具调用:")
+        if (markerIdx >= 0) {
+            val afterMarker = content.substring(markerIdx + "[工具调用:".length).trimStart()
+            val endIdx = afterMarker.indexOf(']')
+            val name = if (endIdx >= 0) afterMarker.substring(0, endIdx).trim() else ""
+            val resultPart = if (endIdx >= 0) afterMarker.substring(endIdx + 1).trim() else content
+            return Triple("", name, resultPart.removePrefix("\n").removePrefix("\n"))
+        }
+        return Triple("", "", "")
+    }
+
+    val prefix = content.substring(0, jsonStart).trim()
+    val afterJsonStart = content.substring(jsonStart)
+
+    var depth = 0
+    var jsonEnd = -1
+    for (i in afterJsonStart.indices) {
+        when (afterJsonStart[i]) {
+            '{' -> depth++
+            '}' -> { depth--; if (depth == 0) { jsonEnd = jsonStart + i; break } }
+        }
+    }
+    if (jsonEnd < 0) return Triple(prefix, "", "")
+
+    val jsonPart = content.substring(jsonStart, jsonEnd + 1)
+    val name = try {
+        org.json.JSONObject(jsonPart).optString("tool_name", "")
+    } catch (_: Exception) { "" }
+
+    val resultPart = content.substring(jsonEnd + 1).trim().removePrefix("\n").removePrefix("\n")
+
+    return Triple(prefix, name, resultPart)
+}
+
 @Composable
 private fun StreamingCursor() {
     val infiniteTransition = rememberInfiniteTransition(label = "streaming")
@@ -467,110 +582,6 @@ private fun StreamingCursor() {
     )
 }
 
-// 文件操作卡片 - 新样式：左文件名、中路径、右新增/删除行数 + 确认/拒绝按钮
-@Composable
-private fun FileOperationCard(
-    op: com.template.jh.core.ai.FileOperationMeta,
-    onFileCardClick: ((String) -> Unit)?,
-    showReviewButtons: Boolean = false,
-    onAcceptAll: (() -> Unit)? = null,
-    onRejectAll: (() -> Unit)? = null,
-) {
-    // 提取文件名和路径
-    val fileName = op.filePath.substringAfterLast("/")
-    val dirPath = op.filePath.substringBeforeLast("/", "")
-
-    // 解析新增/删除行数
-    val addedLines = if (op.lineChanges > 0) op.lineChanges else 0
-    val deletedLines = if (op.lineChanges < 0) -op.lineChanges else 0
-
-    // 操作类型标签
-    val opLabel = when (op.opType) {
-        com.template.jh.core.ai.FileOpType.Create -> "新建"
-        com.template.jh.core.ai.FileOpType.Modify -> "修改"
-        com.template.jh.core.ai.FileOpType.Delete -> "删除"
-        com.template.jh.core.ai.FileOpType.Overwrite -> "覆写"
-    }
-    val opColor = when (op.opType) {
-        com.template.jh.core.ai.FileOpType.Create -> Color(0xFF22CC22)
-        com.template.jh.core.ai.FileOpType.Delete -> Color(0xFFCC2222)
-        else -> MaterialTheme.colorScheme.primary
-    }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 3.dp, horizontal = 4.dp)
-            .clickable { onFileCardClick?.invoke(op.filePath) },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                // 操作类型标签
-                Text(
-                    text = opLabel,
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = opColor,
-                )
-                // 文件名
-                Text(
-                    text = fileName,
-                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                // 新增行数
-                if (addedLines > 0) {
-                    Text(text = "+$addedLines", style = MaterialTheme.typography.labelSmall, color = Color(0xFF22CC22))
-                }
-                if (deletedLines > 0) {
-                    Text(text = "-$deletedLines", style = MaterialTheme.typography.labelSmall, color = Color(0xFFCC2222))
-                }
-            }
-            // 路径
-            if (dirPath.isNotEmpty()) {
-                Text(
-                    text = dirPath,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            // 审阅按钮（仅 Modify 操作需要审阅）
-            if (showReviewButtons) {
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = { onAcceptAll?.invoke() },
-                        modifier = Modifier.height(28.dp),
-                        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF22CC22)),
-                    ) {
-                        Icon(Icons.Default.Check, null, Modifier.size(12.dp))
-                        Spacer(Modifier.width(3.dp))
-                        Text("接受", style = MaterialTheme.typography.labelSmall)
-                    }
-                    OutlinedButton(
-                        onClick = { onRejectAll?.invoke() },
-                        modifier = Modifier.height(28.dp),
-                        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFCC2222)),
-                    ) {
-                        Icon(Icons.Default.Close, null, Modifier.size(12.dp))
-                        Spacer(Modifier.width(3.dp))
-                        Text("拒绝", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-            }
-        }
-    }
-}
-
 @Composable
 private fun ChatInputBar(
     inputText: String, onInputChange: (String) -> Unit, onSend: () -> Unit,
@@ -581,6 +592,8 @@ private fun ChatInputBar(
     onImagePick: () -> Unit = {},
     attachedImageUris: List<android.net.Uri> = emptyList(),
     onDetachImage: (android.net.Uri) -> Unit = {},
+    usageStats: UsageStats = UsageStats(),
+    onUsageStatsClick: () -> Unit = {},
 ) {
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -681,6 +694,23 @@ private fun ChatInputBar(
                         else if (ratio < 0.8f) Color(0xFFFFA000)
                         else Color(0xFFE53935),
                     trackColor = Color(0xFFE0E0E0),
+                )
+            }
+
+            // 用量统计按钮
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { onUsageStatsClick() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "${usageStats.todayCalls}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 9.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
@@ -898,118 +928,65 @@ private class VoiceRecognizerManager(private val context: Context) {
     }
 }
 
-// 任务清单面板（双Tab：任务列表 + 文件列表）
-@Composable
-private fun TaskListPanel(
-    tasks: List<com.template.jh.data.model.TaskItem>,
-    fileChanges: List<com.template.jh.core.ai.FileChangeItem>,
-    onClearCompleted: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var activeTab by remember { mutableStateOf(0) } // 0=任务, 1=文件
 
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-    ) {
-        Column(Modifier.padding(8.dp)) {
-            // 标题栏 + Tab切换
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        "任务",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (activeTab == 0) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (activeTab == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clickable { activeTab = 0 }.padding(horizontal = 4.dp),
-                    )
-                    Text(
-                        "|",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                    )
-                    Text(
-                        "文件 (${fileChanges.size})",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (activeTab == 1) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (activeTab == 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clickable { activeTab = 1 }.padding(horizontal = 4.dp),
-                    )
-                }
-                Row {
-                    if (activeTab == 0) {
-                        IconButton(onClick = onClearCompleted, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Delete, "清除已完成", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+// 用量统计对话框
+@Composable
+private fun UsageStatsDialog(
+    stats: UsageStats,
+    onDismiss: () -> Unit,
+    onReset: () -> Unit,
+) {
+    val avgDuration = if (stats.totalCalls > 0) stats.totalDurationMs / stats.totalCalls else 0L
+    var showResetConfirm by remember { mutableStateOf(false) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("用量统计") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 汇总
+                Text("今日调用: ${stats.todayCalls}", style = MaterialTheme.typography.bodySmall)
+                Text("今日 Token: ${stats.todayTokens}", style = MaterialTheme.typography.bodySmall)
+                HorizontalDivider()
+                Text("累计调用: ${stats.totalCalls}", style = MaterialTheme.typography.bodySmall)
+                Text("累计输入 Token: ${stats.totalPromptTokens}", style = MaterialTheme.typography.bodySmall)
+                Text("累计输出 Token: ${stats.totalCompletionTokens}", style = MaterialTheme.typography.bodySmall)
+                Text("总计 Token: ${stats.totalPromptTokens + stats.totalCompletionTokens}", style = MaterialTheme.typography.bodySmall)
+                Text("平均耗时: ${avgDuration}ms", style = MaterialTheme.typography.bodySmall)
+                HorizontalDivider()
+                // 按模型统计
+                if (stats.byModel.isNotEmpty()) {
+                    Text("按模型:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    stats.byModel.forEach { (key, mStats) ->
+                        val (provider, modelName) = key.split("/", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+                        Column(modifier = Modifier.padding(start = 8.dp)) {
+                            Text("$modelName", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                            Text("  来源: $provider | 调用 ${mStats.calls} 次, Token ${mStats.promptTokens + mStats.completionTokens}, ${mStats.durationMs / 1000}s", style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Close, "关闭", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
                 }
             }
-            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-
-            // 内容区
-            if (activeTab == 0) {
-                // 任务列表
-                if (tasks.isEmpty()) {
-                    Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                        Text("暂无任务", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                if (showResetConfirm) {
+                    onReset()
+                    showResetConfirm = false
                 } else {
-                    tasks.takeLast(15).reversed().forEach { task ->
-                        TaskRow(task)
-                    }
+                    showResetConfirm = true
                 }
-            } else {
-                // 文件列表
-                if (fileChanges.isEmpty()) {
-                    Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                        Text("暂无文件变更", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
-                    fileChanges.reversed().forEach { change ->
-                        FileChangeRow(change)
-                    }
-                }
+            }) {
+                Text(if (showResetConfirm) "确认重置" else "重置统计")
             }
-        }
-    }
-}
-
-@Composable
-private fun TaskRow(task: com.template.jh.data.model.TaskItem) {
-    val statusColor = when (task.status) {
-        com.template.jh.data.model.TaskStatus.Completed -> Color(0xFF4CAF50)
-        com.template.jh.data.model.TaskStatus.Failed -> MaterialTheme.colorScheme.error
-        com.template.jh.data.model.TaskStatus.Running -> MaterialTheme.colorScheme.primary
-        com.template.jh.data.model.TaskStatus.WaitingAuth -> Color(0xFFFFA726)
-        com.template.jh.data.model.TaskStatus.Interrupted -> Color(0xFFFF5722)
-        com.template.jh.data.model.TaskStatus.Pending -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val statusText = when (task.status) {
-        com.template.jh.data.model.TaskStatus.Completed -> "✓"
-        com.template.jh.data.model.TaskStatus.Failed -> "✗"
-        com.template.jh.data.model.TaskStatus.Running -> "⟳"
-        com.template.jh.data.model.TaskStatus.WaitingAuth -> "!"
-        com.template.jh.data.model.TaskStatus.Interrupted -> "⊘"
-        com.template.jh.data.model.TaskStatus.Pending -> "○"
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(statusText, color = statusColor, style = MaterialTheme.typography.labelSmall)
-        Spacer(Modifier.width(6.dp))
-        Text(
-            task.title,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-    }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = {
+                showResetConfirm = false
+                onDismiss()
+            }) {
+                Text(if (showResetConfirm) "取消" else "关闭")
+            }
+        },
+    )
 }
 
 // 上下文窗口详情对话框
@@ -1102,46 +1079,4 @@ private fun ContextInfoDialog(
     }
 }
 
-@Composable
-private fun FileChangeRow(change: com.template.jh.core.ai.FileChangeItem) {
-    val icon = when (change.opType) {
-        com.template.jh.core.ai.FileOpType.Create -> Icons.Default.Add
-        com.template.jh.core.ai.FileOpType.Modify -> Icons.Default.Refresh
-        com.template.jh.core.ai.FileOpType.Overwrite -> Icons.Default.Refresh
-        com.template.jh.core.ai.FileOpType.Delete -> Icons.Default.Delete
-    }
-    val opLabel = when (change.opType) {
-        com.template.jh.core.ai.FileOpType.Create -> "创建"
-        com.template.jh.core.ai.FileOpType.Modify -> "修改"
-        com.template.jh.core.ai.FileOpType.Overwrite -> "覆盖"
-        com.template.jh.core.ai.FileOpType.Delete -> "删除"
-    }
-    val tint = when (change.opType) {
-        com.template.jh.core.ai.FileOpType.Create -> Color(0xFF4CAF50)
-        com.template.jh.core.ai.FileOpType.Modify -> MaterialTheme.colorScheme.primary
-        com.template.jh.core.ai.FileOpType.Overwrite -> Color(0xFFFF9800)
-        com.template.jh.core.ai.FileOpType.Delete -> MaterialTheme.colorScheme.error
-    }
-    val lineInfo = if (change.lineChanges != 0) {
-        val diff = if (change.lineChanges > 0) "+${change.lineChanges}" else "${change.lineChanges}"
-        " (${diff}\u884C)"
-    } else ""
 
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, Modifier.size(12.dp), tint = tint)
-        Spacer(Modifier.width(6.dp))
-        Text(opLabel, style = MaterialTheme.typography.labelSmall, color = tint)
-        Spacer(Modifier.width(4.dp))
-        Text(
-            change.filePath.substringAfterLast('/') + lineInfo,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}

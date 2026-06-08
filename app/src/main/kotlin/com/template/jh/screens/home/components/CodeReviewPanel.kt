@@ -446,7 +446,8 @@ private fun ReviewActionBar(
 }
 
 /**
- * 精简版审查导航器（用于编辑器右上角）
+ * 精简版审查导航器（用于编辑器右上角浮动）
+ * 注意：所有 IconButton 尺寸 ≥ 40dp 以满足 Android 触摸目标规范
  */
 @Composable
 fun ReviewNavigator(
@@ -461,43 +462,45 @@ fun ReviewNavigator(
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
         modifier = Modifier
             .background(
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
-                RoundedCornerShape(20.dp)
+                RoundedCornerShape(24.dp)
             )
             .padding(horizontal = 4.dp, vertical = 2.dp)
             .border(
                 1.dp,
                 MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                RoundedCornerShape(20.dp)
+                RoundedCornerShape(24.dp)
             )
     ) {
         // 上一条
         IconButton(
             onClick = onPrev,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(40.dp),
             colors = IconButtonDefaults.iconButtonColors(
                 containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
             ),
         ) {
-            Icon(Icons.Default.KeyboardArrowUp, "上一处", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Default.KeyboardArrowUp, "上一处", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         }
 
-        // 计数显示
+        // 计数显示（点击打开面板）
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.clickable(onClick = onOpenPanel)
+            modifier = Modifier
+                .clickable(onClick = onOpenPanel)
+                .padding(horizontal = 4.dp, vertical = 2.dp)
         ) {
             Text(
                 text = "${reviewState.currentBlockIndex + 1}/${reviewState.totalCount}",
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
             Text(
                 text = "剩${reviewState.pendingCount}",
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
         }
@@ -505,28 +508,27 @@ fun ReviewNavigator(
         // 下一条
         IconButton(
             onClick = onNext,
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(40.dp),
             colors = IconButtonDefaults.iconButtonColors(
                 containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
             ),
         ) {
-            Icon(Icons.Default.KeyboardArrowDown, "下一处", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Default.KeyboardArrowDown, "下一处", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
         }
 
         // 分隔线
         Box(
             modifier = Modifier
                 .width(1.dp)
-                .height(16.dp)
+                .height(20.dp)
                 .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         )
 
-        // 当前块操作按钮（始终显示，允许重新选择）
+        // 当前块操作按钮
         currentBlock?.let { block ->
-            // 拒绝当前
             IconButton(
                 onClick = onRejectCurrent,
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(40.dp),
                 colors = IconButtonDefaults.iconButtonColors(
                     containerColor = if (block.status == ChangeBlockStatus.REJECTED)
                         Color(0xFFCC2222).copy(alpha = 0.3f)
@@ -534,12 +536,11 @@ fun ReviewNavigator(
                         Color(0xFFCC2222).copy(alpha = 0.15f)
                 ),
             ) {
-                Icon(Icons.Default.Close, "拒绝", Modifier.size(16.dp), tint = Color(0xFFCC2222))
+                Icon(Icons.Default.Close, "拒绝", Modifier.size(20.dp), tint = Color(0xFFCC2222))
             }
-            // 接受当前
             IconButton(
                 onClick = onAcceptCurrent,
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(40.dp),
                 colors = IconButtonDefaults.iconButtonColors(
                     containerColor = if (block.status == ChangeBlockStatus.ACCEPTED)
                         Color(0xFF22CC22).copy(alpha = 0.3f)
@@ -547,7 +548,7 @@ fun ReviewNavigator(
                         Color(0xFF22CC22).copy(alpha = 0.15f)
                 ),
             ) {
-                Icon(Icons.Default.Check, "接受", Modifier.size(16.dp), tint = Color(0xFF22CC22))
+                Icon(Icons.Default.Check, "接受", Modifier.size(20.dp), tint = Color(0xFF22CC22))
             }
         }
     }

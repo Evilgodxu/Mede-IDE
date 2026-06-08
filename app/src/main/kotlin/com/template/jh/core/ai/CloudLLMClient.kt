@@ -28,19 +28,25 @@ data class CloudModelProfile(
     val modelName: String = "gpt-4o",
 )
 
+/** API 调用返回的用量信息 */
+data class ApiUsage(
+    val promptTokens: Int = 0,
+    val completionTokens: Int = 0,
+)
+
 // 云端大模型客户端（OpenAI 兼容 API /chat/completions + SSE 流式）
 class CloudLLMClient(private val context: Context) {
 
     private val connectTimeout = 30000
     private val readTimeout = 60000
 
-    // 发送消息并流式收集响应，返回完整响应文本
+    // 发送消息并流式收集响应，返回完整响应文本 + 用量信息
     suspend fun sendMessage(
         config: CloudModelConfig,
         systemPrompt: String,
         messages: List<ChatMessage>,
         onChunk: (String) -> Unit,
-    ): String = withContext(Dispatchers.IO) {
+    ): Pair<String, ApiUsage> = withContext(Dispatchers.IO) {
         val endpoint = config.apiEndpoint.trimEnd('/') + "/chat/completions"
 
         val msgs = JSONArray().apply {
@@ -91,6 +97,7 @@ class CloudLLMClient(private val context: Context) {
         }
 
         val fullText = StringBuilder()
+        var usage = ApiUsage()
 
         try {
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
@@ -112,6 +119,14 @@ class CloudLLMClient(private val context: Context) {
                     if (data == "[DONE]") break
                     try {
                         val json = JSONObject(data)
+                        // 提取 token 用量（部分 API 在最后一个 chunk 中返回）
+                        val usageObj = json.optJSONObject("usage")
+                        if (usageObj != null) {
+                            usage = ApiUsage(
+                                promptTokens = usageObj.optInt("prompt_tokens", usage.promptTokens),
+                                completionTokens = usageObj.optInt("completion_tokens", usage.completionTokens),
+                            )
+                        }
                         val choices = json.optJSONArray("choices")
                         if (choices == null || choices.length() == 0) continue
                         val delta = choices.getJSONObject(0).optJSONObject("delta") ?: continue
@@ -130,7 +145,7 @@ class CloudLLMClient(private val context: Context) {
             throw e
         }
         conn.disconnect()
-        fullText.toString()
+        Pair(fullText.toString(), usage)
     }
 
     // 验证 API 连接是否正常（非流式短请求）

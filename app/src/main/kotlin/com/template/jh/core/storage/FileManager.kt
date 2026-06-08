@@ -538,7 +538,7 @@ class FileManager(private val context: Context) {
     }
 
     /**
-     * 语义搜索
+     * 语义向量检索 — 基于 TF-IDF + 余弦相似度
      */
     fun searchCodebase(query: String, targetDirectories: String = ""): String {
         val root = rootDocFile ?: return "No project folder is open."
@@ -566,27 +566,27 @@ class FileManager(private val context: Context) {
 
             if (files.isEmpty()) return "No searchable files found."
 
-            val queryTerms = extractSearchTerms(query)
-            val scoredResults = files.mapNotNull { file ->
-                val score = calculateRelevanceScore(file.content, query, queryTerms)
-                if (score > 0) file to score else null
-            }.sortedByDescending { it.second }
+            val index = com.template.jh.core.search.VectorIndex()
+            files.forEach { file -> index.addDocument(file.path, file.content) }
 
-            if (scoredResults.isEmpty()) {
-                "No relevant code found for: $query\nSearched ${files.size} files."
+            val results = index.search(query)
+
+            if (results.isEmpty()) {
+                "未找到相关代码: $query\n搜索范围: ${files.size} 个文件, ${index.size} 个代码块\n" +
+                "提示: grep 工具可进行精确正则匹配, searchCodebase 更适合按功能描述探索代码"
             } else {
                 buildString {
-                    appendLine("Search results for: \"$query\"")
-                    appendLine("Found ${scoredResults.size} relevant files:")
+                    appendLine("语义搜索结果: \"$query\"")
+                    appendLine("找到 ${results.size} 个相关文件:")
                     appendLine("---")
-                    scoredResults.take(10).forEach { (file, score) ->
-                        appendLine("[Relevance: ${(score * 100).toInt()}%] ${file.path}")
-                        val snippet = extractRelevantSnippet(file.content, queryTerms)
-                        if (snippet.isNotBlank()) {
-                            appendLine("Snippet:")
-                            snippet.lines().take(5).forEach { appendLine("  $it") }
+                    results.forEachIndexed { i, r ->
+                        val pct = (r.score * 100).toInt().coerceIn(0, 99)
+                        appendLine("[$pct%] ${r.filePath} (行 ${r.startLine}-${r.endLine})")
+                        if (r.snippet.isNotBlank()) {
+                            appendLine("片段:")
+                            r.snippet.lines().take(5).forEach { appendLine("  $it") }
                         }
-                        appendLine()
+                        if (i < results.size - 1) appendLine()
                     }
                 }.trimEnd()
             }
