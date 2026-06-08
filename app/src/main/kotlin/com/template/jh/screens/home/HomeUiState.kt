@@ -1,7 +1,6 @@
 package com.template.jh.screens.home
 
 import com.template.jh.data.model.McpServer
-import com.template.jh.data.model.NotificationSettings
 import com.template.jh.data.model.Rule
 import com.template.jh.data.model.SkillItem
 
@@ -15,5 +14,4 @@ data class HomeUiState(
     val rules: List<Rule> = emptyList(),
     val skills: List<SkillItem> = emptyList(),
     val mcpServers: List<McpServer> = emptyList(),
-    val notificationSettings: NotificationSettings = NotificationSettings(),
 )

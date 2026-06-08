@@ -181,17 +181,7 @@
     <string name="mcp_command">命令/地址</string>
     <string name="mcp_args">参数</string>
 
-    <!-- 通知设置 -->
-    <string name="notif_title">对话流通知</string>
-    <string name="notif_desc">配置对话流中的通知行为</string>
-    <string name="notif_task_completed">任务完成</string>
-    <string name="notif_task_failed">异常打断</string>
-    <string name="notif_waiting_auth">等待用户授权</string>
-    <string name="notif_sound">音效</string>
-    <string name="notif_popup">弹出提示</string>
 
-    <!-- 任务清单 -->
-    <string name="task_list_title">任务清单</string>
 
 
 

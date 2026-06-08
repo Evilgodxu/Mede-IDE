@@ -94,7 +94,6 @@ import com.template.jh.core.ai.EngineStatus
 import com.template.jh.core.ai.LiteRTManager
 import com.template.jh.core.ai.ModelParams
 import com.template.jh.data.model.McpServer
-import com.template.jh.data.model.NotificationSettings
 import com.template.jh.data.model.Rule
 import com.template.jh.data.model.RuleType
 import com.template.jh.data.model.SkillItem
@@ -181,7 +180,7 @@ private fun SettingsCategoryContent(
                 else {
                     ThemeSettingsCard(state, onSetThemeMode, Modifier.fillMaxWidth())
                     LanguageSettingsCard(state, onSetLanguage, Modifier.fillMaxWidth())
-                    GeneralSettingsCard(modifier = Modifier.fillMaxWidth(), notificationSettings = state.notificationSettings)
+                    GeneralSettingsCard(modifier = Modifier.fillMaxWidth())
                 }
             }
             SettingsCategory.Model -> ModelSettingsContent(chatViewModel)
@@ -724,8 +723,6 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
 @Composable
 private fun GeneralSettingsCard(
     modifier: Modifier = Modifier,
-    notificationSettings: NotificationSettings = NotificationSettings(),
-    viewModel: ChatViewModel = koinViewModel(),
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -735,53 +732,6 @@ private fun GeneralSettingsCard(
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("通用", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-
-            // 音效设置开关
-            Text("通知音效", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-            // 任务完成音效
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("任务完成", style = MaterialTheme.typography.bodySmall)
-                Switch(
-                    checked = notificationSettings.taskCompletedSound,
-                    onCheckedChange = { viewModel.setTaskCompletedSound(it) },
-                    modifier = Modifier.size(32.dp),
-                )
-            }
-
-            // 任务失败音效
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("任务失败", style = MaterialTheme.typography.bodySmall)
-                Switch(
-                    checked = notificationSettings.taskFailedSound,
-                    onCheckedChange = { viewModel.setTaskFailedSound(it) },
-                    modifier = Modifier.size(32.dp),
-                )
-            }
-
-            // 等待用户操作音效
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("等待用户操作", style = MaterialTheme.typography.bodySmall)
-                Switch(
-                    checked = notificationSettings.waitingUserActionSound,
-                    onCheckedChange = { viewModel.setWaitingUserActionSound(it) },
-                    modifier = Modifier.size(32.dp),
-                )
-            }
-
-            HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
             // 发送日志按钮
             var isSharing by remember { mutableStateOf(false) }

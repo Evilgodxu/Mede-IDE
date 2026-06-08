@@ -9,7 +9,6 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.template.jh.data.model.McpServer
-import com.template.jh.data.model.NotificationSettings
 import com.template.jh.data.model.Rule
 import com.template.jh.data.model.SkillItem
 import kotlinx.coroutines.flow.Flow
@@ -28,11 +27,6 @@ class UserPreferencesRepository(private val context: Context) {
         val RULES_JSON = stringPreferencesKey("rules_json")
         val SKILLS_JSON = stringPreferencesKey("skills_json")
         val MCP_SERVERS_JSON = stringPreferencesKey("mcp_servers_json")
-        // 通知设置（音效）
-        val NOTIFY_TASK_COMPLETED_SOUND = booleanPreferencesKey("notify_task_completed_sound")
-        val NOTIFY_TASK_FAILED_SOUND = booleanPreferencesKey("notify_task_failed_sound")
-        val NOTIFY_WAITING_AUTH_SOUND = booleanPreferencesKey("notify_waiting_auth_sound")
-        val DELETE_CARD_ENABLED = booleanPreferencesKey("delete_card_enabled")
         val SHOW_TOOL_CALLS = booleanPreferencesKey("show_tool_calls")
         val DEEP_THINK_ENABLED = booleanPreferencesKey("deep_think_enabled")
         val THINKING_ROUNDS = intPreferencesKey("thinking_rounds")
@@ -143,16 +137,6 @@ class UserPreferencesRepository(private val context: Context) {
                     )
                 }
             } catch (_: Exception) { emptyList() }
-        }
-
-    val notificationSettings: Flow<NotificationSettings> = context.dataStore.data
-        .map { prefs ->
-            NotificationSettings(
-                taskCompletedSound = prefs[PreferencesKeys.NOTIFY_TASK_COMPLETED_SOUND] ?: true,
-                taskFailedSound = prefs[PreferencesKeys.NOTIFY_TASK_FAILED_SOUND] ?: true,
-                waitingUserActionSound = prefs[PreferencesKeys.NOTIFY_WAITING_AUTH_SOUND] ?: true,
-                deleteCardEnabled = prefs[PreferencesKeys.DELETE_CARD_ENABLED] ?: false,
-            )
         }
 
     suspend fun setThemeMode(mode: String) {
@@ -290,27 +274,6 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun setAutoLoadLastModel(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.AUTO_LOAD_LAST_MODEL] = enabled }
-    }
-
-    suspend fun setNotificationSettings(settings: NotificationSettings) {
-        context.dataStore.edit { prefs ->
-            prefs[PreferencesKeys.NOTIFY_TASK_COMPLETED_SOUND] = settings.taskCompletedSound
-            prefs[PreferencesKeys.NOTIFY_TASK_FAILED_SOUND] = settings.taskFailedSound
-            prefs[PreferencesKeys.NOTIFY_WAITING_AUTH_SOUND] = settings.waitingUserActionSound
-            prefs[PreferencesKeys.DELETE_CARD_ENABLED] = settings.deleteCardEnabled
-        }
-    }
-
-    suspend fun setTaskCompletedSound(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.NOTIFY_TASK_COMPLETED_SOUND] = enabled }
-    }
-
-    suspend fun setTaskFailedSound(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.NOTIFY_TASK_FAILED_SOUND] = enabled }
-    }
-
-    suspend fun setWaitingUserActionSound(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.NOTIFY_WAITING_AUTH_SOUND] = enabled }
     }
 
     private fun rulesToJson(rules: List<Rule>): String {

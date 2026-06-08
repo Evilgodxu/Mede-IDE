@@ -9,7 +9,6 @@ import androidx.lifecycle.viewModelScope
 import com.template.jh.core.ai.FileOperationEvents
 import com.template.jh.core.storage.FileManager
 import com.template.jh.data.model.McpServer
-import com.template.jh.data.model.NotificationSettings
 import com.template.jh.data.model.Rule
 import com.template.jh.data.model.SkillItem
 import com.template.jh.data.repository.UserPreferencesRepository
@@ -40,7 +39,6 @@ class HomeViewModel(
                 userPreferencesRepository.rules,
                 userPreferencesRepository.skills,
                 userPreferencesRepository.mcpServers,
-                userPreferencesRepository.notificationSettings,
                 _folderState,
             ) { values: Array<Any?> ->
                 HomeUiState(
@@ -50,9 +48,8 @@ class HomeViewModel(
                     rules = (values[2] as? List<Rule>) ?: emptyList(),
                     skills = (values[3] as? List<SkillItem>) ?: emptyList(),
                     mcpServers = (values[4] as? List<McpServer>) ?: emptyList(),
-                    notificationSettings = (values[5] as? NotificationSettings) ?: NotificationSettings(),
-                    openedFolderName = (values[6] as? FolderState)?.folderName,
-                    openedFolderUri = (values[6] as? FolderState)?.folderUri?.toString(),
+                    openedFolderName = (values[5] as? FolderState)?.folderName,
+                    openedFolderUri = (values[5] as? FolderState)?.folderUri?.toString(),
                 )
             }.collect { _state.value = it }
         }
@@ -150,10 +147,6 @@ class HomeViewModel(
 
     fun setMcpServers(servers: List<McpServer>) {
         viewModelScope.launch { userPreferencesRepository.setMcpServers(servers) }
-    }
-
-    fun setNotificationSettings(settings: NotificationSettings) {
-        viewModelScope.launch { userPreferencesRepository.setNotificationSettings(settings) }
     }
 
     // 文件操作委托给 FileManager

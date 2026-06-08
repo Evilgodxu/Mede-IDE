@@ -3,6 +3,13 @@ package com.template.jh.core.ai
 import android.net.Uri
 import java.util.UUID
 
+// 附件文件（用户添加到对话中的文件引用）
+data class AttachedFile(
+    val name: String,
+    val path: String,
+    val content: String,
+)
+
 // 聊天消息
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
@@ -68,8 +75,6 @@ data class ChatUiState(
     val activeConversationId: String? = null,
     val isHistoryOpen: Boolean = false,
     val isOptimizing: Boolean = false,
-    // 任务清单
-    val taskList: List<com.template.jh.data.model.TaskItem> = emptyList(),
     // 云端模型
     val cloudModelEnabled: Boolean = false,
     val cloudModelProfiles: List<CloudModelProfile> = emptyList(),
@@ -83,10 +88,12 @@ data class ChatUiState(
     val cursorLine: Int = 0,
     // 已修改（未保存）文件路径列表
     val modifiedFilePaths: List<String> = emptyList(),
-    // 文件引用映射：短名称 → 完整路径（用户输入 @filename 时自动解析）
-    val fileRefMap: Map<String, String> = emptyMap(),
-    // 通知设置
-    val notificationSettings: com.template.jh.data.model.NotificationSettings = com.template.jh.data.model.NotificationSettings(),
+    // 附加到对话中的文件（含预读内容，发送时一并注入）
+    val attachedFileRefs: List<AttachedFile> = emptyList(),
+    // 上下文压缩状态
+    val isContextCompressed: Boolean = false,
+    val contextCompressedTokens: Int = 0,  // 本次对话累计压缩的 token 数
+    val contextCompressedCount: Int = 0,   // 压缩次数
     // 附着的图片 URI 列表
     val attachedImageUris: List<Uri> = emptyList(),
 )

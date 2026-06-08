@@ -11,12 +11,8 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.tool
-import com.template.jh.data.model.NotificationEventType
-import com.template.jh.data.model.ParsedTaskList
 import com.template.jh.data.model.Rule
 import com.template.jh.data.model.RuleType
-import com.template.jh.data.model.TaskItem
-import com.template.jh.data.model.TaskStatus
 import com.template.jh.core.analytics.LlmCallRecord
 import com.template.jh.core.analytics.UsageStats
 import com.template.jh.data.repository.UsageAnalyticsRepository
@@ -128,23 +124,6 @@ class ChatViewModel(
                 _state.update { it.copy(activeCloudProfileId = id) }
             }
         }
-        viewModelScope.launch {
-            preferencesRepo.notificationSettings.collect { settings ->
-                _state.update { it.copy(notificationSettings = settings) }
-            }
-        }
-    }
-
-    fun setTaskCompletedSound(enabled: Boolean) {
-        viewModelScope.launch { preferencesRepo.setTaskCompletedSound(enabled) }
-    }
-
-    fun setTaskFailedSound(enabled: Boolean) {
-        viewModelScope.launch { preferencesRepo.setTaskFailedSound(enabled) }
-    }
-
-    fun setWaitingUserActionSound(enabled: Boolean) {
-        viewModelScope.launch { preferencesRepo.setWaitingUserActionSound(enabled) }
     }
 
     fun setInputText(text: String) {
@@ -214,25 +193,24 @@ class ChatViewModel(
     fun sendMessage() {
         val text = _state.value.inputText.trim()
         val images = _state.value.attachedImageUris
-        if (text.isEmpty() && images.isEmpty()) return
+        val files = _state.value.attachedFileRefs
+        if (text.isEmpty() && images.isEmpty() && files.isEmpty()) return
         val isCloud = _state.value.cloudModelEnabled
         if (!isCloud && !liteRTManager.isInitialized) {
             _state.update { it.copy(engineErrorMessage = "请先加载模型或启用云端模型") }
             return
         }
-        val resolvedText = resolveFileReferences(text)
-        val userContent = if (images.isNotEmpty()) {
-            if (resolvedText.isNotBlank()) "$resolvedText\n[已附加 ${images.size} 张图片]" else "[已附加 ${images.size} 张图片]"
-        } else resolvedText
+        val fileContent = buildFileAttachmentBlock()
+        val userContent = buildString {
+            append(text)
+            if (fileContent.isNotBlank()) append(fileContent)
+            if (images.isNotEmpty()) append("\n[已附加 ${images.size} 张图片]")
+        }
         val userMsg = ChatMessage(role = ChatRole.User, content = userContent)
-        val taskId = java.util.UUID.randomUUID().toString()
-        val task = TaskItem(id = taskId, title = userContent.take(50), status = TaskStatus.Running, description = userContent)
-        _state.update { it.copy(messages = it.messages + userMsg, inputText = "", attachedImageUris = emptyList(), isLoading = true, taskList = it.taskList + task) }
         val modelMsgId = java.util.UUID.randomUUID().toString()
         val placeholderMsg = ChatMessage(id = modelMsgId, role = ChatRole.Model, content = "", isStreaming = true)
-        _state.update { it.copy(messages = it.messages + placeholderMsg) }
+        _state.update { it.copy(messages = it.messages + userMsg + placeholderMsg, inputText = "", attachedImageUris = emptyList(), attachedFileRefs = emptyList(), isLoading = true) }
         val ctx = getApplication<Application>()
-        val notifSettings = runBlocking { preferencesRepo.notificationSettings.first() }
         sendJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 // 将图片 URI 复制到临时文件
@@ -244,10 +222,17 @@ class ChatViewModel(
                     } catch (_: Exception) {}
                 }
                 if (isCloud) {
-                    processWithCloudTools(text, modelMsgId, taskId, ctx, notifSettings)
+                    processWithCloudTools(text, modelMsgId, ctx)
                 } else {
+                    // LiteRT: 上下文超出阈值时压缩并重建 Conversation
+                    val currentMsgs = _state.value.messages
+                    if (estimateContextTokens(currentMsgs) > COMPRESS_THRESHOLD) {
+                        val compressed = compressMessages(currentMsgs)
+                        _state.update { it.copy(messages = compressed) }
+                        resetConversation()
+                    }
                     val conv = ensureConversation()
-                    processWithJsonTools(text, modelMsgId, taskId, ctx, notifSettings, tempImagePaths)
+                    processWithJsonTools(text, modelMsgId, ctx, tempImagePaths)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -256,8 +241,6 @@ class ChatViewModel(
                 FileLogger.e("ChatViewModel", "sendMessage failed: ${e.message}", e)
                 updateModelMessage(modelMsgId, "\n\n[错误: ${e.message}]", false)
                 finalizeModelMessage(modelMsgId)
-                updateTaskStatus(taskId, TaskStatus.Failed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, notifSettings)
             }
         }
     }
@@ -279,19 +262,7 @@ class ChatViewModel(
 
 
 
-    fun clearCompletedTasks() {
-        _state.update { it.copy(taskList = it.taskList.filter { t -> t.status == TaskStatus.Running || t.status == TaskStatus.Pending || t.status == TaskStatus.WaitingAuth }) }
-    }
 
-    fun notifyWaitingAuth(message: String) {
-        val ctx = getApplication<Application>()
-        val notifSettings = runBlocking { preferencesRepo.notificationSettings.first() }
-        ConversationNotifier.notify(ctx, NotificationEventType.WaitingUserAction, notifSettings)
-    }
-
-    private fun updateTaskStatus(taskId: String, status: TaskStatus) {
-        _state.update { state -> state.copy(taskList = state.taskList.map { if (it.id == taskId) it.copy(status = status) else it }) }
-    }
 
     fun setProjectRoot(uri: Uri?) {
         aiToolSet.projectUri = uri
@@ -326,9 +297,21 @@ class ChatViewModel(
         _state.update { it.copy(modifiedFilePaths = paths) }
     }
 
-    // 注册文件引用：短名称 → 完整路径（用于 @filename 自动解析）
-    fun registerFileRef(shortName: String, fullPath: String) {
-        _state.update { it.copy(fileRefMap = it.fileRefMap + (shortName to fullPath)) }
+    // 添加文件附件：预读内容并存入状态（同名文件自动追加路径前缀区分）
+    fun attachFile(path: String, name: String) {
+        val refs = _state.value.attachedFileRefs
+        val exists = refs.any { it.path == path }
+        if (exists) return
+        val content = runCatching { fileManager?.readFileRaw(path) }.getOrNull()
+        if (content == null) return
+        // 同名文件自动去重：同名但路径不同时标记
+        val displayName = if (refs.any { it.name == name }) "${name} (${path.substringBeforeLast('/')})" else name
+        _state.update { it.copy(attachedFileRefs = refs + AttachedFile(name = displayName, path = path, content = content)) }
+    }
+
+    // 移除指定文件附件
+    fun detachFile(index: Int) {
+        _state.update { it.copy(attachedFileRefs = it.attachedFileRefs.toMutableList().also { list -> if (index in list.indices) list.removeAt(index) }) }
     }
 
     // 用量统计
@@ -371,32 +354,20 @@ class ChatViewModel(
         return ctx.toString()
     }
 
-    // 解析 @filepath 引用，替换为文件内容
-    private fun resolveFileReferences(text: String): String {
-        val refMap = _state.value.fileRefMap
-        val regex = Regex("@([^\\s@]+)")
-        val resolved = StringBuilder()
-        var lastEnd = 0
-        regex.findAll(text).forEach { match ->
-            resolved.append(text.substring(lastEnd, match.range.first))
-            val name = match.groupValues[1]
-            val path = refMap[name] ?: name
-            val content = runCatching { fileManager.readFileRaw(path) }.getOrNull()
-            if (content != null && content.isNotEmpty()) {
-                resolved.appendLine()
-                resolved.appendLine("[文件: ${refMap[name] ?: name}]")
-                resolved.appendLine("```${name.substringAfterLast('.')}")
-                resolved.append(content)
-                if (!content.endsWith('\n')) resolved.appendLine()
-                resolved.appendLine("```")
-            } else {
-                resolved.append(match.value)
-            }
-            lastEnd = match.range.last + 1
+    // 构建文件附件内容块（从 attachedFileRefs 中读取预存的文件内容）
+    private fun buildFileAttachmentBlock(): String {
+        val refs = _state.value.attachedFileRefs
+        if (refs.isEmpty()) return ""
+        val block = StringBuilder()
+        refs.forEach { f ->
+            block.appendLine()
+            block.appendLine("[文件: ${f.path}]")
+            block.appendLine("```${f.name.substringAfterLast('.')}")
+            block.append(f.content)
+            if (!f.content.endsWith('\n')) block.appendLine()
+            block.appendLine("```")
         }
-        if (lastEnd == 0) return text
-        resolved.append(text.substring(lastEnd))
-        return resolved.toString()
+        return block.toString()
     }
 
     fun cancelGeneration() {
@@ -484,7 +455,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
 
         sb.append("## 编辑器上下文\n")
         sb.append("每次用户消息前注入 [当前编辑器上下文]，包含活动文件路径、光标行号、已打开文件列表。\n")
-        sb.append("用户消息中的 `@filepath` 引用会自动解析为该文件的完整内容（如: @app/src/main.kt）。\n")
+        sb.append("用户附加的文件内容会以 [文件: path] ```...``` 块拼接在消息末尾。\n")
         sb.append("文件路径相对于项目根目录，如: app/src/main/kotlin/com/example/MainActivity.kt\n\n")
         val deepThink = runBlocking { preferencesRepo.deepThinkEnabled.first() }
         if (deepThink) {
@@ -529,16 +500,88 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         sb.append("任务完成后直接输出最终回答，不要再输出 JSON 工具调用。\n\n")
         val userName = runBlocking { preferencesRepo.userName.first() }
         if (userName.isNotBlank()) sb.append("\n用户: $userName")
-        val rules = runBlocking { preferencesRepo.rules.first() }
-        if (rules.isNotEmpty()) {
-            sb.append("\n\n用户规则:")
-            rules.forEach { r -> sb.append("\n- ${r.name}: ${r.content}") }
-            sb.append("\n严格遵守以上规则。")
+
+        val allRules = runBlocking { preferencesRepo.rules.first() }
+        val globalRules = allRules.filter { it.type == RuleType.Global }
+        val projectRules = allRules.filter { it.type == RuleType.Project }
+        if (globalRules.isNotEmpty()) {
+            sb.append("\n\n## 全局规则（必须遵守）")
+            globalRules.forEach { r -> sb.append("\n- ${r.name}: ${r.content}") }
         }
+        if (projectRules.isNotEmpty()) {
+            sb.append("\n\n## 项目规则（优先级高于全局规则）")
+            projectRules.forEach { r -> sb.append("\n- ${r.name}: ${r.content}") }
+        }
+        if (allRules.isNotEmpty()) sb.append("\n严格遵守以上所有规则。")
+
+        val skills = runBlocking { preferencesRepo.skills.first() }
+        val enabledSkills = skills.filter { it.enabled }
+        if (enabledSkills.isNotEmpty()) {
+            sb.append("\n\n## 已启用技能")
+            enabledSkills.forEach { s ->
+                sb.append("\n\n### ${s.name}")
+                if (s.description.isNotBlank()) sb.append("\n${s.description}")
+                if (s.prompt.isNotBlank()) sb.append("\n${s.prompt}")
+            }
+        }
+
         return sb.toString()
     }
 
     // ---- 图像支持：URI 转临时文件 ----
+    // ---- 上下文压缩 ----
+    companion object {
+        private const val MAX_CONTEXT_TOKENS = 128000
+        private const val COMPRESS_THRESHOLD = 96000  // 75% 时触发
+        private const val KEEP_EXCHANGES = 3          // 保留最后 3 轮用户↔模型交换
+    }
+
+    // 粗略 token 估算
+    private fun estimateTokens(text: String): Int = text.length / 2
+
+    // 计算当前消息列表的 token 估计值
+    private fun estimateContextTokens(messages: List<ChatMessage>): Int =
+        messages.sumOf { estimateTokens(it.content) }
+
+    // 压缩消息列表：丢弃早期消息，仅保留最后 KEEP_EXCHANGES 轮交换
+    private fun compressMessages(messages: List<ChatMessage>): List<ChatMessage> {
+        val totalTokens = estimateContextTokens(messages)
+        if (totalTokens <= COMPRESS_THRESHOLD) return messages
+
+        // 从后往前收集，保留最后 KEEP_EXCHANGES 个用户消息及其之后的完整响应
+        val kept = mutableListOf<ChatMessage>()
+        var userCount = 0
+        for (i in messages.indices.reversed()) {
+            kept.add(0, messages[i])
+            if (messages[i].role == ChatRole.User) {
+                userCount++
+                if (userCount >= KEEP_EXCHANGES) break
+            }
+        }
+
+        val removedTokens = totalTokens - estimateContextTokens(kept)
+        _state.update {
+            it.copy(
+                contextCompressedTokens = it.contextCompressedTokens + removedTokens,
+                contextCompressedCount = it.contextCompressedCount + 1,
+                isContextCompressed = true,
+            )
+        }
+
+        // 在压缩后的消息前插入压缩说明
+        val summaryMsg = ChatMessage(
+            role = ChatRole.Model,
+            content = "[上下文压缩] 已移除早期 ${removedTokens / 1000}k tokens，保留最近 $KEEP_EXCHANGES 轮对话。",
+            timestamp = kept.firstOrNull()?.timestamp ?: System.currentTimeMillis(),
+        )
+        return listOf(summaryMsg) + kept
+    }
+
+    // 重置 LiteRT Conversation 以节省上下文（用于本地模型路径）
+    private fun resetConversation() {
+        activeConversation = null
+    }
+
 
     private fun uriToTempFile(ctx: android.content.Context, uri: Uri): File? = try {
         val input = ctx.contentResolver.openInputStream(uri) ?: return null
@@ -616,8 +659,8 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
     }
 
     private suspend fun processWithJsonTools(
-        text: String, msgId: String, taskId: String,
-        ctx: Application, notif: com.template.jh.data.model.NotificationSettings,
+        text: String, msgId: String,
+        ctx: Application,
         imagePaths: List<String> = emptyList(),
     ) {
         val conv = activeConversation ?: return
@@ -651,8 +694,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                     FileLogger.e("ChatViewModel", "sendMessageAsync failed: ${t.message}", t)
                     updateModelMessage(currentMsgId, "\n\n[错误: ${t.message}]", false)
                     finalizeModelMessage(currentMsgId)
-                    updateTaskStatus(taskId, TaskStatus.Failed)
-                    ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, notif)
                 }.collect { chunk ->
                     val c = chunk.toString()
                     fullResponse.append(c)
@@ -677,8 +718,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                 FileLogger.e("ChatViewModel", "processWithJsonTools failed: ${e.message}", e)
                 updateModelMessage(currentMsgId, "\n\n[错误: ${e.message}]", false)
                 finalizeModelMessage(currentMsgId)
-                updateTaskStatus(taskId, TaskStatus.Failed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, notif)
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 return
             }
@@ -700,8 +739,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                     errorMessage = null,
                 ))
                 finalizeModelMessage(currentMsgId)
-                updateTaskStatus(taskId, TaskStatus.Completed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, notif)
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 return
             }
@@ -754,20 +791,18 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
     // ---- 云端模型工具循环（OpenAI 兼容 API）----
 
     private suspend fun processWithCloudTools(
-        text: String, msgId: String, taskId: String,
-        ctx: Application, notif: com.template.jh.data.model.NotificationSettings,
+        text: String, msgId: String,
+        ctx: Application,
     ) {
         val profile = _state.value.cloudModelProfiles.find { it.id == _state.value.activeCloudProfileId }
         if (profile == null) {
             updateModelMessage(msgId, "\n\n[错误: 未选择云端模型配置]", false)
             finalizeModelMessage(msgId)
-            updateTaskStatus(taskId, TaskStatus.Failed)
             return
         }
         if (profile.apiKey.isBlank()) {
             updateModelMessage(msgId, "\n\n[错误: 未配置 API Key]", false)
             finalizeModelMessage(msgId)
-            updateTaskStatus(taskId, TaskStatus.Failed)
             return
         }
         val cfg = CloudModelConfig(
@@ -781,7 +816,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         var cloudRounds = 0
         _state.update { it.copy(modelActivity = ModelActivity.Thinking, activityDetail = "") }
 
-        // 构建对话历史：...
+        // 构建对话历史：... 并在超出阈值时压缩
         val historyMessages = mutableListOf<ChatMessage>()
         for (msg in _state.value.messages) {
             if (msg.id == currentMsgId) continue
@@ -789,6 +824,10 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                 if (msg.content.isNotBlank() || msg.role == ChatRole.Model) historyMessages.add(msg)
             }
         }
+        // 上下文压缩：如果历史超出阈值，保留最近 KEEP_EXCHANGES 轮
+        val compressed = compressMessages(historyMessages)
+        historyMessages.clear()
+        historyMessages.addAll(compressed)
         // 注入编辑器上下文 + 当前用户消息
         val editorCtx = buildEditorContext()
         val userContent = if (editorCtx.isNotBlank()) "$editorCtx\n[用户消息]\n$text" else text
@@ -826,8 +865,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                 ))
                 updateModelMessage(currentMsgId, "\n\n[云端模型错误: ${errMsg}]", false)
                 finalizeModelMessage(currentMsgId)
-                updateTaskStatus(taskId, TaskStatus.Failed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskFailed, notif)
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 return
             }
@@ -846,8 +883,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             val response = fullResponse.toString().trim()
             if (response.isBlank()) {
                 finalizeModelMessage(currentMsgId)
-                updateTaskStatus(taskId, TaskStatus.Completed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, notif)
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 return
             }
@@ -857,8 +892,6 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                 // 最终回答：添加到历史并结束
                 historyMessages.add(ChatMessage(role = ChatRole.Model, content = response))
                 finalizeModelMessage(currentMsgId)
-                updateTaskStatus(taskId, TaskStatus.Completed)
-                ConversationNotifier.notify(ctx, NotificationEventType.TaskCompleted, notif)
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 return
             }
@@ -985,7 +1018,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
 
     fun clearMessages() {
         sendJob?.cancel()
-        _state.update { it.copy(messages = emptyList(), inputText = "", taskList = emptyList()) }
+        _state.update { it.copy(messages = emptyList(), inputText = "") }
         viewModelScope.launch(Dispatchers.IO) { closeConversation() }
     }
 
@@ -1006,8 +1039,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         // 立即重置 UI 状态（同步，主线程，无阻塞）
         _state.update {
             it.copy(messages = emptyList(), inputText = "", isLoading = false,
-                conversations = updatedConversations, activeConversationId = null,
-                taskList = emptyList())
+                conversations = updatedConversations, activeConversationId = null)
         }
         // 后台清理：关闭旧会话（可能阻塞）+ 持久化
         viewModelScope.launch(Dispatchers.IO) {
@@ -1052,10 +1084,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             val updatedMessages = state.messages.map { msg ->
                 if (msg.id == msgId) {
                     val newContent = if (append) msg.content + chunk else chunk
-                    // 解析任务清单并更新子任务
-                    val updatedMsg = msg.copy(content = newContent, isStreaming = true)
-                    parseAndUpdateTaskList(newContent, state)
-                    updatedMsg
+                    msg.copy(content = newContent, isStreaming = true)
                 } else msg
             }
             state.copy(messages = updatedMessages)
@@ -1066,68 +1095,12 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
         _state.update { state ->
             val updatedMessages = state.messages.map { msg ->
                 if (msg.id == msgId) {
-                    // 检查是否包含任务完成标记
-                    if (ParsedTaskList.hasCompleteMarker(msg.content)) {
-                        markAllSubTasksCompleted()
-                    }
                     msg.copy(isStreaming = false)
                 } else msg
             }
             state.copy(messages = updatedMessages, isLoading = false)
         }
         saveCurrentToHistory()
-    }
-
-    // 解析任务清单并更新子任务状态
-    private fun parseAndUpdateTaskList(content: String, state: ChatUiState) {
-        val parsed = ParsedTaskList.parse(content) ?: return
-
-        // 找到当前正在运行的主任务
-        val activeTask = state.taskList.find { it.status == TaskStatus.Running && !it.isSubTask }
-            ?: state.taskList.lastOrNull { !it.isSubTask }
-
-        if (activeTask != null) {
-            val existingSubTasks = state.taskList.filter { it.parentTaskId == activeTask.id }
-
-            // 如果子任务数量不同，需要重新创建
-            if (existingSubTasks.size != parsed.tasks.size) {
-                val newSubTasks = parsed.tasks.mapIndexed { index, taskDesc ->
-                    TaskItem(
-                        title = taskDesc,
-                        status = if (index < parsed.completedCount) TaskStatus.Completed else TaskStatus.Pending,
-                        isSubTask = true,
-                        parentTaskId = activeTask.id,
-                        order = index
-                    )
-                }
-                _state.update { s ->
-                    s.copy(taskList = s.taskList.filter { it.parentTaskId != activeTask.id } + newSubTasks)
-                }
-            } else {
-                // 更新现有子任务的完成状态
-                val updatedSubTasks = existingSubTasks.mapIndexed { index, task ->
-                    val shouldBeCompleted = index < parsed.completedCount
-                    if (shouldBeCompleted && task.status != TaskStatus.Completed) {
-                        task.copy(status = TaskStatus.Completed)
-                    } else task
-                }
-                _state.update { s ->
-                    s.copy(taskList = s.taskList.filter { it.parentTaskId != activeTask.id } + updatedSubTasks)
-                }
-            }
-        }
-    }
-
-    // 标记所有子任务为已完成
-    private fun markAllSubTasksCompleted() {
-        _state.update { state ->
-            val updatedTasks = state.taskList.map { task ->
-                if (task.isSubTask && task.status != TaskStatus.Completed) {
-                    task.copy(status = TaskStatus.Completed)
-                } else task
-            }
-            state.copy(taskList = updatedTasks)
-        }
     }
 
     private fun saveCurrentToHistory() {

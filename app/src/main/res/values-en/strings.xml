@@ -168,17 +168,5 @@
     <string name="mcp_command">Command/Address</string>
     <string name="mcp_args">Arguments</string>
 
-    <!-- Notification -->
-    <string name="notif_title">Task Flow Notifications</string>
-    <string name="notif_desc">Configure notification behavior for task events</string>
-    <string name="notif_task_completed">Task Completed</string>
-    <string name="notif_task_failed">Exception Interrupted</string>
-    <string name="notif_waiting_auth">Waiting Authorization</string>
-    <string name="notif_sound">Sound</string>
-    <string name="notif_popup">Popup</string>
-
-    <!-- Task List -->
-    <string name="task_list_title">Task List</string>
-
 
 </resources>

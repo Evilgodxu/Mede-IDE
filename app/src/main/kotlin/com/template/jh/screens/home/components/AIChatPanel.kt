@@ -101,6 +101,7 @@ import com.template.jh.R
 import com.template.jh.core.ai.ChatMessage
 import com.template.jh.core.ai.ChatRole
 import com.template.jh.core.ai.ModelActivity
+import com.template.jh.core.ai.AttachedFile
 import com.template.jh.core.ai.ConversationEntry
 import com.template.jh.core.ai.EngineStatus
 import com.template.jh.core.analytics.UsageStats
@@ -219,8 +220,13 @@ fun AIChatPanel(
             onOptimize = { viewModel.optimizeInput() },
             attachedImageUris = state.attachedImageUris,
             onDetachImage = { viewModel.detachImage(it) },
+            attachedFileRefs = state.attachedFileRefs,
+            onDetachFile = { viewModel.detachFile(it) },
             contextUsedTokens = contextUsedTokens,
             contextMaxTokens = contextMaxTokens,
+            isContextCompressed = state.isContextCompressed,
+            contextCompressedTokens = state.contextCompressedTokens,
+            contextCompressedCount = state.contextCompressedCount,
             onContextInfoClick = { showContextInfoDialog = true },
             onImagePick = { imagePickerLauncher.launch("image/*") },
             usageStats = usageStats,
@@ -233,6 +239,9 @@ fun AIChatPanel(
                 maxTokens = contextMaxTokens,
                 messagesCount = state.messages.size,
                 openedFilePaths = state.openedFilePaths,
+                isContextCompressed = state.isContextCompressed,
+                contextCompressedTokens = state.contextCompressedTokens,
+                contextCompressedCount = state.contextCompressedCount,
                 onDismiss = { showContextInfoDialog = false },
             )
         }
@@ -588,10 +597,15 @@ private fun ChatInputBar(
     isLoading: Boolean, isOptimizing: Boolean, engineStatus: EngineStatus,
     onCancel: () -> Unit, onOptimize: () -> Unit,
     contextUsedTokens: Int = 0, contextMaxTokens: Int = 128000,
+    isContextCompressed: Boolean = false,
+    contextCompressedTokens: Int = 0,
+    contextCompressedCount: Int = 0,
     onContextInfoClick: () -> Unit = {},
     onImagePick: () -> Unit = {},
     attachedImageUris: List<android.net.Uri> = emptyList(),
     onDetachImage: (android.net.Uri) -> Unit = {},
+    attachedFileRefs: List<AttachedFile> = emptyList(),
+    onDetachFile: (Int) -> Unit = {},
     usageStats: UsageStats = UsageStats(),
     onUsageStatsClick: () -> Unit = {},
 ) {
@@ -604,6 +618,32 @@ private fun ChatInputBar(
             colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, focusedBorderColor = MaterialTheme.colorScheme.outlineVariant, unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
             textStyle = MaterialTheme.typography.bodySmall, maxLines = 3, enabled = engineStatus == EngineStatus.Ready,
         )
+
+        // 文件附件芯片
+        if (attachedFileRefs.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                attachedFileRefs.forEachIndexed { index, file ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.secondaryContainer)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(start = 8.dp, end = 2.dp, top = 2.dp, bottom = 2.dp)
+                        ) {
+                            Text("📄 ${file.name}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
+                            IconButton(onClick = { onDetachFile(index) }, Modifier.size(20.dp)) {
+                                Icon(Icons.Default.Close, "移除", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // 图片缩略图预览区
         if (attachedImageUris.isNotEmpty()) {
@@ -690,11 +730,17 @@ private fun ChatInputBar(
                     progress = { ratio },
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 1.5.dp,
-                    color = if (ratio < 0.5f) Color(0xFF4CAF50)
+                    color = if (isContextCompressed) Color(0xFF7B1FA2) // 紫色表示已压缩
+                        else if (ratio < 0.5f) Color(0xFF4CAF50)
                         else if (ratio < 0.8f) Color(0xFFFFA000)
                         else Color(0xFFE53935),
                     trackColor = Color(0xFFE0E0E0),
                 )
+                // 已压缩标记
+                if (isContextCompressed) {
+                    Text("C", style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(fontSize = 7.sp),
+                        color = Color(0xFF7B1FA2))
+                }
             }
 
             // 用量统计按钮
@@ -722,7 +768,7 @@ private fun ChatInputBar(
                     }
                 }
             } else {
-                val canSend = (inputText.isNotBlank() || attachedImageUris.isNotEmpty()) && engineStatus == EngineStatus.Ready
+                val canSend = (inputText.isNotBlank() || attachedImageUris.isNotEmpty() || attachedFileRefs.isNotEmpty()) && engineStatus == EngineStatus.Ready
                 IconButton(onClick = onSend, Modifier.size(32.dp), enabled = canSend) {
                     Icon(Icons.AutoMirrored.Filled.Send, stringResource(R.string.ai_send_message), Modifier.size(20.dp), tint = if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
                 }
@@ -996,6 +1042,9 @@ private fun ContextInfoDialog(
     maxTokens: Int,
     messagesCount: Int,
     openedFilePaths: List<String>,
+    isContextCompressed: Boolean = false,
+    contextCompressedTokens: Int = 0,
+    contextCompressedCount: Int = 0,
     onDismiss: () -> Unit,
 ) {
     val ratio = if (maxTokens > 0) (usedTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
@@ -1050,6 +1099,16 @@ private fun ContextInfoDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (isContextCompressed) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("上下文压缩", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium,
+                        color = Color(0xFF7B1FA2))
+                    Text(
+                        text = "已压缩 $contextCompressedCount 次，累计移除 ${contextCompressedTokens / 1000}k+ token",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (openedFilePaths.isNotEmpty()) {
                     HorizontalDivider()
                     Text("已打开文件", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)

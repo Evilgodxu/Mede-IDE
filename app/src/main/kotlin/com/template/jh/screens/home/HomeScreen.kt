@@ -238,15 +238,10 @@ fun HomeScreen(
                         }
                     },
                     onAddToConversation = { fileItem ->
-                        val current = chatViewModel.state.value.inputText
-                        val key = if (fileItem.relativePath.isNotEmpty()) fileItem.relativePath else fileItem.uri.toString()
-                        val label = if (fileItem.isDirectory) {
-                            "[目录: ${fileItem.name}]"
-                        } else {
-                            chatViewModel.registerFileRef(fileItem.name, key)
-                            "@${fileItem.name}"
+                        if (!fileItem.isDirectory) {
+                            val path = if (fileItem.relativePath.isNotEmpty()) fileItem.relativePath else fileItem.uri.toString()
+                            chatViewModel.attachFile(path, fileItem.name)
                         }
-                        chatViewModel.setInputText(if (current.isBlank()) label else "$current\n$label")
                     },
                     onOpenFileTab = { editorState.openFileTab(it) },
                 )
