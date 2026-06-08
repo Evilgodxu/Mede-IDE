@@ -6,6 +6,8 @@ import android.content.Context
 import android.graphics.Bitmap
 
 
+
+
 import androidx.compose.foundation.Image
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -371,9 +373,27 @@ private fun ConversationItemView(
 
 @Composable
 private fun UserItemView(item: DisplayItem) {
+    val context = LocalContext.current
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = Alignment.End) {
         Text("You", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+        // 图片缩略图
+        if (item.imageUris.isNotEmpty()) {
+            Row(
+                modifier = Modifier.widthIn(max = 360.dp).padding(horizontal = 10.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                item.imageUris.forEach { uri ->
+                    val thumbnail = remember(uri) { loadThumbnail(context, uri) }
+                    thumbnail?.let { bmp ->
+                        Image(bitmap = bmp.asImageBitmap(), contentDescription = null,
+                            modifier = Modifier.size(80.dp).clip(RoundedCornerShape(6.dp)),
+                            contentScale = ContentScale.Crop)
+                    } ?: Box(Modifier.size(80.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp)))
+                }
+            }
+        }
+        // 文本内容
         if (item.content.isNotEmpty()) {
             Text(
                 text = item.content,
@@ -540,11 +560,15 @@ private fun ChatInputBar(
                                 contentScale = ContentScale.Crop)
                         } ?: Box(Modifier.size(56.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp)))
                         // 删除按钮
-                        IconButton(
-                            onClick = { onDetachImage(uri) },
-                            modifier = Modifier.align(Alignment.TopEnd).size(18.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape),
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(16.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                                .clickable { onDetachImage(uri) },
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Icon(Icons.Default.Close, "移除", Modifier.size(12.dp), tint = Color.White)
+                            Icon(Icons.Default.Close, "移除", Modifier.size(10.dp), tint = Color.White)
                         }
                     }
                 }

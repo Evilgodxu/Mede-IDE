@@ -17,6 +17,7 @@ data class ChatMessage(
     val timestamp: Long = System.currentTimeMillis(),
     val isToolMessage: Boolean = false, // 是否为工具调用中间消息（JSON+执行结果）
     val toolCallId: String? = null,     // 工具调用 ID，用于 API role:tool 匹配
+    val imageUris: List<Uri> = emptyList(), // 附加图片 URI（用于聊天消息中显示缩略图）
 )
 
 enum class ChatRole { User, Model, System, Tool }

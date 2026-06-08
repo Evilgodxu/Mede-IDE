@@ -245,7 +245,7 @@ class ChatViewModel(
                 append("[已附加 ${images.size} 张图片]")
             }
         }
-        val userMsg = ChatMessage(role = ChatRole.User, content = userContent)
+        val userMsg = ChatMessage(role = ChatRole.User, content = userContent, imageUris = images)
         val modelMsgId = java.util.UUID.randomUUID().toString()
         val placeholderMsg = ChatMessage(id = modelMsgId, role = ChatRole.Model, content = "", isStreaming = true)
         _state.update { it.copy(messages = it.messages + userMsg + placeholderMsg, inputText = "", attachedImageUris = emptyList(), attachedFileRefs = emptyList(), isLoading = true) }
@@ -881,9 +881,9 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     /** 简单修复常见 JSON 错误：未转义引号、尾随逗号 */
     private fun repairJson(json: String): String {
         var r = json
-            // 移除尾随逗号
-            .replace(Regex(""",\s*}"""), "}")
-            .replace(Regex(""",\s*]"""), "]")
+            // 移除尾随逗号（Android ICU 不支持未转义的 } ] 等元字符）
+            .replace(Regex(""",\s*\}"""), "}")
+            .replace(Regex(""",\s*\]"""), "]")
             // 修复 key 的未转义引号（仅行内模式）
             .replace(Regex("""([{,])\s*(\w+)\s*:""")) { "${it.groupValues[1]}\"${it.groupValues[2]}\":" }
         return r

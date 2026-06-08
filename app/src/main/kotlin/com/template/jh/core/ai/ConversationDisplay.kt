@@ -9,6 +9,7 @@ data class DisplayItem(
     val thinkBlocks: List<String>, // 提取的 [think] 块内容
     val isStreaming: Boolean,
     val timestamp: Long,
+    val imageUris: List<android.net.Uri> = emptyList(), // 图片 URI 列表（仅 User 消息）
 )
 
 private val thinkRegex = Regex("""\[think\](.*?)\[/think]""", RegexOption.DOT_MATCHES_ALL)
@@ -76,6 +77,7 @@ fun toDisplayItems(messages: List<ChatMessage>): List<DisplayItem> {
                     thinkBlocks = emptyList(),
                     isStreaming = false,
                     timestamp = msg.timestamp,
+                    imageUris = msg.imageUris,
                 ))
                 i++
             }
