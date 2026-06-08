@@ -3,11 +3,10 @@ package com.template.jh.core.ai
 import android.net.Uri
 import java.util.UUID
 
-// 附件文件（用户添加到对话中的文件引用）
+// 附件文件（用户添加到对话中的文件引用，仅含路径信息，内容由模型通过 readFile 获取）
 data class AttachedFile(
     val name: String,
     val path: String,
-    val content: String,
 )
 
 // 聊天消息
@@ -39,7 +38,25 @@ enum class ModelActivity {
     GitOperation,
     ReadingLints,
     ExecutingTool,
-    ProcessingResult,
+    ProcessingResult;
+
+    fun displayLabel(): String = when (this) {
+        Idle -> ""
+        Thinking -> "思考中…"
+        ListingFiles -> "正在列出目录"
+        ReadingFile -> "正在读取文件"
+        WritingFile -> "正在写入文件"
+        EditingFile -> "正在修改文件"
+        DeletingFile -> "正在删除文件"
+        CreatingDirectory -> "正在创建目录"
+        SearchingCode -> "正在搜索代码"
+        SearchingWeb -> "正在搜索网络"
+        RunningCommand -> "正在执行命令"
+        GitOperation -> "正在执行 Git 操作"
+        ReadingLints -> "正在检查编译错误"
+        ExecutingTool -> "正在执行操作"
+        ProcessingResult -> "正在处理结果"
+    }
 }
 
 // 对话历史条目

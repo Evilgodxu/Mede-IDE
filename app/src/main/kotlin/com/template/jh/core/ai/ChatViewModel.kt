@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -48,6 +49,30 @@ class ChatViewModel(
 
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
+
+    // 导出对话展示条目（从原始消息转换，过滤工具调用/合并连续模型消息）
+    val displayItems: StateFlow<List<DisplayItem>> = _state.map { s ->
+        toDisplayItems(s.messages)
+    }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // 当前工具操作展示条目（实时显示正在执行的操作）
+    val currentToolActivity: StateFlow<DisplayItem?> = _state.map { s ->
+        if (s.isLoading && s.modelActivity != ModelActivity.Idle
+            && s.modelActivity != ModelActivity.Thinking
+            && s.modelActivity != ModelActivity.ProcessingResult) {
+            val label = s.modelActivity.displayLabel()
+            val detail = if (s.activityDetail.isNotBlank()) ": ${s.activityDetail}" else ""
+            DisplayItem(
+                id = "tool_activity",
+                role = DisplayRole.ToolActivity,
+                content = "$label$detail",
+                thinkBlocks = emptyList(),
+                isStreaming = true,
+                timestamp = System.currentTimeMillis(),
+            )
+        } else null
+    }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), null)
+
     val usageStats: StateFlow<UsageStats> = usageAnalyticsRepo.stats.stateIn(
         viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), UsageStats()
     )
@@ -209,11 +234,18 @@ class ChatViewModel(
             _state.update { it.copy(engineErrorMessage = "请先加载模型或启用云端模型") }
             return
         }
-        val fileContent = buildFileAttachmentBlock()
+        val fileBlock = buildFileAttachmentBlock()
         val userContent = buildString {
-            append(text)
-            if (fileContent.isNotBlank()) append(fileContent)
-            if (images.isNotEmpty()) append("\n[已附加 ${images.size} 张图片]")
+            appendLine("[用户请求]")
+            appendLine(text)
+            if (fileBlock.isNotBlank()) {
+                appendLine()
+                append(fileBlock)
+            }
+            if (images.isNotEmpty()) {
+                appendLine()
+                append("[已附加 ${images.size} 张图片]")
+            }
         }
         val userMsg = ChatMessage(role = ChatRole.User, content = userContent)
         val modelMsgId = java.util.UUID.randomUUID().toString()
@@ -304,16 +336,14 @@ class ChatViewModel(
         _state.update { it.copy(modifiedFilePaths = paths) }
     }
 
-    // 添加文件附件：预读内容并存入状态（同名文件自动追加路径前缀区分）
+    // 添加文件附件：仅记录路径，不预读内容
     fun attachFile(path: String, name: String) {
         val refs = _state.value.attachedFileRefs
         val exists = refs.any { it.path == path }
         if (exists) return
-        val content = runCatching { fileManager?.readFileRaw(path) }.getOrNull()
-        if (content == null) return
         // 同名文件自动去重：同名但路径不同时标记
         val displayName = if (refs.any { it.name == name }) "${name} (${path.substringBeforeLast('/')})" else name
-        _state.update { it.copy(attachedFileRefs = refs + AttachedFile(name = displayName, path = path, content = content)) }
+        _state.update { it.copy(attachedFileRefs = refs + AttachedFile(name = displayName, path = path)) }
     }
 
     // 移除指定文件附件
@@ -361,18 +391,14 @@ class ChatViewModel(
         return ctx.toString()
     }
 
-    // 构建文件附件内容块（从 attachedFileRefs 中读取预存的文件内容）
+    // 构建文件附件引用块（包含文件路径说明，模型需 readFile 获取内容）
     private fun buildFileAttachmentBlock(): String {
         val refs = _state.value.attachedFileRefs
         if (refs.isEmpty()) return ""
         val block = StringBuilder()
+        block.appendLine("[用户指定的文件（路径相对于项目根目录），使用 readFile 查看内容]")
         refs.forEach { f ->
-            block.appendLine()
-            block.appendLine("[文件: ${f.path}]")
-            block.appendLine("```${f.name.substringAfterLast('.')}")
-            block.append(f.content)
-            if (!f.content.endsWith('\n')) block.appendLine()
-            block.appendLine("```")
+            block.appendLine("  - ${f.path}")
         }
         return block.toString()
     }

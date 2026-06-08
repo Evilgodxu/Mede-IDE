@@ -14,6 +14,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -103,6 +104,8 @@ import com.template.jh.core.ai.ChatRole
 import com.template.jh.core.ai.ModelActivity
 import com.template.jh.core.ai.AttachedFile
 import com.template.jh.core.ai.ConversationEntry
+import com.template.jh.core.ai.DisplayItem
+import com.template.jh.core.ai.DisplayRole
 import com.template.jh.core.ai.EngineStatus
 import com.template.jh.core.analytics.UsageStats
 
@@ -115,42 +118,42 @@ fun AIChatPanel(
     viewModel: com.template.jh.core.ai.ChatViewModel,
 ) {
     val state by viewModel.state.collectAsState()
+    val displayItems by viewModel.displayItems.collectAsState()
+    val currentToolActivity by viewModel.currentToolActivity.collectAsState()
     val listState = rememberLazyListState()
 
-    // 计算最后一条消息的内容长度，用于触发流式滚动
-    val lastMessageContentLength by remember(state.messages.size) {
+    // 展示条目总数（含工具操作指示）
+    val totalDisplayCount = displayItems.size + (if (currentToolActivity != null) 1 else 0)
+
+    // 最后一条展示条目内容长度，用于触发流式滚动
+    val lastItemContentLength by remember(totalDisplayCount) {
         derivedStateOf {
-            state.messages.lastOrNull()?.content?.length ?: 0
+            displayItems.lastOrNull()?.content?.length ?: 0
         }
     }
 
-    // 是否用户手动向上滚动（远离底部），此时不自动回滚
     var userScrolledUp by remember { mutableStateOf(false) }
 
-    // 监听用户滚动方向，检测手动向上滚动
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex }
             .collect { firstIdx ->
                 if (!state.isLoading) return@collect
-                val lastIdx = state.messages.size - 1
+                val lastIdx = totalDisplayCount - 1
                 val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
                 userScrolledUp = lastVisible < lastIdx - 1
             }
     }
 
-    // 消息数量变化时立即滚到底（不延时）
-    LaunchedEffect(state.messages.size) {
-        if (state.messages.isEmpty()) return@LaunchedEffect
-        val lastIndex = state.messages.size - 1
-        // 不延迟：新消息出现时立即滚动
+    LaunchedEffect(totalDisplayCount) {
+        if (totalDisplayCount == 0) return@LaunchedEffect
+        val lastIndex = totalDisplayCount - 1
         listState.scrollToItem(lastIndex)
     }
 
-    // 流式生成时持续滚动到底（无延迟，即时跟随）
-    LaunchedEffect(lastMessageContentLength, state.isLoading) {
-        if (state.messages.isEmpty() || !state.isLoading) return@LaunchedEffect
-        if (userScrolledUp) return@LaunchedEffect // 用户手动查看上文时不强制回滚
-        val lastIndex = state.messages.size - 1
+    LaunchedEffect(lastItemContentLength, state.isLoading) {
+        if (totalDisplayCount == 0 || !state.isLoading) return@LaunchedEffect
+        if (userScrolledUp) return@LaunchedEffect
+        val lastIndex = totalDisplayCount - 1
         try { listState.scrollToItem(lastIndex) } catch (_: Exception) {}
     }
 
@@ -169,13 +172,6 @@ fun AIChatPanel(
 
         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-        // 模型活动状态指示
-        ModelActivityIndicator(
-            activity = state.modelActivity,
-            detail = state.activityDetail,
-            visible = state.isLoading && state.modelActivity != ModelActivity.Idle,
-        )
-
         if (state.messages.isEmpty() && state.engineStatus != EngineStatus.Loading) {
             Box(modifier = Modifier.weight(1f)) { EmptyChatState(state.engineStatus) }
         } else {
@@ -183,17 +179,20 @@ fun AIChatPanel(
                 modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp),
                 state = listState, verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(state.messages, key = { it.id }) { msg ->
-                    if (msg.isToolMessage) {
-                        ToolCallBubble(message = msg)
+                items(displayItems, key = { it.id }) { item ->
+                    ConversationItemView(
+                        item = item,
+                        isActiveStreaming = item.isStreaming && item.role == DisplayRole.Model,
+                    )
+                }
+                // 工具操作指示器（固定在列表底部）
+                item(key = "tool_activity") {
+                    if (currentToolActivity != null) {
+                        ToolActivityView(item = currentToolActivity!!)
                     } else {
-                        ChatBubble(
-                            message = msg,
-                            isActiveStreaming = msg.isStreaming,
-                        )
+                        Spacer(Modifier.height(0.dp))
                     }
                 }
-                // 底部 Spacer 确保最后一条消息不被输入框遮挡
                 item { Spacer(Modifier.height(4.dp)) }
             }
         }
@@ -267,48 +266,22 @@ fun AIChatPanel(
     }
 }
 
-private fun ModelActivity.displayLabel(): String = when (this) {
-    ModelActivity.Idle -> ""
-    ModelActivity.Thinking -> "思考中…"
-    ModelActivity.ListingFiles -> "正在列出目录"
-    ModelActivity.ReadingFile -> "正在读取文件"
-    ModelActivity.WritingFile -> "正在写入文件"
-    ModelActivity.EditingFile -> "正在修改文件"
-    ModelActivity.DeletingFile -> "正在删除文件"
-    ModelActivity.CreatingDirectory -> "正在创建目录"
-    ModelActivity.SearchingCode -> "正在搜索代码"
-    ModelActivity.SearchingWeb -> "正在搜索网络"
-    ModelActivity.RunningCommand -> "正在执行命令"
-    ModelActivity.GitOperation -> "正在执行 Git 操作"
-    ModelActivity.ReadingLints -> "正在检查编译错误"
-    ModelActivity.ExecutingTool -> "正在执行操作"
-    ModelActivity.ProcessingResult -> "正在处理结果"
-}
-
 @Composable
-private fun ModelActivityIndicator(
-    activity: ModelActivity,
-    detail: String,
-    visible: Boolean,
-) {
-    if (!visible) return
-    val label = activity.displayLabel()
-    if (label.isEmpty()) return
+private fun ToolActivityView(item: DisplayItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f))
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         CircularProgressIndicator(
-            modifier = Modifier.size(12.dp),
-            strokeWidth = 1.5.dp,
+            modifier = Modifier.size(14.dp),
+            strokeWidth = 2.dp,
             color = MaterialTheme.colorScheme.primary,
         )
         Text(
-            text = if (detail.isNotBlank()) "$label: $detail" else label,
+            text = item.content,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.primary,
             maxLines = 1,
@@ -386,43 +359,70 @@ private fun EmptyChatState(engineStatus: EngineStatus) {
 }
 
 @Composable
-private fun ChatBubble(
-    message: ChatMessage,
+private fun ConversationItemView(
+    item: DisplayItem,
     isActiveStreaming: Boolean = false,
 ) {
-    val isUser = message.role == ChatRole.User
+    when (item.role) {
+        DisplayRole.User -> UserItemView(item)
+        DisplayRole.Model -> ModelItemView(item, isActiveStreaming)
+        DisplayRole.ToolActivity -> { /* 由 ToolActivityView 单独渲染 */ }
+    }
+}
+
+@Composable
+private fun UserItemView(item: DisplayItem) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = Alignment.End) {
+        Text("You", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+        if (item.content.isNotEmpty()) {
+            Text(
+                text = item.content,
+                modifier = Modifier
+                    .widthIn(max = 360.dp)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModelItemView(
+    item: DisplayItem,
+    isActiveStreaming: Boolean,
+) {
     val context = LocalContext.current
-
-    // 提取 [think]...[/think] 块
     val thinkRegex = remember { Regex("""\[think\](.*?)\[/think]""", RegexOption.DOT_MATCHES_ALL) }
-    val thinks = remember(message.content) { thinkRegex.findAll(message.content).map { it.groupValues[1].trim() }.toList() }
-    val displayContent = remember(message.content) { message.content.replace(thinkRegex, "").trim() }
 
-    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
-        Text(if (isUser) "You" else "AI", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = Alignment.Start) {
+        Text("AI", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
 
-        // 可折叠思考块
-        var anyThinkExpanded by remember { mutableStateOf(false) }
-        if (thinks.isNotEmpty()) {
+        // 思考块：可折叠展示
+        if (item.thinkBlocks.isNotEmpty()) {
+            var thinkExpanded by remember { mutableStateOf(false) }
             Box(
                 modifier = Modifier
                     .widthIn(max = 360.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                    .clickable { anyThinkExpanded = !anyThinkExpanded }
+                    .clickable { thinkExpanded = !thinkExpanded }
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("思考", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(4.dp))
-                        Text(if (anyThinkExpanded) "▼" else "▶", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (thinkExpanded) "▼" else "▶", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    if (anyThinkExpanded) {
+                    if (thinkExpanded) {
                         Spacer(Modifier.height(4.dp))
-                        thinks.forEachIndexed { i, thinkContent ->
+                        item.thinkBlocks.forEachIndexed { i, thinkContent ->
                             if (i > 0) Spacer(Modifier.height(6.dp))
-                            Text(thinkContent, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                            Text(thinkContent, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                         }
                     }
                 }
@@ -430,8 +430,8 @@ private fun ChatBubble(
             Spacer(Modifier.height(4.dp))
         }
 
-        // 内容（无气泡包裹，纯文本行）
-        if (displayContent.isNotEmpty()) {
+        // 回复内容
+        if (item.content.isNotEmpty()) {
             Row(
                 modifier = Modifier
                     .widthIn(max = 360.dp)
@@ -439,161 +439,17 @@ private fun ChatBubble(
                         onClick = {},
                         onLongClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("消息内容", message.content))
+                            clipboard.setPrimaryClip(ClipData.newPlainText("消息内容", item.content))
                         },
                     )
                     .padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                Text(displayContent, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f, fill = false))
+                Text(item.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f, fill = false))
                 if (isActiveStreaming) StreamingCursor()
             }
         }
-    }
-}
-
-/**
- * 工具调用气泡：显示模型推理文本 + 工具名 + 可折叠的工具结果
- */
-@Composable
-private fun ToolCallBubble(message: ChatMessage) {
-    val context = LocalContext.current
-    val (prefixText, toolName, toolResult) = remember(message.content) { parseToolMessage(message.content) }
-    var showResult by remember { mutableStateOf(false) }
-
-    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = Alignment.Start) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)) {
-            Text("AI", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.width(4.dp))
-            Box(
-                Modifier
-                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 1.dp)
-            ) {
-                Text("🛠 工具调用", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-            }
-        }
-
-        if (prefixText.isNotBlank()) {
-            Text(
-                text = prefixText,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .combinedClickable(
-                        onClick = {},
-                        onLongClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("消息内容", message.content))
-                        },
-                    )
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-
-        if (toolName.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
-            Box(
-                modifier = Modifier
-                    .widthIn(max = 360.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f))
-                    .clickable { showResult = !showResult }
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("⚡ $toolName", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (showResult) "▼" else "▶", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                    if (!showResult) Text(" 结果", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.6f))
-                }
-            }
-
-            if (showResult && toolResult.isNotBlank()) {
-                Spacer(Modifier.height(2.dp))
-                val truncated = if (toolResult.length > 500) toolResult.take(500) + "\n..." else toolResult
-                Text(
-                    text = truncated,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-// 检查文本中的指定位置是否在 [think]...[/think] 块内部
-private fun isInsideThinkBlock(text: String, pos: Int): Boolean {
-    val before = text.substring(0, pos)
-    val lastThinkOpen = before.lastIndexOf("[think]")
-    val lastThinkClose = before.lastIndexOf("[/think]")
-    return lastThinkOpen >= 0 && lastThinkOpen > lastThinkClose
-}
-
-// 检查 JSON 起始位置是否为独立行（行首仅空白 → `{`）
-private fun isStandaloneJson(text: String, pos: Int): Boolean {
-    val lineStart = text.lastIndexOf('\n', pos - 1) + 1
-    for (i in lineStart until pos) {
-        if (text[i] != ' ' && text[i] != '\t') return false
-    }
-    return true
-}
-
-/**
- * 解析工具消息内容，分离前缀文本、工具名、工具结果。
- */
-private fun parseToolMessage(content: String): Triple<String, String, String> {
-    // 1. 先过滤掉所有 [think]...[/think] 块（思考过程不属于工具调用内容）
-    val thinkRegex = Regex("""\[think\].*?\[/think]""", RegexOption.DOT_MATCHES_ALL)
-    val filteredContent = content.replace(thinkRegex, "").trim()
-
-    // 2. 在过滤后的内容中查找工具调用
-    var searchStart = 0
-    while (true) {
-        val jsonStart = filteredContent.indexOf("""{"tool_name":""", searchStart)
-        if (jsonStart < 0) {
-            val markerIdx = filteredContent.indexOf("[工具调用:")
-            if (markerIdx >= 0) {
-                val afterMarker = filteredContent.substring(markerIdx + "[工具调用:".length).trimStart()
-                val endIdx = afterMarker.indexOf(']')
-                val name = if (endIdx >= 0) afterMarker.substring(0, endIdx).trim() else ""
-                val resultPart = if (endIdx >= 0) afterMarker.substring(endIdx + 1).trim() else filteredContent
-                return Triple("", name, resultPart.removePrefix("\n").removePrefix("\n"))
-            }
-            return Triple("", "", "")
-        }
-
-        // 检查是否为独立行 JSON（避免嵌入文本中的示例 JSON）
-        if (!isStandaloneJson(filteredContent, jsonStart)) {
-            searchStart = jsonStart + 1
-            continue
-        }
-
-        val prefix = filteredContent.substring(0, jsonStart).trim()
-        val afterJsonStart = filteredContent.substring(jsonStart)
-
-        var depth = 0
-        var jsonEnd = -1
-        for (i in afterJsonStart.indices) {
-            when (afterJsonStart[i]) {
-                '{' -> depth++
-                '}' -> { depth--; if (depth == 0) { jsonEnd = jsonStart + i; break } }
-            }
-        }
-        if (jsonEnd < 0) return Triple(prefix, "", "")
-
-        val jsonPart = filteredContent.substring(jsonStart, jsonEnd + 1)
-        val name = try {
-            org.json.JSONObject(jsonPart).optString("tool_name", "")
-        } catch (_: Exception) { "" }
-
-        val resultPart = filteredContent.substring(jsonEnd + 1).trim().removePrefix("\n").removePrefix("\n")
-
-        return Triple(prefix, name, resultPart)
     }
 }
 
@@ -643,10 +499,11 @@ private fun ChatInputBar(
             textStyle = MaterialTheme.typography.bodySmall, maxLines = 3, enabled = engineStatus == EngineStatus.Ready,
         )
 
-        // 文件附件芯片
+        // 文件附件芯片（支持水平滚动）
         if (attachedFileRefs.isNotEmpty()) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 attachedFileRefs.forEachIndexed { index, file ->

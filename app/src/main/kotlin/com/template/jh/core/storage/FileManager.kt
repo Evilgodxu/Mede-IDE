@@ -53,18 +53,18 @@ class FileManager(private val context: Context) {
      */
     private fun resolvePath(relativePath: String): DocumentFile? {
         val root = rootDocFile ?: return null
-        if (relativePath.isBlank()) return root
+        val path = relativePath.trim()
+        if (path.isBlank()) return root
 
         return try {
             var current = root
-            for (segment in relativePath.trim('/').split('/')) {
-                if (segment.isEmpty()) continue
-                // 标准 findFile
-                var found = current.findFile(segment)
-                // findFile 失败时降级：遍历所有子文件按名称匹配（SF 常见兼容问题）
+            for (segment in path.trim('/').split('/')) {
+                val seg = segment.trim()
+                if (seg.isEmpty()) continue
+                var found = current.findFile(seg)
                 if (found == null) {
                     found = current.listFiles().firstOrNull {
-                        it.name.equals(segment, ignoreCase = true)
+                        it.name?.trim().equals(seg, ignoreCase = true)
                     }
                 }
                 current = found ?: return null
@@ -234,7 +234,8 @@ class FileManager(private val context: Context) {
         val root = rootDocFile ?: return "No project folder is open."
 
         return try {
-            val trimmedPath = path.trim('/')
+            val cleanPath = path.trim()
+            val trimmedPath = cleanPath.trim('/')
             val fileName = trimmedPath.substringAfterLast('/')
             val parentPath = trimmedPath.substringBeforeLast('/', "")
 
@@ -245,8 +246,13 @@ class FileManager(private val context: Context) {
                 ensureDirectory(parentPath) ?: return "Failed to create parent directory: $parentPath"
             }
 
-            // 查找或创建文件
-            val existingFile = parentDoc.findFile(fileName)
+            // 查找或创建文件（兼容 findFile 失效的存储后端，兼容名称含空白）
+            var existingFile = parentDoc.findFile(fileName)
+            if (existingFile == null) {
+                existingFile = parentDoc.listFiles().firstOrNull {
+                    it.name.equals(fileName.trim(), ignoreCase = true)
+                }
+            }
             val targetDoc = existingFile ?: parentDoc.createFile("application/octet-stream", fileName)
             ?: return "Failed to create file: $path"
 
@@ -331,14 +337,16 @@ class FileManager(private val context: Context) {
 
         return try {
             var current = root
-            for (part in relativePath.trim('/').split('/')) {
-                if (part.isEmpty()) continue
-                val child = current.findFile(part)
-                current = if (child != null) {
-                    child
-                } else {
-                    current.createDirectory(part) ?: return null
+            for (part in relativePath.trim().trim('/').split('/')) {
+                val seg = part.trim()
+                if (seg.isEmpty()) continue
+                var child = current.findFile(seg)
+                if (child == null) {
+                    child = current.listFiles().firstOrNull {
+                        it.name?.trim().equals(seg, ignoreCase = true)
+                    }
                 }
+                current = child ?: (current.createDirectory(seg) ?: return null)
             }
             current
         } catch (_: Exception) {
@@ -776,7 +784,7 @@ class FileManager(private val context: Context) {
         val root = rootDocFile ?: return "No project folder is open."
 
         return try {
-            val trimmedPath = path.trim('/')
+            val trimmedPath = path.trim().trim('/')
             if (trimmedPath.isEmpty()) return "Cannot create root directory"
 
             // 检查是否已存在
