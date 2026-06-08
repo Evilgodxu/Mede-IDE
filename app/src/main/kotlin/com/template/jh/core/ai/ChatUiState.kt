@@ -103,6 +103,10 @@ data class ChatUiState(
     // 自动上下文
     val activeFilePath: String = "",
     val cursorLine: Int = 0,
+    // 已修改（未保存）文件路径列表
+    val modifiedFilePaths: List<String> = emptyList(),
+    // 文件引用映射：短名称 → 完整路径（用户输入 @filename 时自动解析）
+    val fileRefMap: Map<String, String> = emptyMap(),
     // 通知设置
     val notificationSettings: com.template.jh.data.model.NotificationSettings = com.template.jh.data.model.NotificationSettings(),
     // 附着的图片 URI 列表

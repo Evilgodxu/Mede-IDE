@@ -4,11 +4,10 @@ package com.template.jh.screens.home
 
 import android.app.Application
 import android.net.Uri
-import android.provider.DocumentsContract
-import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.template.jh.core.ai.FileOperationEvents
+import com.template.jh.core.storage.FileManager
 import com.template.jh.data.model.McpServer
 import com.template.jh.data.model.NotificationSettings
 import com.template.jh.data.model.Rule
@@ -18,20 +17,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// 主屏幕 ViewModel
+// 主屏幕 ViewModel - 文件浏览使用 FileManager（相对路径）
 class HomeViewModel(
     application: Application,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val fileManager: FileManager,
 ) : AndroidViewModel(application) {
-    // 文件夹状态
     private val _folderState = MutableStateFlow(FolderState())
-
     private val _state = MutableStateFlow(HomeUiState(isLoading = true))
     val state: StateFlow<HomeUiState> = _state
 
@@ -59,11 +56,8 @@ class HomeViewModel(
                 )
             }.collect { _state.value = it }
         }
-        // 监听文件操作事件，自动刷新根目录
         viewModelScope.launch {
             FileOperationEvents.events.collect { event ->
-                android.util.Log.d("HomeViewModel", "FileOperationEvent: ${event.operation} ${event.path}")
-                // create / overwrite / delete 操作需要刷新根目录
                 if (event.operation in listOf("create", "overwrite", "delete")) {
                     refreshRootFiles()
                 }
@@ -71,33 +65,20 @@ class HomeViewModel(
         }
     }
 
-    // 资源管理器文件列表
     private val _files = MutableStateFlow<List<FileItem>>(emptyList())
     val files: StateFlow<List<FileItem>> = _files
 
-    // 从 SAF URI 打开文件夹并列出文件
+    // 打开文件夹 - 通过 FileManager 设置项目根
     fun openFolder(uri: Uri) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 try {
-                    // 持久化读写权限
-                    val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                            android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                    getApplication<Application>().contentResolver.takePersistableUriPermission(uri, takeFlags)
-
-                    val docFile = DocumentFile.fromTreeUri(getApplication(), uri)
-                        ?: return@withContext
-
-                    val folderName = docFile.name ?: "未命名文件夹"
-                    _folderState.value = FolderState(
-                        folderUri = uri,
-                        folderName = folderName,
-                    )
-
-                    // 通过 DocumentsContract 查询（兼容性优于 DocumentFile.listFiles）
-                    val items = queryChildren(uri)
-                    _files.value = items
-                } catch (e: Exception) {
+                    fileManager.setProjectUri(uri)
+                    val docFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(getApplication(), uri)
+                    val folderName = docFile?.name ?: "未命名文件夹"
+                    _folderState.value = FolderState(folderUri = uri, folderName = folderName)
+                    refreshRootFiles()
+                } catch (_: Exception) {
                     _folderState.value = FolderState()
                     _files.value = emptyList()
                 }
@@ -105,11 +86,12 @@ class HomeViewModel(
         }
     }
 
-    // 懒加载子目录（通过 DocumentsContract 查询，兼容各厂商 ROM）
-    fun listChildren(parentUri: Uri, onResult: (List<FileItem>) -> Unit) {
+    // 懒加载子目录 - 使用 FileManager.listFilesAsNodes
+    fun listChildren(parentRelativePath: String, onResult: (List<FileItem>) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val items = queryChildren(parentUri)
+                val nodes = fileManager.listFilesAsNodes(parentRelativePath)
+                val items = nodes.map { toFileItem(it) }
                 withContext(Dispatchers.Main) { onResult(items) }
             } catch (_: Exception) {
                 withContext(Dispatchers.Main) { onResult(emptyList()) }
@@ -117,38 +99,16 @@ class HomeViewModel(
         }
     }
 
-    // 通过 DocumentFile 查询子文件（参照 AmazeFileManager: fromTreeUri → findFile → listFiles）
-    private fun queryChildren(parentUri: Uri): List<FileItem> {
-        val treeUri = _folderState.value.folderUri ?: return emptyList()
-        val rootDocFile = DocumentFile.fromTreeUri(getApplication(), treeUri)
-            ?: return emptyList()
-
-        // 根目录直接 listFiles
-        if (parentUri == treeUri) {
-            val children = rootDocFile.listFiles()
-            return sortDocFiles(children).map { toFileItem(it) }
-        }
-
-        // 子目录：获取相对路径，从根逐级 findFile
-        val parentDocId = try { DocumentsContract.getDocumentId(parentUri) }
-            catch (_: Exception) { null } ?: return emptyList()
-        val rootDocId = try { DocumentsContract.getTreeDocumentId(treeUri) }
-            catch (_: Exception) { null } ?: return emptyList()
-
-        val relativePath = parentDocId.removePrefix(rootDocId).trimStart('/')
-        if (relativePath.isEmpty()) {
-            val children = rootDocFile.listFiles()
-            return sortDocFiles(children).map { toFileItem(it) }
-        }
-
-        var current = rootDocFile
-        for (segment in relativePath.split('/')) {
-            if (segment.isEmpty()) continue
-            current = current.findFile(segment) ?: return emptyList()
-        }
-
-        val children = current.listFiles()
-        return sortDocFiles(children).map { toFileItem(it) }
+    // 从根路径获取相对路径
+    private fun safUriToRelative(uri: Uri): String {
+        val rootUri = _folderState.value.folderUri ?: return ""
+        val rootDocId = try {
+            android.provider.DocumentsContract.getTreeDocumentId(rootUri)
+        } catch (_: Exception) { null } ?: return ""
+        val fileDocId = try {
+            android.provider.DocumentsContract.getDocumentId(uri)
+        } catch (_: Exception) { null } ?: return ""
+        return fileDocId.removePrefix(rootDocId.trimEnd('/') + "/")
     }
 
     val lastOpenedFolderUri: StateFlow<String?> = userPreferencesRepository.lastOpenedFolderUri
@@ -165,17 +125,42 @@ class HomeViewModel(
         viewModelScope.launch { userPreferencesRepository.setOpenedFileTabs(paths) }
     }
 
-    // 关闭文件夹
     fun closeFolder() {
+        fileManager.clearProjectUri()
         _folderState.value = FolderState()
         _files.value = emptyList()
     }
 
-    // 重命名文件/目录
+    // ---- 设置操作（被 SettingsPane 调用） ----
+    fun setThemeMode(mode: String) {
+        viewModelScope.launch { userPreferencesRepository.setThemeMode(mode) }
+    }
+
+    fun setLanguage(language: String) {
+        viewModelScope.launch { userPreferencesRepository.setLanguage(language) }
+    }
+
+    fun setRules(rules: List<Rule>) {
+        viewModelScope.launch { userPreferencesRepository.setRules(rules) }
+    }
+
+    fun setSkills(skills: List<SkillItem>) {
+        viewModelScope.launch { userPreferencesRepository.setSkills(skills) }
+    }
+
+    fun setMcpServers(servers: List<McpServer>) {
+        viewModelScope.launch { userPreferencesRepository.setMcpServers(servers) }
+    }
+
+    fun setNotificationSettings(settings: NotificationSettings) {
+        viewModelScope.launch { userPreferencesRepository.setNotificationSettings(settings) }
+    }
+
+    // 文件操作委托给 FileManager
     fun renameFile(uri: Uri, newName: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                DocumentsContract.renameDocument(
+                android.provider.DocumentsContract.renameDocument(
                     getApplication<Application>().contentResolver, uri, newName
                 )
                 refreshRootFiles()
@@ -183,25 +168,28 @@ class HomeViewModel(
         }
     }
 
-    // 删除文件/目录
     fun deleteFile(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                DocumentsContract.deleteDocument(
-                    getApplication<Application>().contentResolver, uri
-                )
+                val relativePath = safUriToRelative(uri)
+                if (relativePath.isNotEmpty()) {
+                    fileManager.deleteFile(relativePath)
+                } else {
+                    android.provider.DocumentsContract.deleteDocument(
+                        getApplication<Application>().contentResolver, uri
+                    )
+                }
                 refreshRootFiles()
             } catch (_: Exception) {}
         }
     }
 
-    // 在指定目录下创建文件或目录
     fun createFile(parentUri: Uri, name: String, isDirectory: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val mimeType = if (isDirectory) DocumentsContract.Document.MIME_TYPE_DIR
+                val mimeType = if (isDirectory) android.provider.DocumentsContract.Document.MIME_TYPE_DIR
                     else "application/octet-stream"
-                DocumentsContract.createDocument(
+                android.provider.DocumentsContract.createDocument(
                     getApplication<Application>().contentResolver, parentUri, mimeType, name
                 )
                 refreshRootFiles()
@@ -210,71 +198,17 @@ class HomeViewModel(
     }
 
     private fun refreshRootFiles() {
-        val treeUri = _folderState.value.folderUri ?: return
-        try {
-            val items = queryChildren(treeUri)
-            _files.value = items
-        } catch (_: Exception) {}
+        val nodes = fileManager.listFilesAsNodes("")
+        _files.value = nodes.map { toFileItem(it) }
     }
 
-    fun setThemeMode(mode: String) {
-        viewModelScope.launch {
-            userPreferencesRepository.setThemeMode(mode)
-        }
-    }
-
-    fun setLanguage(language: String) {
-        viewModelScope.launch {
-            userPreferencesRepository.setLanguage(language)
-        }
-    }
-
-    fun setRules(rules: List<Rule>) {
-        viewModelScope.launch {
-            userPreferencesRepository.setRules(rules)
-        }
-    }
-
-    fun setSkills(skills: List<SkillItem>) {
-        viewModelScope.launch {
-            userPreferencesRepository.setSkills(skills)
-        }
-    }
-
-    fun setMcpServers(servers: List<McpServer>) {
-        viewModelScope.launch {
-            userPreferencesRepository.setMcpServers(servers)
-        }
-    }
-
-    fun setNotificationSettings(settings: NotificationSettings) {
-        viewModelScope.launch {
-            userPreferencesRepository.setNotificationSettings(settings)
-        }
-    }
-
-    private fun sortDocFiles(files: Array<DocumentFile>): Array<DocumentFile> {
-        try {
-            files.sortWith(Comparator { a, b ->
-                val aDir = a.isDirectory
-                val bDir = b.isDirectory
-                if (aDir != bDir) {
-                    if (aDir) -1 else 1
-                } else {
-                    (a.name ?: "").lowercase().compareTo((b.name ?: "").lowercase())
-                }
-            })
-        } catch (_: Exception) {}
-        return files
-    }
-
-    private fun toFileItem(doc: DocumentFile): FileItem {
+    private fun toFileItem(node: com.template.jh.core.storage.FileNode): FileItem {
         return FileItem(
-            name = doc.name ?: "未知",
-            uri = doc.uri,
-            isDirectory = doc.isDirectory,
-            size = doc.length(),
-            lastModified = doc.lastModified(),
+            name = node.name,
+            uri = node.uri,
+            isDirectory = node.isDirectory,
+            relativePath = node.path,
+            size = node.size,
         )
     }
 }

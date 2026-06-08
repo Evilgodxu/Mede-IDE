@@ -242,9 +242,10 @@ class ChatViewModel(
             _state.update { it.copy(engineErrorMessage = "请先加载模型或启用云端模型") }
             return
         }
+        val resolvedText = resolveFileReferences(text)
         val userContent = if (images.isNotEmpty()) {
-            if (text.isNotBlank()) "$text\n[已附加 ${images.size} 张图片]" else "[已附加 ${images.size} 张图片]"
-        } else text
+            if (resolvedText.isNotBlank()) "$resolvedText\n[已附加 ${images.size} 张图片]" else "[已附加 ${images.size} 张图片]"
+        } else resolvedText
         val userMsg = ChatMessage(role = ChatRole.User, content = userContent)
         val taskId = java.util.UUID.randomUUID().toString()
         val task = TaskItem(id = taskId, title = userContent.take(50), status = TaskStatus.Running, description = userContent)
@@ -342,7 +343,17 @@ class ChatViewModel(
         _state.update { it.copy(activeFilePath = path, cursorLine = cursorLine) }
     }
 
-    // 构建编辑器上下文块：当前活动文件 + 光标行 + 已打开文件列表
+    // 已修改文件路径列表
+    fun setModifiedFilePaths(paths: List<String>) {
+        _state.update { it.copy(modifiedFilePaths = paths) }
+    }
+
+    // 注册文件引用：短名称 → 完整路径（用于 @filename 自动解析）
+    fun registerFileRef(shortName: String, fullPath: String) {
+        _state.update { it.copy(fileRefMap = it.fileRefMap + (shortName to fullPath)) }
+    }
+
+    // 构建编辑器上下文块：当前活动文件 + 光标行 + 已打开文件列表 + 修改状态
     private fun buildEditorContext(): String {
         val s = _state.value
         val ctx = StringBuilder()
@@ -358,7 +369,8 @@ class ChatViewModel(
             ctx.appendLine("已打开文件:")
             s.openedFilePaths.take(10).forEach { path ->
                 val marker = if (path == s.activeFilePath) " ← 活动" else ""
-                ctx.appendLine("  - $path$marker")
+                val dirty = if (path in s.modifiedFilePaths) " [已修改]" else ""
+                ctx.appendLine("  - $path$marker$dirty")
             }
             if (s.openedFilePaths.size > 10) {
                 ctx.appendLine("  ... 及其他 ${s.openedFilePaths.size - 10} 个文件")
@@ -367,8 +379,37 @@ class ChatViewModel(
             ctx.appendLine("（未打开任何文件 — 使用 searchInFiles 搜索目标文件内容来定位）")
         }
         ctx.appendLine("文件路径相对于项目根目录。")
+        ctx.appendLine("标注 [已修改] 的文件存在未保存的更改，活动文件光标所在行号已标注。")
         if (ctx.length < 30) return ""
         return ctx.toString()
+    }
+
+    // 解析 @filepath 引用，替换为文件内容
+    private fun resolveFileReferences(text: String): String {
+        val refMap = _state.value.fileRefMap
+        val regex = Regex("@([^\\s@]+)")
+        val resolved = StringBuilder()
+        var lastEnd = 0
+        regex.findAll(text).forEach { match ->
+            resolved.append(text.substring(lastEnd, match.range.first))
+            val name = match.groupValues[1]
+            val path = refMap[name] ?: name
+            val content = runCatching { fileManager.readFileRaw(path) }.getOrNull()
+            if (content != null && content.isNotEmpty()) {
+                resolved.appendLine()
+                resolved.appendLine("[文件: ${refMap[name] ?: name}]")
+                resolved.appendLine("```${name.substringAfterLast('.')}")
+                resolved.append(content)
+                if (!content.endsWith('\n')) resolved.appendLine()
+                resolved.appendLine("```")
+            } else {
+                resolved.append(match.value)
+            }
+            lastEnd = match.range.last + 1
+        }
+        if (lastEnd == 0) return text
+        resolved.append(text.substring(lastEnd))
+        return resolved.toString()
     }
 
     fun cancelGeneration() {
@@ -456,6 +497,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
 
         sb.append("## 编辑器上下文\n")
         sb.append("每次用户消息前注入 [当前编辑器上下文]，包含活动文件路径、光标行号、已打开文件列表。\n")
+        sb.append("用户消息中的 `@filepath` 引用会自动解析为该文件的完整内容（如: @app/src/main.kt）。\n")
         sb.append("文件路径相对于项目根目录，如: app/src/main/kotlin/com/example/MainActivity.kt\n\n")
         val deepThink = runBlocking { preferencesRepo.deepThinkEnabled.first() }
         if (deepThink) {

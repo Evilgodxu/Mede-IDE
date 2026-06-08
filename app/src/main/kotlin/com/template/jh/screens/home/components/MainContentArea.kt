@@ -94,7 +94,7 @@ fun MainContentArea(
             // 当前文件路径指示
             if (activeTabIndex in tabs.indices) {
                 val activeTab = tabs[activeTabIndex]
-                if (activeTab.type == TabType.File) {
+                if (activeTab.type == TabType.File || activeTab.type == TabType.Image) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

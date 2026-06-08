@@ -78,6 +78,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.DisposableEffect
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.launch
 import androidx.compose.ui.Alignment
@@ -709,7 +712,7 @@ private fun loadThumbnail(context: Context, uri: android.net.Uri): Bitmap? = try
     }
 } catch (_: Exception) { null }
 
-// 语音输入按钮组件 - 使用 SpeechRecognizer 直接接管，不弹系统对话框
+// 语音输入按钮组件 - 使用 SpeechRecognizer，支持连续识别
 @Composable
 private fun VoiceInputButton(
     onTextRecognized: (String) -> Unit,
@@ -718,30 +721,37 @@ private fun VoiceInputButton(
     val context = LocalContext.current
     var isListening by remember { mutableStateOf(false) }
     var hasPermission by remember { mutableStateOf(false) }
+    val recognizerManager = remember { VoiceRecognizerManager(context) }
 
-    // 检查权限
     LaunchedEffect(Unit) {
         hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
-    // 权限请求启动器
+    // 清理
+    DisposableEffect(Unit) {
+        onDispose { recognizerManager.destroy() }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         hasPermission = isGranted
         if (isGranted) {
-            startDirectSpeech(context, onTextRecognized) { isListening = it }
+            recognizerManager.start(isListeningState = { isListening = it }, onTextRecognized = onTextRecognized)
         }
     }
 
     IconButton(
         onClick = {
-            if (!hasPermission) {
+            if (isListening) {
+                recognizerManager.stop()
+                isListening = false
+            } else if (!hasPermission) {
                 permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
             } else {
-                startDirectSpeech(context, onTextRecognized) { isListening = it }
+                recognizerManager.start(isListeningState = { isListening = it }, onTextRecognized = onTextRecognized)
             }
         },
         modifier = Modifier.size(28.dp),
@@ -768,50 +778,123 @@ private fun VoiceInputButton(
     }
 }
 
-/** 直接使用 SpeechRecognizer API，不弹系统对话框 */
-private fun startDirectSpeech(
-    context: Context,
-    onResult: (String) -> Unit,
-    onListeningStateChange: (Boolean) -> Unit,
-) {
-    try {
-        val recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(context)
-        val listener = object : android.speech.RecognitionListener {
-            override fun onReadyForSpeech(params: android.os.Bundle?) {
-                onListeningStateChange(true)
-            }
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {
-                onListeningStateChange(false)
-            }
-            override fun onError(error: Int) {
-                onListeningStateChange(false)
-                recognizer.destroy()
-            }
-            override fun onResults(results: android.os.Bundle?) {
-                onListeningStateChange(false)
-                val matches = results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
-                matches?.firstOrNull()?.let { text ->
-                    if (text.isNotBlank()) onResult(text)
+/**
+ * 语音识别管理器 - 支持连续识别、自动重连、静音超时控制
+ *
+ * 修复问题：
+ * 1. 设置静音超时延长参数（完整3000ms / 可能完成2000ms）
+ * 2. API 34+ 启用分段会话（SEGMENTED_SESSION）
+ * 3. ERROR_SPEECH_TIMEOUT / ERROR_NO_MATCH 自动重启
+ * 4. onPartialResults 实时显示中间结果
+ */
+private class VoiceRecognizerManager(private val context: Context) {
+    private var recognizer: android.speech.SpeechRecognizer? = null
+    private var isActive = false
+    private var accumulatedText = ""
+    private var onResultCallback: ((String) -> Unit)? = null
+    private var onListeningCallback: ((Boolean) -> Unit)? = null
+    private val handler = Handler(Looper.getMainLooper())
+
+    fun start(
+        isListeningState: (Boolean) -> Unit,
+        onTextRecognized: (String) -> Unit,
+    ) {
+        destroy()
+        isActive = true
+        accumulatedText = ""
+        onResultCallback = onTextRecognized
+        onListeningCallback = isListeningState
+        startRecognizer()
+    }
+
+    fun stop() {
+        isActive = false
+        recognizer?.stopListening()
+        recognizer?.destroy()
+        recognizer = null
+        onListeningCallback?.invoke(false)
+        if (accumulatedText.isNotBlank()) {
+            onResultCallback?.invoke(accumulatedText)
+            accumulatedText = ""
+        }
+    }
+
+    fun destroy() {
+        isActive = false
+        handler.removeCallbacksAndMessages(null)
+        recognizer?.destroy()
+        recognizer = null
+    }
+
+    private fun startRecognizer() {
+        if (!isActive) return
+        try {
+            val r = android.speech.SpeechRecognizer.createSpeechRecognizer(context)
+            recognizer = r
+            r.setRecognitionListener(object : android.speech.RecognitionListener {
+                override fun onReadyForSpeech(params: android.os.Bundle?) {
+                    onListeningCallback?.invoke(true)
                 }
-                recognizer.destroy()
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {
+                    onListeningCallback?.invoke(false)
+                }
+                override fun onError(error: Int) {
+                    android.util.Log.d("VoiceRecognizer", "onError: $error")
+                    onListeningCallback?.invoke(false)
+                    // ERROR_SPEECH_TIMEOUT (6) / ERROR_NO_MATCH (7): 静默重启
+                    if (isActive && (error == android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == android.speech.SpeechRecognizer.ERROR_NO_MATCH)) {
+                        handler.postDelayed({ startRecognizer() }, 300)
+                    } else {
+                        r.destroy()
+                        if (recognizer == r) recognizer = null
+                    }
+                }
+                override fun onResults(results: android.os.Bundle?) {
+                    val matches = results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                    val text = matches?.firstOrNull()
+                    if (text != null && text.isNotBlank()) {
+                        accumulatedText = if (accumulatedText.isBlank()) text else "$accumulatedText$text"
+                        onResultCallback?.invoke(accumulatedText)
+                        accumulatedText = ""
+                    }
+                    // 连续识别模式：不销毁，等待分段结果
+                    if (isActive) {
+                        onListeningCallback?.invoke(true)
+                    } else {
+                        r.destroy()
+                        if (recognizer == r) recognizer = null
+                    }
+                }
+                override fun onPartialResults(partialResults: android.os.Bundle?) {
+                    val matches = partialResults?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                    val text = matches?.firstOrNull()
+                    if (text != null && text.isNotBlank()) {
+                        onResultCallback?.invoke(text)
+                    }
+                }
+                override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+            })
+            val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
+                putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+                // 延长静音超时（毫秒）
+                putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000L)
+                putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+                // API 34+ 分段会话
+                if (android.os.Build.VERSION.SDK_INT >= 34) {
+                    putExtra("android.speech.extra.SEGMENTED_SESSION", true)
+                }
             }
-            override fun onPartialResults(partialResults: android.os.Bundle?) {}
-            override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+            r.startListening(intent)
+        } catch (e: Exception) {
+            onListeningCallback?.invoke(false)
+            android.widget.Toast.makeText(context, "语音识别不可用: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
         }
-        recognizer.setRecognitionListener(listener)
-        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
-            putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        }
-        recognizer.startListening(intent)
-    } catch (e: Exception) {
-        onListeningStateChange(false)
-        android.widget.Toast.makeText(context, "语音识别不可用: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
