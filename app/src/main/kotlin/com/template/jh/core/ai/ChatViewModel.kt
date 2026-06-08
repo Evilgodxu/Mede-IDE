@@ -261,7 +261,10 @@ class ChatViewModel(
                         if (tempFile != null) tempImagePaths.add(tempFile.absolutePath)
                     } catch (_: Exception) {}
                 }
-                if (isCloud) {
+                val useHybrid = isCloud && liteRTManager.isInitialized
+                if (useHybrid) {
+                    processHybrid(text, modelMsgId, ctx)
+                } else if (isCloud) {
                     processWithCloudTools(text, modelMsgId, ctx)
                 } else {
                     // LiteRT: 上下文超出阈值时压缩并重建 Conversation
@@ -579,6 +582,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         private const val SUMMARIZE_INTERVAL = 10              // 云端每 10 轮触发渐进式摘要
         private const val TOOL_TRUNCATE_LINES = 80             // 工具输出首尾各保留行数
         private const val UTFS_BYTES_PER_TOKEN = 3.5f          // UTF-8 字节/token 估算系数
+        private const val HYBRID_EXPLORE_MAX_ROUNDS = 5        // 混合模式本地探索最大轮次
     }
 
     // 根据配置获取上下文窗口大小
@@ -1281,6 +1285,222 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             FileLogger.e("ChatViewModel", "fallbackToAutoToolCalling failed: ${e.message}", e)
             null
         }
+    }
+
+    // === 混合模式：本地探索 + 云端推理 ===
+
+    /** 探索阶段允许的只读工具 */
+    private val exploreOnlyTools = setOf(
+        "listFiles", "readFile", "grep", "searchInFiles", "searchCodebase", "readLints"
+    )
+
+    /**
+     * 混合模式主流程：
+     * Phase 1: 本地探索 (read-only, capped)
+     * Phase 2: 结构化压缩
+     * Phase 3: 云端推理 + 工具执行
+     */
+    /** 如果请求很简单（短文本、无功能描述），跳过探索直接走云端 */
+    private fun needsExploration(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.length < 40) return false  // 极短请求 → 直接云端
+        // 仅含单个变量/属性操作，不需要探索
+        val simplePatterns = listOf(
+            Regex("""将\s*\S+\s*(?:改为|改成|修改为)\s*\S+"""),
+            Regex("""把\s*\S+\s*(?:改为|改成|修改为)\s*\S+"""),
+            Regex("""(?:修改|更改|改)\s+\S+\s+(?:为|成)\s+\S+"""),
+            Regex("""(?:change|update|rename|fix|delete|remove|add)\s+\S+\s+(?:to|from|in)\s+\S+"""),
+        )
+        if (simplePatterns.any { it.containsMatchIn(trimmed) }) return false
+        return true
+    }
+
+    private suspend fun processHybrid(
+        text: String, msgId: String,
+        ctx: Application,
+    ) {
+        _state.update { it.copy(modelActivity = ModelActivity.Thinking, activityDetail = "") }
+        FileLogger.d("ChatViewModel", "processHybrid: starting hybrid mode")
+
+        // Phase 1: 本地探索（仅复杂请求需要）
+        val explorationResult = if (needsExploration(text)) {
+            runLocalExploration(text, msgId)
+        } else {
+            FileLogger.d("ChatViewModel", "processHybrid: fast path, skip exploration")
+            null
+        }
+        FileLogger.d("ChatViewModel", "processHybrid: exploration done, ${explorationResult?.length ?: 0} chars")
+
+        // Phase 2: 结构化压缩
+        val compressed = buildExplorationContext(explorationResult)
+        FileLogger.d("ChatViewModel", "processHybrid: compressed to ${compressed.length} chars")
+
+        // Phase 3: 带上下文的云端推理
+        val enrichedText = if (compressed.isNotBlank()) "$compressed\n\n$text" else text
+        processWithCloudTools(enrichedText, msgId, ctx)
+    }
+
+    /**
+     * Phase 1: 本地探索阶段。
+     * 创建只读工具集的 LiteRT 对话，运行最多 HYBRID_EXPLORE_MAX_ROUNDS 轮。
+     * 在探索模式下模型只能调用：listFiles, readFile, grep, searchInFiles, searchCodebase, readLints
+     * 探索完成后收集所有工具结果并返回。
+     */
+    private suspend fun runLocalExploration(
+        text: String, msgId: String
+    ): String? {
+        if (!liteRTManager.isInitialized) return null
+        val exploreInstruction = buildString {
+            appendLine(buildSystemInstruction())
+            appendLine()
+            appendLine("## 本地探索模式")
+            appendLine("你只能使用只读工具：listFiles, readFile, grep, searchInFiles, searchCodebase, readLints")
+            appendLine("禁止使用：writeFile, replaceInFile, batchReplaceInFile, deleteFile, runCommand, searchWeb")
+            appendLine("你有最多 $HYBRID_EXPLORE_MAX_ROUNDS 轮来探索项目结构。")
+            appendLine("当你收集到足够信息后，输出【探索完毕】并附上文件结构摘要。")
+        }
+
+        val conv = try {
+            liteRTManager.createConversation(ConversationConfig(
+                systemInstruction = Contents.of(exploreInstruction),
+                samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
+                tools = listOf(tool(aiToolSet)),
+            ))
+        } catch (e: Exception) {
+            Log.e("ChatViewModel", "hybrid: failed to create conv", e)
+            FileLogger.e("ChatViewModel", "hybrid: failed to create conv: ${e.message}", e)
+            return null
+        }
+
+        val exploreMessages = StringBuilder()
+        var round = 0
+        try {
+            while (round < HYBRID_EXPLORE_MAX_ROUNDS) {
+                round++
+                val currentMsg = if (round == 1) {
+                    Message.user("探索项目：$text")
+                } else {
+                    null
+                }
+                if (currentMsg == null) break
+
+                val response = StringBuilder()
+                conv.sendMessageAsync(currentMsg).catch { t ->
+                    Log.e("ChatViewModel", "hybrid explore failed round=$round", t)
+                }.collect { chunk ->
+                    val c = chunk.toString()
+                    response.append(c)
+                }
+
+                val respText = response.toString().trim()
+                if (respText.contains("探索完毕")) {
+                    exploreMessages.appendLine(respText)
+                    break
+                }
+
+                val toolCall = extractJsonToolCalls(respText)
+                if (toolCall == null) {
+                    exploreMessages.appendLine("[探索: $respText]")
+                    continue
+                }
+
+                // 过滤只允许探索工具
+                var hasBlocked = false
+                val results = toolCallsToResults(toolCall)
+                for (r in results) {
+                    exploreMessages.appendLine(r)
+                    if (r.startsWith("[拒绝]")) hasBlocked = true
+                }
+
+                if (hasBlocked) {
+                    conv.sendMessageAsync(Message.user("[请只使用只读工具：listFiles, readFile, grep, searchInFiles, searchCodebase]")).collect {}
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("ChatViewModel", "hybrid explore error", e)
+            FileLogger.e("ChatViewModel", "hybrid explore error: ${e.message}", e)
+        } finally {
+            try { conv.close() } catch (_: Exception) {}
+        }
+
+        return exploreMessages.toString().ifBlank { null }
+    }
+
+    /** 将工具调用列表转换为结果字符串 */
+    private suspend fun toolCallsToResults(
+        toolCalls: List<Triple<String?, String, Map<String, String>>>
+    ): List<String> {
+        return coroutineScope {
+            toolCalls.map { (_, funcName, funcArgs) ->
+                async(Dispatchers.IO) {
+                    if (funcName !in exploreOnlyTools) {
+                        "[拒绝] 禁止工具: $funcName（探索阶段仅允许只读工具）"
+                    } else {
+                        try {
+                            val result = executeAiTool(funcName, funcArgs)
+                            "[$funcName] $result"
+                        } catch (e: Exception) {
+                            "[$funcName] 执行失败: ${e.message}"
+                        }
+                    }
+                }
+            }.map { it.await() }
+        }
+    }
+
+    /**
+     * Phase 2: 结构化压缩。
+     * 从探索结果中提取关键信息，生成结构化摘要。
+     * 不依赖模型推理，纯文本处理。
+     */
+    private fun buildExplorationContext(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
+        val sb = StringBuilder()
+        sb.appendLine("[探索结果摘要]")
+        // 提取文件路径
+        val filePaths = mutableSetOf<String>()
+        val grepResults = mutableListOf<String>()
+        var totalLines = 0
+
+        for (line in raw.lines()) {
+            when {
+                line.startsWith("[readFile]") -> {
+                    val parts = line.removePrefix("[readFile]").trim().split("\n").firstOrNull()
+                    if (parts != null) {
+                        val fp = parts.substringBefore(" ").substringBefore("(")
+                        if (fp.isNotEmpty()) filePaths.add(fp)
+                    }
+                }
+                line.startsWith("[grep]") || line.startsWith("[searchInFiles]") -> {
+                    grepResults.add(line.take(120))
+                }
+                line.startsWith("[listFiles]") -> {
+                    // 提取目录结构摘要
+                }
+                line.matches(Regex("^\\d+ 行|^\\d+ lines")) -> {
+                    val num = line.filter { it.isDigit() }.toIntOrNull() ?: 0
+                    totalLines += num
+                }
+            }
+        }
+
+        if (filePaths.isNotEmpty()) {
+            sb.appendLine("查看的文件:")
+            filePaths.take(10).forEach { sb.appendLine("  - $it") }
+        }
+        if (grepResults.isNotEmpty()) {
+            sb.appendLine("搜索结果:")
+            grepResults.take(5).forEach { sb.appendLine("  $it") }
+        }
+        if (totalLines > 0) {
+            sb.appendLine("共计查阅约 $totalLines 行代码")
+        }
+        if (raw.contains("探索完毕")) {
+            val summarySection = raw.substringAfter("探索完毕").take(500)
+            sb.appendLine("模型自述摘要: ${summarySection.take(300)}")
+        }
+
+        return sb.toString().trimEnd()
     }
 
     private suspend fun processWithCloudTools(
