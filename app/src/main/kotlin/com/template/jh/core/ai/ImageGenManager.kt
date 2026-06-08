@@ -545,6 +545,11 @@ class ImageGenManager(private val context: Context) {
         } catch (_: Exception) {}
     }
 
+    /** 扫描已检测到的本地生图模型（已下载并解压） */
+    fun scanDetectedModels(): List<RecommendedImageModel> {
+        return RECOMMENDED_IMAGE_MODELS.filter { isModelDownloaded(it.fileName) }
+    }
+
     companion object {
         val ANYTHING_V5_MODEL = RecommendedImageModel(
             name = "Anything V5.0 (SD1.5)",

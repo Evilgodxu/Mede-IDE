@@ -36,6 +36,27 @@ data class ChatMessage(
 
 enum class ChatRole { User, Model, System, Tool }
 
+// 模型当前活动状态
+enum class ModelActivity {
+    Idle,
+    Thinking,
+    ListingFiles,
+    ReadingFile,
+    WritingFile,
+    EditingFile,
+    DeletingFile,
+    CreatingDirectory,
+    SearchingCode,
+    SearchingWeb,
+    RunningCommand,
+    GitOperation,
+    ReadingLints,
+    GeneratingImage,
+    ListingImages,
+    ExecutingTool,
+    ProcessingResult,
+}
+
 // 对话历史条目
 data class ConversationEntry(
     val id: String = UUID.randomUUID().toString(),
@@ -54,6 +75,9 @@ data class ChatUiState(
     val isModelPickerOpen: Boolean = false,
     val availableModels: List<ModelInfo> = emptyList(),
     val isLoading: Boolean = false,
+    // 模型活动状态
+    val modelActivity: ModelActivity = ModelActivity.Idle,
+    val activityDetail: String = "", // 如文件路径、搜索关键词等详情
     // 下载状态
     val downloadStatus: DownloadStatus = DownloadStatus.Idle,
     val downloadProgress: Float = 0f,
@@ -74,6 +98,8 @@ data class ChatUiState(
     val cloudModelEnabled: Boolean = false,
     val cloudModelProfiles: List<CloudModelProfile> = emptyList(),
     val activeCloudProfileId: String = "",
+    // 项目根目录名称（SAF 文件夹名）
+    val projectRootName: String = "",
     // 当前打开的文件路径列表
     val openedFilePaths: List<String> = emptyList(),
     // 自动上下文
@@ -87,4 +113,5 @@ data class ChatUiState(
     val imageGenState: ImageGenState = ImageGenState(),
     val imageGenProfiles: List<CloudImageGenProfile> = emptyList(),
     val activeImageGenProfileId: String = "",
+    val detectedImageModels: List<RecommendedImageModel> = emptyList(),
 )

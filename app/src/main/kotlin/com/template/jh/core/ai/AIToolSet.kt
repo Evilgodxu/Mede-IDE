@@ -2,14 +2,13 @@ package com.template.jh.core.ai
 
 import android.content.Context
 import android.net.Uri
-import android.os.Environment
 import android.util.Log
-import androidx.documentfile.provider.DocumentFile
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 import com.template.jh.core.editor.CodeEditTool
 import com.template.jh.core.storage.FileManager
+import com.template.jh.core.utils.FileLogger
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -35,7 +34,13 @@ class AIToolSet(
     fun listFiles(
         @ToolParam(description = "Subdirectory path relative to project root. Leave empty to list root.") subPath: String = "",
     ): String {
-        return fileManager?.listFiles(subPath) ?: "No project folder is open."
+        Log.d("AIToolSet", "listFiles: subPath=$subPath")
+        FileLogger.d("AIToolSet", "listFiles: subPath=$subPath")
+        val result = fileManager?.listFiles(subPath) ?: "No project folder is open."
+        if (result.startsWith("Failed") || result.startsWith("No project")) {
+            FileLogger.w("AIToolSet", "listFiles failed: $result")
+        }
+        return result
     }
 
     private fun readFileRaw(path: String): String? {
@@ -48,8 +53,14 @@ class AIToolSet(
         @ToolParam(description = "Line number to start reading from (1-based). Default 1.") offset: Int = 1,
         @ToolParam(description = "Maximum number of lines to read. Default 1000.") limit: Int = 1000,
     ): String {
-        return fileManager?.readFileWithLineNumbers(path, offset, limit) 
+        Log.d("AIToolSet", "readFile: path=$path offset=$offset limit=$limit")
+        FileLogger.d("AIToolSet", "readFile: path=$path offset=$offset limit=$limit")
+        val result = fileManager?.readFileWithLineNumbers(path, offset, limit)
             ?: "No project folder is open."
+        if (result.startsWith("Failed") || result.startsWith("No project")) {
+            FileLogger.w("AIToolSet", "readFile failed: ${result.take(200)}")
+        }
+        return result
     }
 
     @Tool(description = "View a specific range of lines from a file. Optimized for viewing large files without loading entire content. Returns content with line numbers.")
@@ -58,20 +69,35 @@ class AIToolSet(
         @ToolParam(description = "Line number to start reading from (1-based). Default 1.") offset: Int = 1,
         @ToolParam(description = "Maximum number of lines to read. Default 100, max 500.") limit: Int = 100,
     ): String {
+        Log.d("AIToolSet", "viewFile: path=$path offset=$offset limit=$limit")
+        FileLogger.d("AIToolSet", "viewFile: path=$path offset=$offset limit=$limit")
         val effectiveLimit = limit.coerceIn(1, 500)
-        return fileManager?.viewFile(path, offset, effectiveLimit) 
+        val result = fileManager?.viewFile(path, offset, effectiveLimit) 
             ?: "No project folder is open."
+        if (result.startsWith("Failed") || result.startsWith("No project")) {
+            FileLogger.w("AIToolSet", "viewFile failed: ${result.take(200)}")
+        }
+        return result
     }
 
-    @Tool(description = "Create a new file. WARNING: For existing files, use applyPatch instead. Only use this when creating new files or completely rewriting (>80% changed).")
+    @Tool(description = "Create a new file. WARNING: For existing files, use replaceInFile instead. Only use this when creating new files or completely rewriting (>80% changed).")
     fun writeFile(
         @ToolParam(description = "File path relative to project root, e.g. 'src/App.kt'") path: String,
         @ToolParam(description = "The complete text content to write to the file") content: String,
     ): String {
-        val fm = fileManager ?: return "No project folder is open."
+        Log.d("AIToolSet", "writeFile: path=$path contentLen=${content.length}")
+        FileLogger.d("AIToolSet", "writeFile: path=$path contentLen=${content.length}")
+        val fm = fileManager ?: run {
+            FileLogger.w("AIToolSet", "writeFile: no project folder open")
+            return "No project folder is open."
+        }
         val result = fm.writeFile(path, content)
         if (!result.startsWith("Failed") && !result.startsWith("No project")) {
-            FileOperationEvents.notify(path, if (fm.exists(path)) "overwrite" else "create", content.lines().size, newContent = content)
+            val lineCount = if (content.isEmpty()) 0 else content.lines().size
+            FileOperationEvents.notify(path, if (fm.exists(path)) "overwrite" else "create", lineCount, newContent = content)
+            FileLogger.d("AIToolSet", "writeFile succeeded: $result")
+        } else {
+            FileLogger.w("AIToolSet", "writeFile failed: $result")
         }
         return result
     }
@@ -84,39 +110,47 @@ class AIToolSet(
         @ToolParam(description = "The exact code block to find. Must be unique in the file. Include function signature or class definition for uniqueness.") old_string: String,
         @ToolParam(description = "The new code block to replace with.") new_string: String,
     ): String {
-        val uri = projectUri
-        if (uri == null) return "No project folder is open."
+        val fm = fileManager ?: run {
+            FileLogger.w("AIToolSet", "replaceInFile: no project folder open")
+            return "No project folder is open."
+        }
         return try {
-            android.util.Log.d("AIToolSet", "replaceInFile: path=$path")
+            Log.d("AIToolSet", "replaceInFile: path=$path oldLen=${old_string.length} newLen=${new_string.length}")
+            FileLogger.d("AIToolSet", "replaceInFile: path=$path oldLen=${old_string.length} newLen=${new_string.length}")
             val original = readFileRaw(path)
             if (original == null) {
-                android.util.Log.w("AIToolSet", "replaceInFile: file not found: $path")
+                Log.w("AIToolSet", "replaceInFile: file not found: $path")
+                FileLogger.w("AIToolSet", "replaceInFile: file not found: $path")
                 return "Cannot replace: file not found. Use writeFile to create first."
             }
 
-            // 使用 CodeEditTool 执行替换
             when (val result = CodeEditTool.replace(original, old_string, new_string)) {
                 is CodeEditTool.ReplaceResult.Success -> {
                     val newContent = result.newText
-                    // 真正写入文件
-                    val writeResult = fileManager?.writeFile(path, newContent) ?: "No project folder is open."
+                    val writeResult = fm.writeFile(path, newContent)
                     if (writeResult.startsWith("Failed") || writeResult.startsWith("No project")) {
+                        FileLogger.e("AIToolSet", "replaceInFile: replace OK but write failed: $writeResult")
                         return "Replace succeeded but write failed: $writeResult"
                     }
-                    FileOperationEvents.notify(path, "pending", computeChangedLines(original, newContent), original, newContent)
+                    val changed = computeChangedLines(original, newContent)
+                    FileOperationEvents.notify(path, "pending", changed, original, newContent)
+                    FileLogger.d("AIToolSet", "replaceInFile succeeded: $path changed=$changed")
                     "Replace succeeded: $path. ${result.message}"
                 }
                 is CodeEditTool.ReplaceResult.Error -> {
+                    FileLogger.w("AIToolSet", "replaceInFile: CodeEditTool rejected: ${result.message.take(200)}")
                     "Replace failed:\n${result.message}"
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("AIToolSet", "replaceInFile failed: ${e.message}", e)
+            Log.e("AIToolSet", "replaceInFile failed: ${e.message}", e)
+            FileLogger.e("AIToolSet", "replaceInFile failed: ${e.message}", e)
             "Replace failed: ${e.message}"
         }
     }
 
     private fun computeChangedLines(old: String, new: String): Int {
+        if (old == new) return 0
         val o = old.lines(); val n = new.lines()
         return (maxOf(o.size, n.size) - (o.zip(n).count { it.first == it.second })).coerceAtLeast(1)
     }
@@ -125,16 +159,40 @@ class AIToolSet(
     fun deleteFile(
         @ToolParam(description = "File or directory path relative to project root, e.g. 'src/OldFile.kt' or 'temp/'") path: String,
     ): String {
-        val fm = fileManager ?: return "No project folder is open."
-        return fm.deleteFile(path)
+        Log.d("AIToolSet", "deleteFile: path=$path")
+        FileLogger.d("AIToolSet", "deleteFile: path=$path")
+        val fm = fileManager ?: run {
+            FileLogger.w("AIToolSet", "deleteFile: no project folder open")
+            return "No project folder is open."
+        }
+        val result = fm.deleteFile(path)
+        if (result.startsWith("Failed") || result.startsWith("No project")) {
+            FileLogger.w("AIToolSet", "deleteFile failed: $result")
+        } else {
+            FileOperationEvents.notify(path, "delete")
+            FileLogger.d("AIToolSet", "deleteFile succeeded: $result")
+        }
+        return result
     }
 
     @Tool(description = "Create a new directory in the project.")
     fun createDirectory(
         @ToolParam(description = "Directory path relative to project root, e.g. 'src/utils' or 'assets/images'") path: String,
     ): String {
-        val fm = fileManager ?: return "No project folder is open."
-        return fm.createDirectory(path)
+        Log.d("AIToolSet", "createDirectory: path=$path")
+        FileLogger.d("AIToolSet", "createDirectory: path=$path")
+        val fm = fileManager ?: run {
+            FileLogger.w("AIToolSet", "createDirectory: no project folder open")
+            return "No project folder is open."
+        }
+        val result = fm.createDirectory(path)
+        if (result.startsWith("Failed") || result.startsWith("No project")) {
+            FileLogger.w("AIToolSet", "createDirectory failed: $result")
+        } else {
+            FileOperationEvents.notify(path, "create")
+            FileLogger.d("AIToolSet", "createDirectory succeeded: $result")
+        }
+        return result
     }
 
     // ---- 终端命令 ----
@@ -143,9 +201,10 @@ class AIToolSet(
     fun runCommand(
         @ToolParam(description = "The command to execute, e.g. 'ls -la' or 'git status'") command: String,
     ): String {
+        Log.d("AIToolSet", "runCommand: $command")
+        FileLogger.d("AIToolSet", "runCommand: $command")
         return try {
-            val dir = if (projectUri != null) File(context.filesDir, "workspace").also { it.mkdirs() }
-                else File(context.filesDir, "workspace").also { it.mkdirs() }
+            val dir = File(context.filesDir, "workspace").also { it.mkdirs() }
             val parts = command.split(" ")
             val pb = ProcessBuilder(parts).directory(dir).redirectErrorStream(true)
             val proc = pb.start()
@@ -154,6 +213,8 @@ class AIToolSet(
             proc.destroy()
             if (text.isBlank()) "Command completed with no output." else text.take(5000)
         } catch (e: Exception) {
+            Log.e("AIToolSet", "runCommand failed: ${e.message}", e)
+            FileLogger.e("AIToolSet", "runCommand failed: ${e.message}", e)
             "Command failed: ${e.message}"
         }
     }
@@ -165,20 +226,25 @@ class AIToolSet(
         @ToolParam(description = "Search query keywords, concise and specific") query: String,
     ): String {
         if (query.isBlank()) return "Search query is empty."
+        Log.d("AIToolSet", "searchWeb: query=$query")
+        FileLogger.d("AIToolSet", "searchWeb: query=$query")
         return try {
-            // 优先使用聚合搜索引擎 SearXNG
             val searxResult = searchViaSearxNG(query)
             if (searxResult.isNotBlank() && !searxResult.contains("失败") && !searxResult.contains("无结果")) {
+                FileLogger.d("AIToolSet", "searchWeb: SearXNG returned ${searxResult.lines().size} lines")
                 return searxResult
             }
-            // 备选：使用 Bing
             val bingResult = searchViaBing(query)
             if (bingResult.isNotBlank() && !bingResult.contains("失败")) {
+                FileLogger.d("AIToolSet", "searchWeb: Bing returned ${bingResult.lines().size} lines")
                 return bingResult
             }
-            // 最后的备选：DuckDuckGo
-            searchViaDuckDuckGo(query)
+            val ddgResult = searchViaDuckDuckGo(query)
+            FileLogger.d("AIToolSet", "searchWeb: DuckDuckGo returned ${ddgResult.lines().size} lines")
+            ddgResult
         } catch (e: Exception) {
+            Log.e("AIToolSet", "searchWeb failed: ${e.message}", e)
+            FileLogger.e("AIToolSet", "searchWeb failed: ${e.message}", e)
             "Search failed: ${e.message}"
         }
     }
@@ -218,23 +284,21 @@ class AIToolSet(
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.w("AIToolSet", "SearXNG $url failed: ${e.message}")
+                Log.w("AIToolSet", "SearXNG $url failed: ${e.message}")
+                FileLogger.w("AIToolSet", "SearXNG $url failed: ${e.message}")
                 continue
             }
         }
+        FileLogger.w("AIToolSet", "searchViaSearxNG: all instances failed for query=$query")
         return "SearXNG search failed or returned no results."
     }
 
-    /**
-     * Bing 搜索 - 作为备选
-     */
     private fun searchViaBing(query: String): String {
         val encoded = URLEncoder.encode(query, "UTF-8")
         val url = "https://www.bing.com/search?q=$encoded&setmkt=en-US&setlang=en"
-        
         return try {
             val html = fetchUrl(url, timeoutMs = 15000, extraHeaders = mapOf(
-                "Cookie" to "MUID=1; MUIDB=1",  // 匿名Cookie
+                "Cookie" to "MUID=1; MUIDB=1",
                 "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             ))
             val results = parseBingResults(html)
@@ -244,6 +308,8 @@ class AIToolSet(
                 "Bing search returned no results."
             }
         } catch (e: Exception) {
+            Log.w("AIToolSet", "Bing search failed: ${e.message}")
+            FileLogger.w("AIToolSet", "searchViaBing failed: ${e.message}")
             "Bing search failed: ${e.message}"
         }
     }
@@ -262,7 +328,10 @@ class AIToolSet(
                 if (results.isNotEmpty()) {
                     return results.joinToString("\n---\n") { "• ${it.first}\n  ${it.second}" }
                 }
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                Log.w("AIToolSet", "DuckDuckGo $searchUrl failed: ${e.message}")
+                FileLogger.w("AIToolSet", "DuckDuckGo $searchUrl failed: ${e.message}")
+            }
         }
 
         try {
@@ -284,8 +353,12 @@ class AIToolSet(
                 }
             }
             if (results.isNotEmpty()) return results.joinToString("\n---\n")
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+            Log.w("AIToolSet", "DuckDuckGo API failed: ${e.message}")
+            FileLogger.w("AIToolSet", "DuckDuckGo API failed: ${e.message}")
+        }
 
+        FileLogger.w("AIToolSet", "searchViaDuckDuckGo: all sources failed for query=$query")
         return "Search returned no results for: $query"
     }
 
@@ -372,60 +445,70 @@ class AIToolSet(
     // ---- Git 集成 ----
 
     @Tool(description = "Show git status (short format). Returns staged/unstaged changes.")
-    fun gitStatus(): String = runGit("git status --short")
+    fun gitStatus(): String = runGit("status", "--short")
 
     @Tool(description = "Stage files for commit. Use '.' to stage all.")
     fun gitAdd(
         @ToolParam(description = "File paths to stage, space-separated. Use '.' for all") paths: String = ".",
-    ): String = runGit("git add $paths")
+    ): String {
+        val args = paths.split(" ").filter { it.isNotBlank() }
+        return runGit("add", *args.toTypedArray())
+    }
 
     @Tool(description = "Commit staged changes with a message.")
     fun gitCommit(
         @ToolParam(description = "Commit message") message: String,
-    ): String = runGit("git commit -m \"$message\"")
+    ): String = runGit("commit", "-m", message)
 
     @Tool(description = "Push commits to remote repository.")
     fun gitPush(
         @ToolParam(description = "Remote name, default 'origin'") remote: String = "origin",
         @ToolParam(description = "Branch name, e.g. 'main' or 'master'") branch: String = "main",
-    ): String = runGit("git push $remote $branch")
+    ): String = runGit("push", remote, branch)
 
     @Tool(description = "List local branches. Add '-a' to show remote branches too.")
     fun gitBranch(
         @ToolParam(description = "Extra args, e.g. '-a' for all, '-D name' to delete") args: String = "",
-    ): String = runGit("git branch $args")
+    ): String {
+        val extra = args.split(" ").filter { it.isNotBlank() }
+        return runGit("branch", *extra.toTypedArray())
+    }
 
     @Tool(description = "Show diff of staged/unstaged changes.")
     fun gitDiff(
         @ToolParam(description = "Args: '--staged' for staged only, 'HEAD~1' for last commit") args: String = "",
-    ): String = runGit("git diff $args")
+    ): String {
+        val extra = args.split(" ").filter { it.isNotBlank() }
+        return runGit("diff", *extra.toTypedArray())
+    }
 
-    private fun runGit(cmd: String): String {
-        val dir = if (projectUri != null) File(context.filesDir, "workspace").also { it.mkdirs() }
-            else File(context.filesDir, "workspace").also { it.mkdirs() }
+    private fun runGit(vararg args: String): String {
+        Log.d("AIToolSet", "runGit: git ${args.joinToString(" ")}")
+        FileLogger.d("AIToolSet", "runGit: git ${args.joinToString(" ")}")
+        val dir = File(context.filesDir, "workspace").also { it.mkdirs() }
         return try {
-            val pb = if (isWindows()) {
-                ProcessBuilder("cmd", "/c", cmd).directory(dir).redirectErrorStream(true)
-            } else {
-                ProcessBuilder("sh", "-c", cmd).directory(dir).redirectErrorStream(true)
-            }
+            val fullArgs = listOf("git") + args.toList()
+            val pb = ProcessBuilder(fullArgs).directory(dir).redirectErrorStream(true)
             val proc = pb.start()
             val text = proc.inputStream.bufferedReader().readText()
             proc.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)
             proc.destroy()
             if (text.isBlank()) "已完成，无输出。" else text.take(5000)
-        } catch (e: Exception) { "命令失败: ${e.message}" }
+        } catch (e: Exception) {
+            Log.e("AIToolSet", "runGit failed: git ${args.joinToString(" ")}: ${e.message}", e)
+            FileLogger.e("AIToolSet", "runGit: git ${args.joinToString(" ")} failed: ${e.message}", e)
+            "命令失败: ${e.message}"
+        }
     }
-
-    private fun isWindows(): Boolean = System.getProperty("os.name")?.lowercase()?.contains("win") == true
 
     // ---- Lint/诊断读取 ----
 
     @Tool(description = "Read build lint or compilation errors from the project. Runs gradle lint if needed.")
     fun readLints(): String {
+        Log.d("AIToolSet", "readLints")
+        FileLogger.d("AIToolSet", "readLints")
         return try {
             val buildDir = File(context.filesDir, "workspace")
-            // 1. 尝试读取 lint 报告
             val lintFiles = listOf(
                 File(buildDir, "app/build/reports/lint-results.xml"),
                 File(buildDir, "app/build/reports/lint-results-release.xml"),
@@ -439,10 +522,12 @@ class AIToolSet(
                             val msg = Regex("""<message>([^<]+)</message>""").find(text, match.range.last)?.groupValues[1] ?: ""
                             "• $id: $msg"
                         }
-                    if (issues.isNotBlank()) return "Lint errors:\n$issues"
+                    if (issues.isNotBlank()) {
+                        FileLogger.d("AIToolSet", "readLints: found issues in ${f.name}")
+                        return "Lint errors:\n$issues"
+                    }
                 }
             }
-            // 2. 尝试读取 Gradle 问题报告
             val problemFiles = listOf(
                 File(buildDir, "build/reports/problems/problems-report.html"),
                 File(buildDir, "app/build/reports/problems/problems-report.html"),
@@ -453,10 +538,12 @@ class AIToolSet(
                     val errors = Regex("""<li[^>]*>(.*?)</li>""", RegexOption.DOT_MATCHES_ALL)
                         .findAll(html).take(10).map { it.groupValues[1].replace(Regex("<[^>]*>"), "").trim() }
                         .filter { it.isNotBlank() }.toList()
-                    if (errors.isNotEmpty()) return "Compilation problems:\n${errors.joinToString("\n")}"
+                    if (errors.isNotEmpty()) {
+                        FileLogger.d("AIToolSet", "readLints: found problems in ${f.name}")
+                        return "Compilation problems:\n${errors.joinToString("\n")}"
+                    }
                 }
             }
-            // 3. 尝试运行 gradle lint（简短超时）
             val pb = if (isWindows()) ProcessBuilder("cmd", "/c", "gradlew lint")
                 else ProcessBuilder("sh", "-c", "./gradlew lint")
             pb.directory(buildDir).redirectErrorStream(true)
@@ -464,11 +551,21 @@ class AIToolSet(
             val out = proc.inputStream.bufferedReader().readText()
             proc.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
             proc.destroy()
-            // 从输出中提取错误
             val errors = out.lines().filter { it.contains("ERROR") || it.contains("error:") }.take(30)
-            if (errors.isNotEmpty()) "Lint output errors:\n${errors.joinToString("\n")}" else "No lint errors found."
-        } catch (e: Exception) { "读取诊断失败: ${e.message}" }
+            if (errors.isNotEmpty()) {
+                FileLogger.d("AIToolSet", "readLints: found ${errors.size} errors from gradle lint")
+                "Lint output errors:\n${errors.joinToString("\n")}"
+            } else {
+                "No lint errors found."
+            }
+        } catch (e: Exception) {
+            Log.e("AIToolSet", "readLints failed: ${e.message}", e)
+            FileLogger.e("AIToolSet", "readLints failed: ${e.message}", e)
+            "读取诊断失败: ${e.message}"
+        }
     }
+
+    private fun isWindows(): Boolean = System.getProperty("os.name")?.lowercase()?.contains("win") == true
 
     // ---- 文件搜索 ----
 
@@ -480,19 +577,33 @@ class AIToolSet(
         @ToolParam(description = "Case insensitive search, default true") ignoreCase: Boolean = true,
         @ToolParam(description = "Number of context lines to show before/after matches, default 2") contextLines: Int = 2,
     ): String {
-        return fileManager?.grep(pattern, extension, glob, ignoreCase, contextLines)
+        Log.d("AIToolSet", "grep: pattern=$pattern ext=$extension glob=$glob ignoreCase=$ignoreCase context=$contextLines")
+        FileLogger.d("AIToolSet", "grep: pattern=$pattern ext=$extension glob=$glob ignoreCase=$ignoreCase context=$contextLines")
+        val result = fileManager?.grep(pattern, extension, glob, ignoreCase, contextLines)
             ?: "No project folder is open."
+        if (result.startsWith("Failed") || result.startsWith("No project")) {
+            FileLogger.w("AIToolSet", "grep failed: ${result.take(200)}")
+        } else {
+            FileLogger.d("AIToolSet", "grep: found ${result.lines().size} lines of results")
+        }
+        return result
     }
-
-    // ---- 语义搜索 ----
 
     @Tool(description = "Search codebase by meaning/semantics. Finds code by describing what you're looking for rather than exact text. Use for exploring unfamiliar code or finding implementations by behavior.")
     fun searchCodebase(
         @ToolParam(description = "Natural language query describing what you're looking for, e.g. 'Where is user authentication implemented?' or 'How does error handling work?'") query: String,
         @ToolParam(description = "Specific directories to search within, relative to project root. Leave empty to search entire project.") targetDirectories: String = "",
     ): String {
-        return fileManager?.searchCodebase(query, targetDirectories)
+        Log.d("AIToolSet", "searchCodebase: query=$query dirs=$targetDirectories")
+        FileLogger.d("AIToolSet", "searchCodebase: query=$query dirs=$targetDirectories")
+        val result = fileManager?.searchCodebase(query, targetDirectories)
             ?: "No project folder is open."
+        if (result.startsWith("Failed") || result.startsWith("No project")) {
+            FileLogger.w("AIToolSet", "searchCodebase failed: ${result.take(200)}")
+        } else {
+            FileLogger.d("AIToolSet", "searchCodebase: found ${result.lines().size} lines of results")
+        }
+        return result
     }
 
     // ---- 图像生成（AnythingV5 SD1.5）----
@@ -508,13 +619,18 @@ class AIToolSet(
         @ToolParam(description = "Width of the output image in pixels. Default 512.") width: Int = 512,
         @ToolParam(description = "Height of the output image in pixels. Default 512.") height: Int = 512,
     ): String {
-        val mgr = imageGenManager ?: return "Image generation is not available. Configure ImageGenManager first."
+        val mgr = imageGenManager
+        if (mgr == null) {
+            FileLogger.w("AIToolSet", "generateImage: ImageGenManager not configured")
+            return "Image generation is not available. Configure ImageGenManager first."
+        }
+        Log.d("AIToolSet", "generateImage: prompt=$prompt negPrompt=$negativePrompt steps=$steps cfg=$cfgScale ${width}x$height")
+        FileLogger.d("AIToolSet", "generateImage: prompt=${prompt.take(100)} steps=$steps cfg=$cfgScale ${width}x$height")
         try {
-            // 检查模型是否已下载
             if (!mgr.isModelDownloaded(ImageGenManager.ANYTHING_V5_MODEL.fileName)) {
+                FileLogger.w("AIToolSet", "generateImage: model not downloaded")
                 return "Model not downloaded yet. Please go to Settings > 推荐下载模型 to download the image generation model first."
             }
-
             val params = com.template.jh.core.ai.ImageGenParams(
                 prompt = prompt,
                 negativePrompt = negativePrompt,
@@ -524,20 +640,33 @@ class AIToolSet(
                 width = width.coerceIn(256, 2048),
                 height = height.coerceIn(256, 2048),
             )
-            val result = kotlinx.coroutines.runBlocking {
+            val result = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
                 mgr.generateImage(params)
             }
+            FileLogger.d("AIToolSet", "generateImage succeeded: $result")
             return "Image generated successfully. File path: $result"
         } catch (e: Exception) {
+            Log.e("AIToolSet", "generateImage failed: ${e.message}", e)
+            FileLogger.e("AIToolSet", "generateImage failed: ${e.message}", e)
             return "Image generation failed: ${e.message}"
         }
     }
 
     @Tool(description = "List recently generated images in the output directory. Returns file names and paths.")
     fun listGeneratedImages(): String {
-        val mgr = imageGenManager ?: return "ImageGenManager not available."
+        Log.d("AIToolSet", "listGeneratedImages")
+        FileLogger.d("AIToolSet", "listGeneratedImages")
+        val mgr = imageGenManager
+        if (mgr == null) {
+            FileLogger.w("AIToolSet", "listGeneratedImages: ImageGenManager not configured")
+            return "ImageGenManager not available."
+        }
         val images = mgr.listGeneratedImages()
-        if (images.isEmpty()) return "No generated images found."
+        if (images.isEmpty()) {
+            FileLogger.d("AIToolSet", "listGeneratedImages: no images found")
+            return "No generated images found."
+        }
+        FileLogger.d("AIToolSet", "listGeneratedImages: found ${images.size} images")
         return images.joinToString("\n") { "• ${it.name}  (${formatSize(it.size)})  path: ${it.path}" }
     }
 

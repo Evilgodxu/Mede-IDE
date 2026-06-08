@@ -1,9 +1,11 @@
 package com.template.jh.core.storage
 
 import android.content.Context
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
+import java.io.File
 
 /**
  * 统一的文件管理器，使用 DocumentFile 公共 API 实现 SAF 操作
@@ -244,6 +246,7 @@ class FileManager(private val context: Context) {
             } ?: return "Failed to write file: $path"
 
             val opName = if (existingFile != null) "overwrite" else "create"
+            notifyFileSystemChange(path)
             "File written: $path (${content.lines().size} lines, $opName)"
         } catch (e: Exception) {
             "Failed to write file: ${e.message}"
@@ -700,6 +703,30 @@ class FileManager(private val context: Context) {
         return lines.subList(start, end).joinToString("\n")
     }
 
+    /**
+     * 通知系统刷新文件，使文件管理器等外部应用可见
+     */
+    private fun notifyFileSystemChange(path: String) {
+        try {
+            val filePath = try {
+                // 尝试将 SAF 路径转为真实文件路径
+                resolvePath(path.trim('/'))?.uri?.let { uri ->
+                    val docId = android.provider.DocumentsContract.getDocumentId(uri)
+                    if (docId.startsWith("primary:")) {
+                        File(
+                            android.os.Environment.getExternalStorageDirectory(),
+                            docId.removePrefix("primary:")
+                        ).absolutePath
+                    } else null
+                }
+            } catch (_: Exception) { null }
+
+            if (filePath != null) {
+                MediaScannerConnection.scanFile(context, arrayOf(filePath), null, null)
+            }
+        } catch (_: Exception) { }
+    }
+
     private fun formatSize(bytes: Long): String = when {
         bytes < 1024 -> "$bytes B"
         bytes < 1024 * 1024 -> "${bytes / 1024} KB"
@@ -720,6 +747,7 @@ class FileManager(private val context: Context) {
 
             val deleted = target.delete()
             if (deleted) {
+                notifyFileSystemChange(path)
                 "Deleted: $path"
             } else {
                 "Failed to delete: $path"
@@ -757,6 +785,7 @@ class FileManager(private val context: Context) {
 
             val created = parentDoc.createDirectory(dirName)
             if (created != null) {
+                notifyFileSystemChange(path)
                 "Directory created: $path"
             } else {
                 "Failed to create directory: $path"

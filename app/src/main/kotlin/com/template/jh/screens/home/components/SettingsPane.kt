@@ -89,6 +89,7 @@ import com.template.jh.R
 import com.template.jh.core.ai.ChatViewModel
 import com.template.jh.core.ai.ImageGenParams
 import com.template.jh.core.utils.LogCollector
+import com.template.jh.core.utils.FileLogger
 import com.template.jh.core.ai.DownloadStatus
 import com.template.jh.core.ai.EngineStatus
 import com.template.jh.core.ai.LiteRTManager
@@ -271,11 +272,12 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
         }
 
         // 已检测模型
-        if (chatState.availableModels.isNotEmpty()) {
+        val hasDetectedModels = chatState.availableModels.isNotEmpty() || chatState.detectedImageModels.isNotEmpty()
+        if (hasDetectedModels) {
             Text("已检测模型", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
             chatState.availableModels.forEach { model ->
                 Card(
-                    modifier = Modifier.fillMaxWidth().clickable { chatViewModel.loadModel(model.path) },
+                    modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
                 ) {
                     Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -283,9 +285,21 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
                             Text(model.name, style = MaterialTheme.typography.bodyMedium)
                             Text(model.sizeText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Button(onClick = { chatViewModel.loadModel(model.path) }) {
-                            Text("加载")
+                        Text("已就绪", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50))
+                    }
+                }
+            }
+            chatState.detectedImageModels.forEach { model ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                ) {
+                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(model.name, style = MaterialTheme.typography.bodyMedium)
+                            Text(model.size, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                        Text("已就绪", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50))
                     }
                 }
             }
@@ -295,6 +309,11 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
         Text("推荐下载模型", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
 
         LiteRTManager.RECOMMENDED_MODELS.forEach { model ->
+            // 已下载/检测到的模型在已检测列表显示，隐藏下载卡
+            val isDetected = chatState.availableModels.any { it.path.contains(model.fileName, ignoreCase = true) }
+            val isCompleted = chatState.downloadStatus == DownloadStatus.Completed && chatState.downloadFileName == model.fileName
+            if (isDetected || isCompleted) return@forEach
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)),
@@ -332,15 +351,6 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
                                 Spacer(Modifier.width(4.dp))
                                 Text("取消")
                             }
-                        }
-                    } else if (chatState.downloadStatus == DownloadStatus.Completed && chatState.downloadFileName == model.fileName) {
-                        Text("下载完成 ✓", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50))
-                        Spacer(Modifier.height(4.dp))
-                        Button(onClick = {
-                            chatViewModel.resetDownload()
-                            chatViewModel.scanModels()
-                        }, modifier = Modifier.fillMaxWidth()) {
-                            Text("扫描已下载模型")
                         }
                     } else if (chatState.downloadStatus == DownloadStatus.Error && chatState.downloadFileName == model.fileName) {
                         Text("下载失败: ${chatState.downloadErrorMessage}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
@@ -636,9 +646,7 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                                             isTesting = false
                                             testResult = "测试失败: ${e.message}"
                                             Log.e("CloudModelCard", "Test connection error", e)
-                                            // 复制崩溃信息到剪贴板
-                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            clipboard.setPrimaryClip(ClipData.newPlainText("CloudModel Test Error", "Test connection error: ${e.message}\n${e.stackTraceToString()}"))
+                                            FileLogger.e("CloudModelCard", "testConnection error: ${e.message}", e)
                                         }
                                     }
                                 },
@@ -669,9 +677,7 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                                             isFetchingModels = false
                                             availableModels = emptyList()
                                             Log.e("CloudModelCard", "Fetch models error", e)
-                                            // 复制崩溃信息到剪贴板
-                                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                            clipboard.setPrimaryClip(ClipData.newPlainText("CloudModel Fetch Error", "Fetch models error: ${e.message}\n${e.stackTraceToString()}"))
+                                            FileLogger.e("CloudModelCard", "fetchModels error: ${e.message}", e)
                                         }
                                     }
                                 },
@@ -1721,6 +1727,9 @@ private fun ImageGenRecommendedCard(
 ) {
     val genState = chatState.imageGenState
     val anyV5 = com.template.jh.core.ai.ImageGenManager.ANYTHING_V5_MODEL
+
+    // 模型已解压到本地时在已检测模型列表中显示，隐藏下载面板
+    if (chatState.detectedImageModels.any { it.fileName == anyV5.fileName }) return
 
     // 文件选择器：从外部选择生图模型压缩包
     val zipPickerLauncher = rememberLauncherForActivityResult(
