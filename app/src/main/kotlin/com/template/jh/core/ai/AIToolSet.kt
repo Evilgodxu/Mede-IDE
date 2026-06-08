@@ -269,6 +269,39 @@ class AIToolSet(
         return result
     }
 
+    @Tool(description = "Batch delete multiple files or directories in one call. All paths resolved relative to project root. Use when you need to clean up several files at once.")
+    fun batchDeleteFile(
+        @ToolParam(description = "JSON array of file/directory paths relative to project root, e.g. '[\"src/temp.kt\",\"old/\"]'") pathsJson: String,
+    ): String {
+        Log.d("AIToolSet", "batchDeleteFile: $pathsJson")
+        FileLogger.d("AIToolSet", "batchDeleteFile: $pathsJson")
+        val fm = fileManager ?: return "No project folder is open."
+        return try {
+            val paths = org.json.JSONArray(pathsJson)
+            val results = mutableListOf<String>()
+            for (i in 0 until paths.length()) {
+                val path = paths.getString(i)
+                val result = fm.deleteFile(path)
+                if (result.startsWith("Failed") || result.startsWith("No project")) {
+                    results.add("$path: $result")
+                } else {
+                    FileOperationEvents.notify(path, "delete")
+                    results.add("$path: Deleted")
+                }
+            }
+            "Batch delete results:\n" + results.joinToString("\n")
+        } catch (e: org.json.JSONException) {
+            val err = "Invalid paths JSON: ${e.message}"
+            Log.e("AIToolSet", "batchDeleteFile: $err")
+            FileLogger.e("AIToolSet", "batchDeleteFile: $err")
+            "Batch delete failed: $err"
+        } catch (e: Exception) {
+            Log.e("AIToolSet", "batchDeleteFile failed: ${e.message}", e)
+            FileLogger.e("AIToolSet", "batchDeleteFile failed: ${e.message}", e)
+            "Batch delete failed: ${e.message}"
+        }
+    }
+
     @Tool(description = "Create a new directory in the project.")
     fun createDirectory(
         @ToolParam(description = "Directory path relative to project root, e.g. 'src/utils' or 'assets/images'") path: String,

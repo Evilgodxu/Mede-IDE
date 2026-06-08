@@ -89,8 +89,9 @@ class FileManager(private val context: Context) {
      * @return 文件列表字符串，包含 [DIR]/[FILE] 标记
      */
     fun listFiles(subPath: String = ""): String {
-        val targetDoc = resolvePath(subPath.trim('/'))
-            ?: return if (subPath.isBlank()) "No project folder is open." else "Directory not found: $subPath"
+        val cleanPath = subPath.trim('/').let { if (it == "null" || it == "undefined") "" else it }
+        val targetDoc = resolvePath(cleanPath)
+            ?: return if (cleanPath.isBlank()) "No project folder is open." else "Directory not found: $subPath"
 
         if (!targetDoc.isDirectory) return "Not a directory: $subPath"
 
@@ -103,10 +104,10 @@ class FileManager(private val context: Context) {
                     .thenBy { it.name?.lowercase() ?: "" }
             )
 
-            val rootName = rootDocFile?.name?.takeIf { it.isNotBlank() } ?: "project root"
-            val displayPath = if (subPath.isBlank()) rootName else subPath.trim('/')
+            val displayPath = if (cleanPath.isBlank()) "" else cleanPath.trim('/')
+            val header = if (displayPath.isEmpty()) "项目根目录/" else "$displayPath/"
             buildString {
-                appendLine("$displayPath/")
+                appendLine(header)
                 sorted.forEach { doc ->
                     val name = doc.name ?: return@forEach
                     if (doc.isDirectory) {
@@ -128,14 +129,15 @@ class FileManager(private val context: Context) {
      * @return FileNode 列表
      */
     fun listFilesAsNodes(subPath: String = ""): List<FileNode> {
-        val targetDoc = resolvePath(subPath.trim('/')) ?: return emptyList()
+        val cleanPath = subPath.trim('/').let { if (it == "null" || it == "undefined") "" else it }
+        val targetDoc = resolvePath(cleanPath) ?: return emptyList()
         if (!targetDoc.isDirectory) return emptyList()
 
         return try {
             val children = targetDoc.listFiles()
             children.map { doc ->
                 val name = doc.name ?: ""
-                val relPath = if (subPath.isBlank()) name else "${subPath.trim('/')}/$name"
+                val relPath = if (cleanPath.isBlank()) name else "$cleanPath/$name"
                 FileNode(
                     name = name,
                     path = relPath,

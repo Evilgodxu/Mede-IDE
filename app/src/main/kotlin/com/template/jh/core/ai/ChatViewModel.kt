@@ -495,6 +495,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         sb.append("- 禁止重复：同一信息只出现一次\n\n")
         sb.append("## 核心规则\n")
         sb.append("- 用户要求修改/创建文件时，立即执行，不要请求确认。\n")
+        sb.append("- 用户未明确指定文件时，默认以[当前编辑器上下文]中的'活动文件'为首要操作目标。\n")
         sb.append("- 不要只提供代码建议——使用工具实际写入文件。\n")
         sb.append("- 不要解释你将要做什么——直接做。\n")
 
@@ -519,6 +520,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         sb.append("  - replaceInFile(path, old_string, new_string): 编辑文件（单处修改），old_string 必须唯一匹配含缩进\n")
         sb.append("  - batchReplaceInFile(path, edits): 编辑文件（一次修改多处），edits 为 JSON 数组，每项含 old_string/new_string\n")
         sb.append("  - deleteFile(path): 删除文件或目录\n")
+        sb.append("  - batchDeleteFile(pathsJson): 批量删除多个文件，pathsJson 为 JSON 数组如 '[\"old.tmp\",\"temp/\"]'\n")
         sb.append("  - createDirectory(path): 创建目录\n\n")
         sb.append("搜索:\n")
         sb.append("  - grep(pattern, extension?, glob?, ignoreCase?, contextLines?): 正则搜索文件内容\n")
