@@ -631,6 +631,12 @@ class AIToolSet(
                 FileLogger.w("AIToolSet", "generateImage: model not downloaded")
                 return "Model not downloaded yet. Please go to Settings > 推荐下载模型 to download the image generation model first."
             }
+            // 设置输出目录：优先当前项目目录
+            val projectDir = getProjectOutputDir()
+            if (projectDir != null) {
+                mgr.customOutputDir = projectDir
+                FileLogger.d("AIToolSet", "generateImage: output dir set to ${projectDir.absolutePath}")
+            }
             val params = com.template.jh.core.ai.ImageGenParams(
                 prompt = prompt,
                 negativePrompt = negativePrompt,
@@ -640,6 +646,7 @@ class AIToolSet(
                 width = width.coerceIn(256, 2048),
                 height = height.coerceIn(256, 2048),
             )
+            // 会在 ImageGenManager.generateImage 内部主动激活引擎
             val result = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
                 mgr.generateImage(params)
             }
@@ -650,6 +657,25 @@ class AIToolSet(
             FileLogger.e("AIToolSet", "generateImage failed: ${e.message}", e)
             return "Image generation failed: ${e.message}"
         }
+    }
+
+    /** 从 SAF 项目 URI 推导真实路径，用于生图输出目录 */
+    private fun getProjectOutputDir(): java.io.File? {
+        val fm = fileManager ?: return null
+        val uri = fm.projectUri ?: return null
+        try {
+            val docId = android.provider.DocumentsContract.getDocumentId(uri)
+            if (docId.startsWith("primary:")) {
+                val base = java.io.File(
+                    android.os.Environment.getExternalStorageDirectory(),
+                    docId.removePrefix("primary:")
+                )
+                val genDir = java.io.File(base, "generated_images")
+                genDir.mkdirs()
+                return genDir
+            }
+        } catch (_: Exception) {}
+        return null
     }
 
     @Tool(description = "List recently generated images in the output directory. Returns file names and paths.")

@@ -105,12 +105,20 @@ class ImageGenManager(private val context: Context) {
 
     private val baseDir: File get() = context.getExternalFilesDir(null) ?: context.filesDir
 
+    /** 可选的输出目录（优先于默认 genDir），由 AIToolSet 传入项目目录 */
+    @Volatile var customOutputDir: File? = null
+
     private val modelsDir: File get() = File(baseDir, "models").also { it.mkdirs() }
 
     private val genDir: File get() {
-        val dir = File(baseDir, "generated_images")
-        if (!dir.exists()) dir.mkdirs()
-        return dir
+        val dir = customOutputDir
+        if (dir != null) {
+            if (!dir.exists()) dir.mkdirs()
+            return dir
+        }
+        val default = File(baseDir, "generated_images")
+        if (!default.exists()) default.mkdirs()
+        return default
     }
 
     /** 返回模型解压后的目录 */
@@ -158,10 +166,26 @@ class ImageGenManager(private val context: Context) {
             val fileName = "gen_${dateStr}.png"
             val outputFile = File(genDir, fileName)
 
-            // 尝试用原生引擎生成
+            // 1. 确保 getInstance 已调用（设置 nativeDir，否则 isNativeAvailable 永远 false）
+            StableDiffusionEngine.getInstance(context)
+
+            // 2. 如果原生引擎可用则主动启动
             if (StableDiffusionEngine.isNativeAvailable()) {
                 val engine = StableDiffusionEngine.getInstance(context)
                 val modelDir = getModelDir(ANYTHING_V5_MODEL.fileName)
+                // 检查模型文件是否存在
+                val hasModelFiles = modelDir.exists() && modelDir.listFiles()?.any {
+                    it.name == "unet.bin" || it.name == "clip.bin"
+                } == true
+                if (!hasModelFiles) {
+                    throw IllegalStateException("生图模型文件缺失(${modelDir.absolutePath})，请重新下载")
+                }
+                // 主动启动引擎
+                val started = engine.start(modelDir, params.width, params.height)
+                if (!started) {
+                    throw IllegalStateException("生图引擎启动失败，请检查设备兼容性")
+                }
+                // 引擎就绪后生成
                 try {
                     val bitmap = engine.generate(
                         modelDir = modelDir,
@@ -183,14 +207,11 @@ class ImageGenManager(private val context: Context) {
                         bitmap.recycle()
                     }
                 } catch (e: Exception) {
-                    Log.w("ImageGenManager", "Native engine failed, falling back to placeholder", e)
-                    withContext(Dispatchers.IO) { savePlaceholderImage(outputFile, params) }
+                    Log.w("ImageGenManager", "Native engine failed", e)
+                    throw e
                 }
             } else {
-                // 原生引擎不可用时回退到占位图
-                withContext(Dispatchers.IO) {
-                    savePlaceholderImage(outputFile, params)
-                }
+                throw IllegalStateException("生图引擎不可用，请确认设备支持 QNN (骁龙 8Gen1+)")
             }
 
             val info = GenImageInfo(

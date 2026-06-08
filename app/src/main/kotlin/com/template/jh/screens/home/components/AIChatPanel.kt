@@ -711,7 +711,7 @@ private fun loadThumbnail(context: Context, uri: android.net.Uri): Bitmap? = try
     }
 } catch (_: Exception) { null }
 
-// 语音输入按钮组件
+// 语音输入按钮组件 - 使用 SpeechRecognizer 直接接管，不弹系统对话框
 @Composable
 private fun VoiceInputButton(
     onTextRecognized: (String) -> Unit,
@@ -728,26 +728,13 @@ private fun VoiceInputButton(
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
-    // 语音识别启动器
-    val speechRecognizerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result: androidx.activity.result.ActivityResult ->
-        isListening = false
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val matches = result.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
-            matches?.firstOrNull()?.let { recognizedText ->
-                onTextRecognized(recognizedText)
-            }
-        }
-    }
-
     // 权限请求启动器
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
         hasPermission = isGranted
         if (isGranted) {
-            startVoiceRecognition(context, speechRecognizerLauncher) { isListening = it }
+            startDirectSpeech(context, onTextRecognized) { isListening = it }
         }
     }
 
@@ -755,18 +742,18 @@ private fun VoiceInputButton(
         onClick = {
             if (!hasPermission) {
                 permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-            } else if (!isListening) {
-                startVoiceRecognition(context, speechRecognizerLauncher) { isListening = it }
+            } else {
+                startDirectSpeech(context, onTextRecognized) { isListening = it }
             }
         },
         modifier = Modifier.size(28.dp),
-        enabled = enabled && !isListening
+        enabled = enabled,
     ) {
         if (isListening) {
             CircularProgressIndicator(
                 modifier = Modifier.size(18.dp),
                 strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.primary
+                color = Color(0xFFE53935),
             )
         } else {
             Icon(
@@ -777,29 +764,56 @@ private fun VoiceInputButton(
                     if (hasPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                }
+                },
             )
         }
     }
 }
 
-private fun startVoiceRecognition(
+/** 直接使用 SpeechRecognizer API，不弹系统对话框 */
+private fun startDirectSpeech(
     context: Context,
-    launcher: androidx.activity.result.ActivityResultLauncher<android.content.Intent>,
-    onListeningStateChange: (Boolean) -> Unit
+    onResult: (String) -> Unit,
+    onListeningStateChange: (Boolean) -> Unit,
 ) {
     try {
+        val recognizer = android.speech.SpeechRecognizer.createSpeechRecognizer(context)
+        val listener = object : android.speech.RecognitionListener {
+            override fun onReadyForSpeech(params: android.os.Bundle?) {
+                onListeningStateChange(true)
+            }
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {
+                onListeningStateChange(false)
+            }
+            override fun onError(error: Int) {
+                onListeningStateChange(false)
+                recognizer.destroy()
+            }
+            override fun onResults(results: android.os.Bundle?) {
+                onListeningStateChange(false)
+                val matches = results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                matches?.firstOrNull()?.let { text ->
+                    if (text.isNotBlank()) onResult(text)
+                }
+                recognizer.destroy()
+            }
+            override fun onPartialResults(partialResults: android.os.Bundle?) {}
+            override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+        }
+        recognizer.setRecognitionListener(listener)
         val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
             putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
-        onListeningStateChange(true)
-        launcher.launch(intent)
+        recognizer.startListening(intent)
     } catch (e: Exception) {
         onListeningStateChange(false)
-        android.widget.Toast.makeText(context, "语音识别不可用", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(context, "语音识别不可用: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
