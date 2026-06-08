@@ -26,6 +26,7 @@ data class CloudModelProfile(
     val apiEndpoint: String = "https://api.openai.com/v1",
     val apiKey: String = "",
     val modelName: String = "gpt-4o",
+    val contextWindow: Int = 128000,  // 模型上下文窗口大小（token），用于自适应压缩阈值
 )
 
 /** API 调用返回的用量信息 */

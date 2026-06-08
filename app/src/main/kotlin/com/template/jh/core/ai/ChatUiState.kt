@@ -90,6 +90,8 @@ data class ChatUiState(
     val modifiedFilePaths: List<String> = emptyList(),
     // 附加到对话中的文件（含预读内容，发送时一并注入）
     val attachedFileRefs: List<AttachedFile> = emptyList(),
+    // 上下文窗口大小（从模型配置获取，默认 128K）
+    val contextMaxTokens: Int = 128000,
     // 上下文压缩状态
     val isContextCompressed: Boolean = false,
     val contextCompressedTokens: Int = 0,  // 本次对话累计压缩的 token 数

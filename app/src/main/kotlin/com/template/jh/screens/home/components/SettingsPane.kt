@@ -369,6 +369,7 @@ private data class CloudVendorPreset(
     val name: String,
     val apiEndpoint: String,
     val defaultModels: List<String>,
+    val defaultContextWindow: Int = 128000,
     val icon: @Composable () -> Unit = { Icon(Icons.Default.SmartToy, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) }
 )
 
@@ -382,6 +383,7 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
     var editEndpoint by remember { mutableStateOf("") }
     var editKey by remember { mutableStateOf("") }
     var editModel by remember { mutableStateOf("") }
+    var editContextWindow by remember { mutableIntStateOf(128000) }
     var showKey by remember { mutableStateOf(false) }
     var isTesting by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<String?>(null) }
@@ -389,12 +391,12 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
     var availableModels by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val vendorPresets = listOf(
-        CloudVendorPreset("OpenAI", "https://api.openai.com/v1", listOf("gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo")),
-        CloudVendorPreset("DeepSeek", "https://api.deepseek.com/v1", listOf("deepseek-chat", "deepseek-reasoner")),
-        CloudVendorPreset("智谱AI", "https://open.bigmodel.cn/api/paas/v4", listOf("glm-4-flash", "glm-4-plus")),
-        CloudVendorPreset("通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1", listOf("qwen-plus", "qwen-turbo")),
-        CloudVendorPreset("Moonshot", "https://api.moonshot.cn/v1", listOf("moonshot-v1-8k", "moonshot-v1-32k")),
-        CloudVendorPreset("自定义", "", listOf()),
+        CloudVendorPreset("OpenAI", "https://api.openai.com/v1", listOf("gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"), defaultContextWindow = 128000),
+        CloudVendorPreset("DeepSeek", "https://api.deepseek.com/v1", listOf("deepseek-chat", "deepseek-reasoner"), defaultContextWindow = 128000),
+        CloudVendorPreset("智谱AI", "https://open.bigmodel.cn/api/paas/v4", listOf("glm-4-flash", "glm-4-plus"), defaultContextWindow = 128000),
+        CloudVendorPreset("通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1", listOf("qwen-plus", "qwen-turbo"), defaultContextWindow = 128000),
+        CloudVendorPreset("Moonshot", "https://api.moonshot.cn/v1", listOf("moonshot-v1-8k", "moonshot-v1-32k"), defaultContextWindow = 128000),
+        CloudVendorPreset("自定义", "", listOf(), defaultContextWindow = 128000),
     )
 
     val verifyMsg = when {
@@ -456,6 +458,7 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                             OutlinedButton(onClick = {
                                 editName = profile.name; editEndpoint = profile.apiEndpoint
                                 editKey = profile.apiKey; editModel = profile.modelName
+                                editContextWindow = profile.contextWindow
                                 editingProfile = profile; editStep = 1
                                 testResult = null
                                 availableModels = emptyList()
@@ -506,6 +509,7 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                         vendorPresets.forEach { vendor ->
                             Card(
                                 modifier = Modifier.fillMaxWidth().clickable {
+                                    editContextWindow = vendor.defaultContextWindow
                                     if (vendor.name == "自定义") {
                                         editEndpoint = ""
                                         editModel = ""
@@ -602,7 +606,21 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                                 }
                             },
                         )
-                        
+
+                        // 上下文窗口大小
+                        OutlinedTextField(
+                            value = if (editContextWindow == 0) "" else editContextWindow.toString(),
+                            onValueChange = { v ->
+                                editContextWindow = v.filter { it.isDigit() }.take(7).toIntOrNull()
+                                    ?: if (v.isEmpty()) 0 else editContextWindow
+                            },
+                            label = { Text("上下文窗口 (token)") },
+                            placeholder = { Text("128000") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            supportingText = { Text("75% 用量自动触发上下文压缩", style = MaterialTheme.typography.labelSmall) },
+                        )
+
                         // 测试连接和获取模型按钮
                         val context = androidx.compose.ui.platform.LocalContext.current
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -702,10 +720,11 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                                     val updated = editingProfile!!.copy(
                                         name = editName, apiEndpoint = editEndpoint,
                                         apiKey = editKey, modelName = editModel,
+                                        contextWindow = editContextWindow,
                                     )
                                     chatViewModel.updateCloudProfile(updated)
                                 } else {
-                                    chatViewModel.addCloudProfile(editName, editEndpoint, editKey, editModel)
+                                    chatViewModel.addCloudProfile(editName, editEndpoint, editKey, editModel, editContextWindow)
                                 }
                                 showEditDialog = false
                             }

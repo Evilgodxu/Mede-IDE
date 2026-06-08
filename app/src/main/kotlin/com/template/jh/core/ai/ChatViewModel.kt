@@ -105,11 +105,6 @@ class ChatViewModel(
             }
         }
         viewModelScope.launch {
-            FileOperationEvents.events.collect { event ->
-                // 文件操作事件由 EditorScreenState 的 createReviewForEvent 处理
-            }
-        }
-        viewModelScope.launch {
             preferencesRepo.cloudModelEnabled.collect { enabled ->
                 _state.update { it.copy(cloudModelEnabled = enabled) }
             }
@@ -117,13 +112,27 @@ class ChatViewModel(
         viewModelScope.launch {
             preferencesRepo.cloudModelProfiles.collect { profiles ->
                 _state.update { it.copy(cloudModelProfiles = profiles) }
+                updateContextMaxTokens()
             }
         }
         viewModelScope.launch {
             preferencesRepo.activeCloudProfileId.collect { id ->
                 _state.update { it.copy(activeCloudProfileId = id) }
+                updateContextMaxTokens()
             }
         }
+    }
+
+    // 根据当前云端模型配置更新 UI 状态中的上下文窗口最大值
+    private fun updateContextMaxTokens() {
+        val s = _state.value
+        if (!s.cloudModelEnabled) {
+            _state.update { it.copy(contextMaxTokens = DEFAULT_CONTEXT_WINDOW) }
+            return
+        }
+        val window = s.cloudModelProfiles.find { it.id == s.activeCloudProfileId }?.contextWindow
+            ?: DEFAULT_CONTEXT_WINDOW
+        _state.update { it.copy(contextMaxTokens = window) }
     }
 
     fun setInputText(text: String) {
@@ -226,10 +235,15 @@ class ChatViewModel(
                 } else {
                     // LiteRT: 上下文超出阈值时压缩并重建 Conversation
                     val currentMsgs = _state.value.messages
-                    if (estimateContextTokens(currentMsgs) > COMPRESS_THRESHOLD) {
+                    if (estimateContextTokens(currentMsgs) > getCompressThreshold()) {
                         val compressed = compressMessages(currentMsgs)
                         _state.update { it.copy(messages = compressed) }
                         resetConversation()
+                        // 将保留的消息（不含压缩通知）转为 LiteRT Messages 重建上下文
+                        val contextMsgs = compressed.filterNot {
+                            it.role == ChatRole.Model && it.content.startsWith("[上下文压缩累计]")
+                        }
+                        pendingInitialMessages = chatMessagesToLiteRT(contextMsgs)
                     }
                     val conv = ensureConversation()
                     processWithJsonTools(text, modelMsgId, ctx, tempImagePaths)
@@ -250,15 +264,8 @@ class ChatViewModel(
 
     fun requestOpenFile(path: String) { _openFileRequests.tryEmit(path) }
 
-    // 接受文件的所有修改
-    fun acceptAllChanges(filePath: String) {
-        FileOperationEvents.notifyAcceptAll(filePath)
-    }
 
-    // 拒绝文件的所有修改
-    fun rejectAllChanges(filePath: String) {
-        FileOperationEvents.notifyRejectAll(filePath)
-    }
+
 
 
 
@@ -531,35 +538,73 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
     // ---- 图像支持：URI 转临时文件 ----
     // ---- 上下文压缩 ----
     companion object {
-        private const val MAX_CONTEXT_TOKENS = 128000
-        private const val COMPRESS_THRESHOLD = 96000  // 75% 时触发
-        private const val KEEP_EXCHANGES = 3          // 保留最后 3 轮用户↔模型交换
+        private const val DEFAULT_CONTEXT_WINDOW = 128000    // 默认上下文窗口
+        private const val KEEP_EXCHANGES = 5                 // 保留最后 5 轮用户↔模型交换
+        private const val KEEP_PRIORITY_LINES = 200          // 保护早期含代码块/工具结果的最多行数
     }
 
-    // 粗略 token 估算
-    private fun estimateTokens(text: String): Int = text.length / 2
+    // 根据配置获取上下文窗口大小（云端按 profile，本地用默认值）
+    private fun getContextWindow(): Int {
+        val s = _state.value
+        if (!s.cloudModelEnabled) return DEFAULT_CONTEXT_WINDOW
+        val profile = s.cloudModelProfiles.find { it.id == s.activeCloudProfileId }
+        return profile?.contextWindow ?: DEFAULT_CONTEXT_WINDOW
+    }
+    private fun getCompressThreshold(): Int = (getContextWindow() * 0.75).toInt()
+
+    // 精确 token 估算：代码 ASCII ~4 chars/token，中文等 ~2 chars/token
+    private fun estimateTokens(text: String): Int {
+        var ascii = 0
+        var other = 0
+        for (c in text) {
+            if (c.code <= 127) ascii++ else other++
+        }
+        return ascii / 4 + other / 2
+    }
 
     // 计算当前消息列表的 token 估计值
     private fun estimateContextTokens(messages: List<ChatMessage>): Int =
         messages.sumOf { estimateTokens(it.content) }
 
-    // 压缩消息列表：丢弃早期消息，仅保留最后 KEEP_EXCHANGES 轮交换
+    // 压缩消息列表：丢弃早期消息，保留最后 KEEP_EXCHANGES 轮 + 含代码块/工具结果的早期消息
     private fun compressMessages(messages: List<ChatMessage>): List<ChatMessage> {
+        val threshold = getCompressThreshold()
         val totalTokens = estimateContextTokens(messages)
-        if (totalTokens <= COMPRESS_THRESHOLD) return messages
+        if (totalTokens <= threshold) return messages
 
-        // 从后往前收集，保留最后 KEEP_EXCHANGES 个用户消息及其之后的完整响应
-        val kept = mutableListOf<ChatMessage>()
+        // 第1遍：从后往前收集，保留最后 KEEP_EXCHANGES 个用户消息及其之后的完整响应
+        val recent = mutableListOf<ChatMessage>()
         var userCount = 0
         for (i in messages.indices.reversed()) {
-            kept.add(0, messages[i])
+            recent.add(0, messages[i])
             if (messages[i].role == ChatRole.User) {
                 userCount++
                 if (userCount >= KEEP_EXCHANGES) break
             }
         }
 
-        val removedTokens = totalTokens - estimateContextTokens(kept)
+        // 第2遍：扫描早期消息，保护含代码块、工具结果的优先级消息
+        val keepEnd = messages.size - recent.size
+        val priorityEarly = messages.take(keepEnd).filter { msg ->
+            (msg.role == ChatRole.Tool) ||
+            msg.content.contains("```") ||
+            msg.content.contains("[工具调用:") ||
+            msg.content.contains("filePath") ||
+            msg.content.contains("\"path\":")
+        }
+        var priorityLines = 0
+        val combined = mutableListOf<ChatMessage>()
+        // 优先加入最近的优先级消息（倒序）
+        for (msg in priorityEarly.reversed()) {
+            if (msg !in combined) {
+                combined.add(0, msg)
+                priorityLines += msg.content.lines().size
+                if (priorityLines > KEEP_PRIORITY_LINES) break
+            }
+        }
+        combined.addAll(recent)
+
+        val removedTokens = totalTokens - estimateContextTokens(combined)
         _state.update {
             it.copy(
                 contextCompressedTokens = it.contextCompressedTokens + removedTokens,
@@ -568,19 +613,43 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             )
         }
 
-        // 在压缩后的消息前插入压缩说明
+        // 合并压缩通知为一条累计消息（避免多次压缩产生多条通知占据 token）
+        val existingSummaryIndex = combined.indexOfFirst {
+            it.role == ChatRole.Model && it.content.startsWith("[上下文压缩累计]")
+        }
         val summaryMsg = ChatMessage(
             role = ChatRole.Model,
-            content = "[上下文压缩] 已移除早期 ${removedTokens / 1000}k tokens，保留最近 $KEEP_EXCHANGES 轮对话。",
-            timestamp = kept.firstOrNull()?.timestamp ?: System.currentTimeMillis(),
+            content = "[上下文压缩累计] 累计移除 ${removedTokens / 1000}k tokens，保留最近 $KEEP_EXCHANGES 轮对话。",
+            timestamp = System.currentTimeMillis(),
         )
-        return listOf(summaryMsg) + kept
+        return if (existingSummaryIndex >= 0) {
+            // 替换旧的通知
+            combined.toMutableList().also { list -> list[existingSummaryIndex] = summaryMsg }
+        } else {
+            listOf(summaryMsg) + combined
+        }
     }
 
     // 重置 LiteRT Conversation 以节省上下文（用于本地模型路径）
     private fun resetConversation() {
         activeConversation = null
     }
+
+    // 将 ChatMessage 列表转为 LiteRT Message，用于重建 Conversation 时恢复上下文
+    private fun chatMessagesToLiteRT(messages: List<ChatMessage>): List<Message> =
+        messages.mapNotNull { msg ->
+            when (msg.role) {
+                ChatRole.User -> Message.user(msg.content)
+                ChatRole.Model -> Message.model(msg.content)
+                ChatRole.System -> Message.system(msg.content)
+                ChatRole.Tool -> Message.tool(
+                    com.google.ai.edge.litertlm.Contents.of(
+                        listOf(com.google.ai.edge.litertlm.Content.ToolResponse("", msg.content))
+                    )
+                )
+                else -> null
+            }
+        }
 
 
     private fun uriToTempFile(ctx: android.content.Context, uri: Uri): File? = try {
@@ -593,26 +662,61 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
 
     // ---- JSON 工具调用解析与调度（手动模式，适配 gemma-4 JSON 格式） ----
 
+    // 检查文本中的指定位置是否在 [think]...[/think] 块内部
+    private fun isInsideThinkBlock(text: String, pos: Int): Boolean {
+        val before = text.substring(0, pos)
+        val lastThinkOpen = before.lastIndexOf("[think]")
+        val lastThinkClose = before.lastIndexOf("[/think]")
+        return lastThinkOpen >= 0 && lastThinkOpen > lastThinkClose
+    }
+
+    // 检查 JSON 起始位置是否为独立行（行首仅空白 → `{`）
+    // 若同行 `{` 前有非空白字符，则为嵌入文本，不是真正的工具调用
+    private fun isStandaloneJson(text: String, pos: Int): Boolean {
+        // 计算 `{` 所在行的行首位置
+        val lineStart = text.lastIndexOf('\n', pos - 1) + 1  // -1 时返回 0
+        // 检查从行首到 pos 是否只有空白字符
+        for (i in lineStart until pos) {
+            if (text[i] != ' ' && text[i] != '\t') return false
+        }
+        return true
+    }
+
     private fun extractJsonToolCall(text: String): Triple<String?, String, Map<String, String>>? {
         val trimmed = text.trim()
-        val start = trimmed.indexOf("{\"tool_name\"")
-        if (start < 0) return null
-        var depth = 0
-        var end = -1
-        for (i in start until trimmed.length) {
-            when (trimmed[i]) { '{' -> depth++; '}' -> { depth--; if (depth == 0) { end = i; break } } }
+        if (!trimmed.contains("{\"tool_name\"")) return null
+
+        // 逐次扫描，跳过 [think] 块内部 JSON 以及非独立行的嵌入 JSON
+        var searchStart = 0
+        while (true) {
+            val start = trimmed.indexOf("{\"tool_name\"", searchStart)
+            if (start < 0) return null
+            if (isInsideThinkBlock(trimmed, start)) {
+                searchStart = start + 1
+                continue
+            }
+            // 新增：跳过嵌入行内文本的 JSON（非独立行）
+            if (!isStandaloneJson(trimmed, start)) {
+                searchStart = start + 1
+                continue
+            }
+            var depth = 0
+            var end = -1
+            for (i in start until trimmed.length) {
+                when (trimmed[i]) { '{' -> depth++; '}' -> { depth--; if (depth == 0) { end = i; break } } }
+            }
+            if (end < 0) return null
+            return try {
+                val json = org.json.JSONObject(trimmed.substring(start, end + 1))
+                val toolName = json.optString("tool_name", "")
+                if (toolName.isEmpty()) return null
+                val argsJson = json.optJSONObject("arguments") ?: org.json.JSONObject()
+                val args = mutableMapOf<String, String>()
+                for (k in argsJson.keys()) args[k] = argsJson.optString(k, "")
+                val prefix = trimmed.substring(0, start).trim().ifEmpty { null }
+                Triple(prefix, toolName, args)
+            } catch (_: Exception) { null }
         }
-        if (end < 0) return null
-        return try {
-            val json = org.json.JSONObject(trimmed.substring(start, end + 1))
-            val toolName = json.optString("tool_name", "")
-            if (toolName.isEmpty()) return null
-            val argsJson = json.optJSONObject("arguments") ?: org.json.JSONObject()
-            val args = mutableMapOf<String, String>()
-            for (k in argsJson.keys()) args[k] = argsJson.optString(k, "")
-            val prefix = trimmed.substring(0, start).trim().ifEmpty { null }
-            Triple(prefix, toolName, args)
-        } catch (_: Exception) { null }
     }
 
     private fun executeAiTool(name: String, args: Map<String, String>): String = try {
@@ -946,11 +1050,11 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
     // 云端模型设置方法
     fun setCloudModelEnabled(enabled: Boolean) {
         viewModelScope.launch { preferencesRepo.setCloudModelEnabled(enabled) }
-        if (!enabled) _state.update { it.copy(cloudModelEnabled = false) }
-        else _state.update { it.copy(cloudModelEnabled = true) }
+        _state.update { it.copy(cloudModelEnabled = enabled) }
+        updateContextMaxTokens()
     }
 
-    fun addCloudProfile(name: String, apiEndpoint: String, apiKey: String, modelName: String) {
+    fun addCloudProfile(name: String, apiEndpoint: String, apiKey: String, modelName: String, contextWindow: Int = 128000) {
         val id = java.util.UUID.randomUUID().toString()
         val newProfile = CloudModelProfile(
             id = id,
@@ -958,6 +1062,7 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
             apiEndpoint = apiEndpoint,
             apiKey = apiKey,
             modelName = modelName,
+            contextWindow = contextWindow,
         )
         viewModelScope.launch {
             val current = preferencesRepo.cloudModelProfiles.first()
@@ -1018,7 +1123,8 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
 
     fun clearMessages() {
         sendJob?.cancel()
-        _state.update { it.copy(messages = emptyList(), inputText = "") }
+        _state.update { it.copy(messages = emptyList(), inputText = "",
+            isContextCompressed = false, contextCompressedTokens = 0, contextCompressedCount = 0) }
         viewModelScope.launch(Dispatchers.IO) { closeConversation() }
     }
 
@@ -1058,7 +1164,9 @@ sb.append("You are a helpful AI coding assistant. Always respond in Chinese (简
                 ChatRole.Tool -> Message.tool(com.google.ai.edge.litertlm.Contents.of(listOf(com.google.ai.edge.litertlm.Content.ToolResponse("", msg.content))))
             }
         }
-        _state.update { it.copy(messages = entry.messages, inputText = "", isLoading = false, activeConversationId = entry.id, isHistoryOpen = false) }
+        _state.update { it.copy(messages = entry.messages, inputText = "", isLoading = false,
+            activeConversationId = entry.id, isHistoryOpen = false,
+            isContextCompressed = false, contextCompressedTokens = 0, contextCompressedCount = 0) }
         viewModelScope.launch(Dispatchers.IO) { closeConversation() }
     }
 

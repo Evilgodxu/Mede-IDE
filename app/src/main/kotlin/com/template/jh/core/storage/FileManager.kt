@@ -49,7 +49,7 @@ class FileManager(private val context: Context) {
 
     /**
      * 根据相对路径获取 DocumentFile
-     * 纯 DocumentFile API 实现，逐级 findFile
+     * 优先使用 findFile（标准 API），失败时降级到遍历 listFiles 匹配名称
      */
     private fun resolvePath(relativePath: String): DocumentFile? {
         val root = rootDocFile ?: return null
@@ -59,7 +59,15 @@ class FileManager(private val context: Context) {
             var current = root
             for (segment in relativePath.trim('/').split('/')) {
                 if (segment.isEmpty()) continue
-                current = current.findFile(segment) ?: return null
+                // 标准 findFile
+                var found = current.findFile(segment)
+                // findFile 失败时降级：遍历所有子文件按名称匹配（SF 常见兼容问题）
+                if (found == null) {
+                    found = current.listFiles().firstOrNull {
+                        it.name.equals(segment, ignoreCase = true)
+                    }
+                }
+                current = found ?: return null
             }
             current
         } catch (_: Exception) {
@@ -90,13 +98,15 @@ class FileManager(private val context: Context) {
 
             val displayPath = if (subPath.isBlank()) "project root" else subPath.trim('/')
             buildString {
-                appendLine("Path: $displayPath")
-                appendLine("---")
+                appendLine("$displayPath/")
                 sorted.forEach { doc ->
                     val name = doc.name ?: return@forEach
-                    val tag = if (doc.isDirectory) "[DIR]" else "[FILE]"
-                    val sizeStr = if (!doc.isDirectory && doc.length() > 0) " (${formatSize(doc.length())})" else ""
-                    appendLine("$tag $name$sizeStr")
+                    if (doc.isDirectory) {
+                        appendLine("  $name/")
+                    } else {
+                        val sizeStr = if (doc.length() > 0) " (${formatSize(doc.length())})" else ""
+                        appendLine("  $name$sizeStr")
+                    }
                 }
             }.trimEnd()
         } catch (e: Exception) {

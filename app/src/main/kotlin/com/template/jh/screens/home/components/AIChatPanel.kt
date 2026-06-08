@@ -124,30 +124,34 @@ fun AIChatPanel(
         }
     }
 
-    // 自动滚动到最新消息（消息数量变化时触发）
+    // 是否用户手动向上滚动（远离底部），此时不自动回滚
+    var userScrolledUp by remember { mutableStateOf(false) }
+
+    // 监听用户滚动方向，检测手动向上滚动
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .collect { firstIdx ->
+                if (!state.isLoading) return@collect
+                val lastIdx = state.messages.size - 1
+                val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                userScrolledUp = lastVisible < lastIdx - 1
+            }
+    }
+
+    // 消息数量变化时立即滚到底（不延时）
     LaunchedEffect(state.messages.size) {
         if (state.messages.isEmpty()) return@LaunchedEffect
         val lastIndex = state.messages.size - 1
-        delay(50)
-        if (!isActive) return@LaunchedEffect
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-        // 如果用户正在靠近底部（最后可见项在倒数第3以内），自动滚到底
-        if (lastVisible >= lastIndex - 2) {
-            listState.animateScrollToItem(lastIndex)
-        }
+        // 不延迟：新消息出现时立即滚动
+        listState.scrollToItem(lastIndex)
     }
 
-    // 流式生成时的平滑滚动（监听内容长度变化）
+    // 流式生成时持续滚动到底（无延迟，即时跟随）
     LaunchedEffect(lastMessageContentLength, state.isLoading) {
         if (state.messages.isEmpty() || !state.isLoading) return@LaunchedEffect
+        if (userScrolledUp) return@LaunchedEffect // 用户手动查看上文时不强制回滚
         val lastIndex = state.messages.size - 1
-        delay(100) // 防抖 100ms
-        if (!isActive) return@LaunchedEffect // 组合已离开则不滚动
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-        // 当用户靠近底部时自动滚动
-        if (lastVisible >= lastIndex - 1) {
-            listState.animateScrollToItem(lastIndex)
-        }
+        try { listState.scrollToItem(lastIndex) } catch (_: Exception) {}
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -189,15 +193,23 @@ fun AIChatPanel(
                         )
                     }
                 }
+                // 底部 Spacer 确保最后一条消息不被输入框遮挡
+                item { Spacer(Modifier.height(4.dp)) }
             }
         }
 
         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-        val contextUsedTokens = remember(state.messages.size, state.messages.lastOrNull()?.content) {
-            state.messages.sumOf { it.content.length / 2 }
+        val contextUsedTokens = remember(state.messages) {
+            var ascii = 0; var other = 0
+            for (msg in state.messages) {
+                for (c in msg.content) {
+                    if (c.code <= 127) ascii++ else other++
+                }
+            }
+            ascii / 4 + other / 2
         }
-        val contextMaxTokens = 128000
+        val contextMaxTokens = state.contextMaxTokens
         var showContextInfoDialog by remember { mutableStateOf(false) }
         val usageStats by viewModel.usageStats.collectAsState()
         var showUsageStatsDialog by remember { mutableStateOf(false) }
@@ -379,8 +391,6 @@ private fun ChatBubble(
     isActiveStreaming: Boolean = false,
 ) {
     val isUser = message.role == ChatRole.User
-    val bgColor = if (isUser) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-    val shape = RoundedCornerShape(topStart = if (isUser) 12.dp else 4.dp, topEnd = 12.dp, bottomStart = 12.dp, bottomEnd = if (isUser) 4.dp else 12.dp)
     val context = LocalContext.current
 
     // 提取 [think]...[/think] 块
@@ -406,11 +416,7 @@ private fun ChatBubble(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("思考", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(4.dp))
-                        Text(
-                            if (anyThinkExpanded) "▼" else "▶",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Text(if (anyThinkExpanded) "▼" else "▶", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (anyThinkExpanded) {
                         Spacer(Modifier.height(4.dp))
@@ -424,13 +430,11 @@ private fun ChatBubble(
             Spacer(Modifier.height(4.dp))
         }
 
-        // 内容气泡
+        // 内容（无气泡包裹，纯文本行）
         if (displayContent.isNotEmpty()) {
-            Box(
-                Modifier
+            Row(
+                modifier = Modifier
                     .widthIn(max = 360.dp)
-                    .clip(shape)
-                    .background(bgColor)
                     .combinedClickable(
                         onClick = {},
                         onLongClick = {
@@ -438,15 +442,11 @@ private fun ChatBubble(
                             clipboard.setPrimaryClip(ClipData.newPlainText("消息内容", message.content))
                         },
                     )
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.Bottom,
             ) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(displayContent, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f, fill = false))
-                    // 流式输出闪烁光标
-                    if (isActiveStreaming) {
-                        StreamingCursor()
-                    }
-                }
+                Text(displayContent, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f, fill = false))
+                if (isActiveStreaming) StreamingCursor()
             }
         }
     }
@@ -460,9 +460,6 @@ private fun ToolCallBubble(message: ChatMessage) {
     val context = LocalContext.current
     val (prefixText, toolName, toolResult) = remember(message.content) { parseToolMessage(message.content) }
     var showResult by remember { mutableStateOf(false) }
-
-    val shape = RoundedCornerShape(topStart = 4.dp, topEnd = 12.dp, bottomStart = 12.dp, bottomEnd = 12.dp)
-    val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
 
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = Alignment.Start) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)) {
@@ -478,11 +475,10 @@ private fun ToolCallBubble(message: ChatMessage) {
         }
 
         if (prefixText.isNotBlank()) {
-            Box(
-                Modifier
-                    .widthIn(max = 360.dp)
-                    .clip(shape)
-                    .background(bgColor)
+            Text(
+                text = prefixText,
+                modifier = Modifier
+                    .fillMaxWidth()
                     .combinedClickable(
                         onClick = {},
                         onLongClick = {
@@ -490,16 +486,16 @@ private fun ToolCallBubble(message: ChatMessage) {
                             clipboard.setPrimaryClip(ClipData.newPlainText("消息内容", message.content))
                         },
                     )
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Text(prefixText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
-            }
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
         }
 
         if (toolName.isNotBlank()) {
             Spacer(Modifier.height(4.dp))
             Box(
-                Modifier
+                modifier = Modifier
                     .widthIn(max = 360.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f))
@@ -510,67 +506,95 @@ private fun ToolCallBubble(message: ChatMessage) {
                     Text("⚡ $toolName", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
                     Spacer(Modifier.width(4.dp))
                     Text(if (showResult) "▼" else "▶", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                    if (!showResult) {
-                        Text(" 结果", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.6f))
-                    }
+                    if (!showResult) Text(" 结果", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.6f))
                 }
             }
 
             if (showResult && toolResult.isNotBlank()) {
                 Spacer(Modifier.height(2.dp))
-                Box(
-                    Modifier
-                        .widthIn(max = 360.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    val truncated = if (toolResult.length > 500) toolResult.take(500) + "\n..." else toolResult
-                    Text(truncated, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                val truncated = if (toolResult.length > 500) toolResult.take(500) + "\n..." else toolResult
+                Text(
+                    text = truncated,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
+}
+
+// 检查文本中的指定位置是否在 [think]...[/think] 块内部
+private fun isInsideThinkBlock(text: String, pos: Int): Boolean {
+    val before = text.substring(0, pos)
+    val lastThinkOpen = before.lastIndexOf("[think]")
+    val lastThinkClose = before.lastIndexOf("[/think]")
+    return lastThinkOpen >= 0 && lastThinkOpen > lastThinkClose
+}
+
+// 检查 JSON 起始位置是否为独立行（行首仅空白 → `{`）
+private fun isStandaloneJson(text: String, pos: Int): Boolean {
+    val lineStart = text.lastIndexOf('\n', pos - 1) + 1
+    for (i in lineStart until pos) {
+        if (text[i] != ' ' && text[i] != '\t') return false
+    }
+    return true
 }
 
 /**
  * 解析工具消息内容，分离前缀文本、工具名、工具结果。
  */
 private fun parseToolMessage(content: String): Triple<String, String, String> {
-    val jsonStart = content.indexOf("""{"tool_name":""")
-    if (jsonStart < 0) {
-        val markerIdx = content.indexOf("[工具调用:")
-        if (markerIdx >= 0) {
-            val afterMarker = content.substring(markerIdx + "[工具调用:".length).trimStart()
-            val endIdx = afterMarker.indexOf(']')
-            val name = if (endIdx >= 0) afterMarker.substring(0, endIdx).trim() else ""
-            val resultPart = if (endIdx >= 0) afterMarker.substring(endIdx + 1).trim() else content
-            return Triple("", name, resultPart.removePrefix("\n").removePrefix("\n"))
+    // 1. 先过滤掉所有 [think]...[/think] 块（思考过程不属于工具调用内容）
+    val thinkRegex = Regex("""\[think\].*?\[/think]""", RegexOption.DOT_MATCHES_ALL)
+    val filteredContent = content.replace(thinkRegex, "").trim()
+
+    // 2. 在过滤后的内容中查找工具调用
+    var searchStart = 0
+    while (true) {
+        val jsonStart = filteredContent.indexOf("""{"tool_name":""", searchStart)
+        if (jsonStart < 0) {
+            val markerIdx = filteredContent.indexOf("[工具调用:")
+            if (markerIdx >= 0) {
+                val afterMarker = filteredContent.substring(markerIdx + "[工具调用:".length).trimStart()
+                val endIdx = afterMarker.indexOf(']')
+                val name = if (endIdx >= 0) afterMarker.substring(0, endIdx).trim() else ""
+                val resultPart = if (endIdx >= 0) afterMarker.substring(endIdx + 1).trim() else filteredContent
+                return Triple("", name, resultPart.removePrefix("\n").removePrefix("\n"))
+            }
+            return Triple("", "", "")
         }
-        return Triple("", "", "")
-    }
 
-    val prefix = content.substring(0, jsonStart).trim()
-    val afterJsonStart = content.substring(jsonStart)
-
-    var depth = 0
-    var jsonEnd = -1
-    for (i in afterJsonStart.indices) {
-        when (afterJsonStart[i]) {
-            '{' -> depth++
-            '}' -> { depth--; if (depth == 0) { jsonEnd = jsonStart + i; break } }
+        // 检查是否为独立行 JSON（避免嵌入文本中的示例 JSON）
+        if (!isStandaloneJson(filteredContent, jsonStart)) {
+            searchStart = jsonStart + 1
+            continue
         }
+
+        val prefix = filteredContent.substring(0, jsonStart).trim()
+        val afterJsonStart = filteredContent.substring(jsonStart)
+
+        var depth = 0
+        var jsonEnd = -1
+        for (i in afterJsonStart.indices) {
+            when (afterJsonStart[i]) {
+                '{' -> depth++
+                '}' -> { depth--; if (depth == 0) { jsonEnd = jsonStart + i; break } }
+            }
+        }
+        if (jsonEnd < 0) return Triple(prefix, "", "")
+
+        val jsonPart = filteredContent.substring(jsonStart, jsonEnd + 1)
+        val name = try {
+            org.json.JSONObject(jsonPart).optString("tool_name", "")
+        } catch (_: Exception) { "" }
+
+        val resultPart = filteredContent.substring(jsonEnd + 1).trim().removePrefix("\n").removePrefix("\n")
+
+        return Triple(prefix, name, resultPart)
     }
-    if (jsonEnd < 0) return Triple(prefix, "", "")
-
-    val jsonPart = content.substring(jsonStart, jsonEnd + 1)
-    val name = try {
-        org.json.JSONObject(jsonPart).optString("tool_name", "")
-    } catch (_: Exception) { "" }
-
-    val resultPart = content.substring(jsonEnd + 1).trim().removePrefix("\n").removePrefix("\n")
-
-    return Triple(prefix, name, resultPart)
 }
 
 @Composable

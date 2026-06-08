@@ -76,8 +76,7 @@ class AIToolSet(
         }
         val result = fm.writeFile(path, content)
         if (!result.startsWith("Failed") && !result.startsWith("No project")) {
-            val lineCount = if (content.isEmpty()) 0 else content.lines().size
-            FileOperationEvents.notify(path, if (fm.exists(path)) "overwrite" else "create", lineCount, newContent = content)
+            FileOperationEvents.notify(path, if (fm.exists(path)) "overwrite" else "create")
             FileLogger.d("AIToolSet", "writeFile succeeded: $result")
         } else {
             FileLogger.w("AIToolSet", "writeFile failed: $result")
@@ -115,9 +114,8 @@ class AIToolSet(
                         FileLogger.e("AIToolSet", "replaceInFile: replace OK but write failed: $writeResult")
                         return "Replace succeeded but write failed: $writeResult"
                     }
-                    val changed = computeChangedLines(original, newContent)
-                    FileOperationEvents.notify(path, "pending", changed, original, newContent)
-                    FileLogger.d("AIToolSet", "replaceInFile succeeded: $path changed=$changed")
+                    FileOperationEvents.notify(path, "modify")
+                    FileLogger.d("AIToolSet", "replaceInFile succeeded: $path")
                     "Replace succeeded: $path. ${result.message}"
                 }
                 is CodeEditTool.ReplaceResult.Error -> {
@@ -130,12 +128,6 @@ class AIToolSet(
             FileLogger.e("AIToolSet", "replaceInFile failed: ${e.message}", e)
             "Replace failed: ${e.message}"
         }
-    }
-
-    private fun computeChangedLines(old: String, new: String): Int {
-        if (old == new) return 0
-        val o = old.lines(); val n = new.lines()
-        return (maxOf(o.size, n.size) - (o.zip(n).count { it.first == it.second })).coerceAtLeast(1)
     }
 
     @Tool(description = "Delete a file or directory in the project. Use with caution - this permanently removes files.")
@@ -269,13 +261,13 @@ class AIToolSet(
             "https://searx.be/search?q=$encoded&format=json&language=all",
             "https://search.bus-hit.me/search?q=$encoded&format=json&language=all",
         )
-        
+
         for (url in instances) {
             try {
                 val json = fetchUrl(url, timeoutMs = 10000)
                 val obj = org.json.JSONObject(json)
                 val results = obj.optJSONArray("results")
-                
+
                 if (results != null && results.length() > 0) {
                     val output = mutableListOf<String>()
                     for (i in 0 until minOf(results.length(), 5)) {
@@ -383,13 +375,13 @@ class AIToolSet(
             setRequestProperty("Connection", "keep-alive")
             extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
         }
-        
+
         val inputStream = if (conn.contentEncoding == "gzip") {
             java.util.zip.GZIPInputStream(conn.inputStream)
         } else {
             conn.inputStream
         }
-        
+
         val html = inputStream.bufferedReader().readText()
         val code = conn.responseCode
         conn.disconnect()
@@ -399,7 +391,7 @@ class AIToolSet(
 
     private fun parseBingResults(html: String): List<Pair<String, String>> {
         val results = mutableListOf<Pair<String, String>>()
-        
+
         // Bing 搜索结果解析
         val patterns = listOf(
             // 新布局
@@ -409,7 +401,7 @@ class AIToolSet(
             // 备选
             Regex("""<a[^>]*href=\"([^\"]+)\"[^>]*h=\"[^\"]*\"[^>]*>(.*?)</a>.*?<span[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL),
         )
-        
+
         for (pattern in patterns) {
             for (m in pattern.findAll(html).take(5)) {
                 val link = m.groupValues[1].replace(Regex("<[^>]*>"), "").trim()

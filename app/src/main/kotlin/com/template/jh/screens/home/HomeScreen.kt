@@ -29,10 +29,6 @@ import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import com.template.jh.R
 import com.template.jh.core.ai.ChatViewModel
-import com.template.jh.core.ai.FileOperationEvents
-import com.template.jh.core.ai.ReviewAction
-import com.template.jh.core.editor.LineChangeType
-import com.template.jh.core.editor.computeLineDiff
 import com.template.jh.core.storage.FileManager
 import com.template.jh.screens.home.components.AIChatPanel
 import com.template.jh.screens.home.components.MainContentArea
@@ -78,25 +74,6 @@ fun HomeScreen(
         }
         val modifiedPaths = fileTabs.filter { editorState.isFileModified(it.id) }.map { it.id }
         chatViewModel.setModifiedFilePaths(modifiedPaths)
-    }
-
-    LaunchedEffect(Unit) {
-        FileOperationEvents.events.collect { event ->
-            editorState.editorContent.remove(event.path)
-            editorState.createReviewForEvent(event)
-            if (event.operation != "delete") {
-                editorState.openFileTab(event.path)
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        FileOperationEvents.reviewEvents.collect { event ->
-            when (event.action) {
-                ReviewAction.AcceptAll -> editorState.acceptAllChanges(event.path)
-                ReviewAction.RejectAll -> editorState.rejectAllChanges(event.path)
-            }
-        }
     }
 
     LaunchedEffect(Unit) {
@@ -157,8 +134,6 @@ fun HomeScreen(
         chatViewModel.setProjectRoot(null)
         editorState.closeAllTabs()
         editorState.editorContent.clear()
-        editorState.reviewStates.clear()
-        editorState.showReviewPanels.clear()
         isSettingsOpen = false
         selectedTab = null
         autoOpened = false
@@ -278,42 +253,15 @@ fun HomeScreen(
                     onSaveAllTabs = { editorState.tabs.filter { it.type == TabType.File }.forEach { editorState.saveFile(it.id) } },
                     tabContent = { path ->
                         val tfv = editorState.editorContent.getOrPut(path) { TextFieldValue(editorState.readFileFromSource(path)) }
-                        val reviewState = editorState.reviewStates[path]
-                        val displayText = reviewState?.newContent ?: tfv.text
-                        val (_, newLineDiffs) = if (reviewState != null) computeLineDiff(reviewState.oldContent, reviewState.newContent) else Pair(emptyMap(), emptyMap())
-                        val lineDiffs = newLineDiffs.filter { it.value != LineChangeType.Unchanged }
 
                         CodeEditor(
-                            text = if (reviewState != null) TextFieldValue(displayText) else tfv,
+                            text = tfv,
                             onTextChange = {
                                 editorState.handleTextChange(path, it)
                                 val modified = editorState.tabs.filter { t -> t.type == TabType.File && editorState.isFileModified(t.id) }.map { it.id }
                                 chatViewModel.setModifiedFilePaths(modified)
                             },
                             modifier = Modifier.fillMaxSize(),
-                            lineDiffs = lineDiffs,
-                            originalContent = reviewState?.oldContent,
-                            reviewState = reviewState,
-                            pendingFilePath = if (reviewState != null) path else null,
-                            showReviewPanel = editorState.showReviewPanels[path] ?: false,
-                            onToggleReviewPanel = { editorState.toggleReviewPanel(path) },
-                            onAcceptBlock = { editorState.acceptChangeBlock(path, it) },
-                            onRejectBlock = { editorState.rejectChangeBlock(path, it) },
-                            onNavigateToBlock = { editorState.navigateToBlock(path, it) },
-                            onJumpToPrevChange = {
-                                reviewState?.let { state ->
-                                    val prev = state.prevPendingIndex()
-                                    if (prev >= 0) editorState.navigateToBlock(path, prev)
-                                }
-                            },
-                            onJumpToNextChange = {
-                                reviewState?.let { state ->
-                                    val next = state.nextPendingIndex()
-                                    if (next >= 0) editorState.navigateToBlock(path, next)
-                                }
-                            },
-                            onAcceptChanges = { editorState.acceptAllChanges(path) },
-                            onRejectChanges = { editorState.rejectAllChanges(path) },
                             onAddToChat = { selectedText ->
                                 val current = chatViewModel.state.value.inputText
                                 chatViewModel.setInputText(if (current.isBlank()) selectedText else "$current\n\n$selectedText")
@@ -422,7 +370,6 @@ private fun LeftPanelContent(
                 onFileClick = onFileClick,
                 onAddToConversation = onAddToConversation,
                 onRename = { relativePath, newName ->
-                    // 重命名通过 DocumentsContract 完成
                     val file = files.find { it.relativePath == relativePath }
                     if (file != null) viewModel.renameFile(file.uri, newName)
                 },
@@ -440,5 +387,3 @@ private fun LeftPanelContent(
         null -> {}
     }
 }
-
-
