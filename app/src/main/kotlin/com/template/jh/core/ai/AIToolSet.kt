@@ -54,6 +54,84 @@ class AIToolSet(
         // 自动截断阈值：超过此行数且未明确指定 limit 时，仅显示前 N 行
         private const val MAX_AUTO_LINES = 200
         private const val TRUNCATE_WARNING_LINES = 500
+
+        /** 构建 OpenAI 兼容的 tools 定义 JSON */
+        fun buildOpenAIToolsJson(): String {
+            val tools = org.json.JSONArray()
+            tools.put(buildReadFileTool())
+            tools.put(buildWriteFileTool())
+            tools.put(buildReplaceInFileTool())
+            tools.put(buildBatchReplaceInFileTool())
+            tools.put(buildDeleteFileTool())
+            tools.put(buildCreateDirectoryTool())
+            tools.put(buildListFilesTool())
+            tools.put(buildGrepTool())
+            tools.put(buildSearchCodebaseTool())
+            tools.put(buildRunCommandTool())
+            tools.put(buildSearchWebTool())
+            tools.put(buildReadLintsTool())
+            return tools.toString()
+        }
+
+        private fun p(type: String, desc: String): org.json.JSONObject = org.json.JSONObject().apply {
+            put("type", type); put("description", desc)
+        }
+        private fun toolDef(name: String, desc: String, required: List<String> = emptyList(), vararg props: Pair<String, org.json.JSONObject>): org.json.JSONObject = org.json.JSONObject().apply {
+            put("type", "function")
+            put("function", org.json.JSONObject().apply {
+                put("name", name); put("description", desc)
+                put("parameters", org.json.JSONObject().apply {
+                    put("type", "object")
+                    put("properties", org.json.JSONObject().apply { props.forEach { (k, v) -> put(k, v) } })
+                    if (required.isNotEmpty()) put("required", org.json.JSONArray(required))
+                })
+            })
+        }
+        private fun buildReadFileTool() = toolDef("readFile", "Read file content with pagination", listOf("path"),
+            "path" to p("string", "File path relative to project root"),
+            "offset" to p("integer", "Starting line (1-based, default 1)"),
+            "limit" to p("integer", "Max lines (default 1000)"),
+        )
+        private fun buildWriteFileTool() = toolDef("writeFile", "Create new file only (refuses overwrite)", listOf("path", "content"),
+            "path" to p("string", "File path relative to project root"),
+            "content" to p("string", "Complete file content"),
+        )
+        private fun buildReplaceInFileTool() = toolDef("replaceInFile", "Edit file by replacing exact code block", listOf("path", "old_string", "new_string"),
+            "path" to p("string", "File path relative to project root"),
+            "old_string" to p("string", "Exact code block to find (unique in file)"),
+            "new_string" to p("string", "Replacement code block"),
+        )
+        private fun buildBatchReplaceInFileTool() = toolDef("batchReplaceInFile", "Edit file at multiple non-overlapping locations", listOf("path", "edits"),
+            "path" to p("string", "File path relative to project root"),
+            "edits" to p("string", "JSON array: [{\"old_string\":\"...\",\"new_string\":\"...\"}]"),
+        )
+        private fun buildDeleteFileTool() = toolDef("deleteFile", "Delete file or directory (permanent)", listOf("path"),
+            "path" to p("string", "File/directory path relative to project root"),
+        )
+        private fun buildCreateDirectoryTool() = toolDef("createDirectory", "Create directory (auto-creates parents)", listOf("path"),
+            "path" to p("string", "Directory path relative to project root"),
+        )
+        private fun buildListFilesTool() = toolDef("listFiles", "List directory contents with file sizes",
+            props = arrayOf("subPath" to p("string", "Subdirectory path (empty=root)")),
+        )
+        private fun buildGrepTool() = toolDef("grep", "Search file contents by regex", listOf("pattern"),
+            "pattern" to p("string", "Regex pattern"),
+            "extension" to p("string", "File extension filter (e.g. 'kt')"),
+            "glob" to p("string", "Glob pattern filter (e.g. '*.kt')"),
+            "ignoreCase" to p("boolean", "Case insensitive (default true)"),
+            "contextLines" to p("integer", "Context lines before/after match (default 2)"),
+        )
+        private fun buildSearchCodebaseTool() = toolDef("searchCodebase", "Semantic code search by meaning", listOf("query"),
+            "query" to p("string", "Natural language query (e.g. 'where is auth?')"),
+            "targetDirectories" to p("string", "Comma-separated directories to search"),
+        )
+        private fun buildRunCommandTool() = toolDef("runCommand", "Execute shell command (adb, git, gradle)", listOf("command"),
+            "command" to p("string", "Command to execute, e.g. 'git status'"),
+        )
+        private fun buildSearchWebTool() = toolDef("searchWeb", "Search internet for current information", listOf("query"),
+            "query" to p("string", "Concise search query"),
+        )
+        private fun buildReadLintsTool() = toolDef("readLints", "Read build/lint errors")
     }
 
     /** 替换后清理多余空行：3+ 连续换行 → 2，首尾空行 */
@@ -409,6 +487,11 @@ class AIToolSet(
         Log.d("AIToolSet", "searchWeb: query=$query")
         FileLogger.d("AIToolSet", "searchWeb: query=$query")
         return try {
+            val ddgResult = searchViaDuckDuckGo(query)
+            if (ddgResult.isNotBlank()) {
+                FileLogger.d("AIToolSet", "searchWeb: DuckDuckGo returned ${ddgResult.lines().size} lines")
+                return ddgResult
+            }
             val searxResult = searchViaSearxNG(query)
             if (searxResult.isNotBlank() && !searxResult.contains("失败") && !searxResult.contains("无结果")) {
                 FileLogger.d("AIToolSet", "searchWeb: SearXNG returned ${searxResult.lines().size} lines")
@@ -419,9 +502,7 @@ class AIToolSet(
                 FileLogger.d("AIToolSet", "searchWeb: Bing returned ${bingResult.lines().size} lines")
                 return bingResult
             }
-            val ddgResult = searchViaDuckDuckGo(query)
-            FileLogger.d("AIToolSet", "searchWeb: DuckDuckGo returned ${ddgResult.lines().size} lines")
-            ddgResult
+            "搜索无结果: $query"
         } catch (e: Exception) {
             Log.e("AIToolSet", "searchWeb failed: ${e.message}", e)
             FileLogger.e("AIToolSet", "searchWeb failed: ${e.message}", e)
@@ -494,50 +575,25 @@ class AIToolSet(
 
     private fun searchViaDuckDuckGo(query: String): String {
         val encoded = URLEncoder.encode(query, "UTF-8")
-        val urls = listOf(
-            "https://lite.duckduckgo.com/lite/?q=$encoded",
-            "https://html.duckduckgo.com/html/?q=$encoded",
-        )
-
-        for (searchUrl in urls) {
-            try {
-                val html = fetchUrl(searchUrl, timeoutMs = 15000)
-                val results = parseDdgResults(html)
-                if (results.isNotEmpty()) {
-                    return results.joinToString("\n---\n") { "• ${it.first}\n  ${it.second}" }
-                }
-            } catch (e: Exception) {
-                Log.w("AIToolSet", "DuckDuckGo $searchUrl failed: ${e.message}")
-                FileLogger.w("AIToolSet", "DuckDuckGo $searchUrl failed: ${e.message}")
-            }
-        }
-
-        try {
-            val apiUrl = "https://api.duckduckgo.com/?q=$encoded&format=json&no_html=1&skip_disambig=1"
-            val json = fetchUrl(apiUrl, timeoutMs = 10000)
-            val obj = org.json.JSONObject(json)
-            val abstractText = obj.optString("AbstractText", "")
-            val answer = obj.optString("Answer", "")
-            val heading = obj.optString("Heading", "")
-            val results = mutableListOf<String>()
-            if (abstractText.isNotBlank()) results.add("$heading\n$abstractText")
-            if (answer.isNotBlank() && answer != abstractText) results.add("Answer: $answer")
-            val topics = obj.optJSONArray("RelatedTopics")
-            if (topics != null) {
-                for (i in 0 until minOf(topics.length(), 5)) {
-                    val topic = topics.optJSONObject(i) ?: continue
-                    val text = topic.optString("Text", "")
-                    if (text.isNotBlank()) results.add("• ${text.take(200)}")
-                }
-            }
-            if (results.isNotEmpty()) return results.joinToString("\n---\n")
+        return try {
+            val html = fetchUrl("https://html.duckduckgo.com/html/?q=$encoded", timeoutMs = 15000)
+            val titleRe = Regex("""class="result__title"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>""", RegexOption.DOT_MATCHES_ALL)
+            val snippetRe = Regex("""class="result__snippet"[^>]*>([\s\S]*?)</""", RegexOption.DOT_MATCHES_ALL)
+            val stitles = titleRe.findAll(html).take(8).map {
+                it.groupValues[2].replace(Regex("<[^>]+>"), "").trim() to it.groupValues[1]
+            }.toList()
+            val snippets = snippetRe.findAll(html).take(8).map {
+                it.groupValues[1].replace(Regex("<[^>]+>"), "").trim()
+            }.toList()
+            if (stitles.isEmpty()) "" else
+            stitles.mapIndexed { i, (title, link) ->
+                "**$title**\n$link\n${snippets.getOrElse(i) { "" }}"
+            }.joinToString("\n\n")
         } catch (e: Exception) {
-            Log.w("AIToolSet", "DuckDuckGo API failed: ${e.message}")
-            FileLogger.w("AIToolSet", "DuckDuckGo API failed: ${e.message}")
+            Log.w("AIToolSet", "DuckDuckGo failed: ${e.message}")
+            FileLogger.w("AIToolSet", "DuckDuckGo failed: ${e.message}")
+            ""
         }
-
-        FileLogger.w("AIToolSet", "searchViaDuckDuckGo: all sources failed for query=$query")
-        return "Search returned no results for: $query"
     }
 
     private fun fetchUrl(urlString: String, timeoutMs: Int = 15000, extraHeaders: Map<String, String> = emptyMap()): String {
@@ -548,23 +604,25 @@ class AIToolSet(
             setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
             setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
             setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en-US,en;q=0.8")
-            setRequestProperty("Accept-Encoding", "gzip, deflate, br")
+            setRequestProperty("Accept-Encoding", "gzip, deflate")  // 移除 br，Android HttpURLConnection 不支持
             setRequestProperty("DNT", "1")
             setRequestProperty("Connection", "keep-alive")
             extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
         }
 
-        val inputStream = if (conn.contentEncoding == "gzip") {
+        val code = conn.responseCode
+        if (code != 200) {
+            conn.disconnect()
+            throw RuntimeException("HTTP $code")
+        }
+
+        val inputStream = if ("gzip" == conn.contentEncoding) {
             java.util.zip.GZIPInputStream(conn.inputStream)
         } else {
             conn.inputStream
         }
 
-        val html = inputStream.bufferedReader().readText()
-        val code = conn.responseCode
-        conn.disconnect()
-        if (code != 200) throw RuntimeException("HTTP $code")
-        return html
+        return inputStream.bufferedReader().use { it.readText() }.also { conn.disconnect() }
     }
 
     private fun parseBingResults(html: String): List<Pair<String, String>> {

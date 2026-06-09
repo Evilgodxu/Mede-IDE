@@ -37,19 +37,27 @@ data class ApiUsage(
     val completionTokens: Int = 0,
 )
 
+/** 原生工具调用（OpenAI function calling 格式） */
+data class CloudToolCall(
+    val id: String,
+    val functionName: String,
+    val arguments: String,  // JSON string of params
+)
+
 // 云端大模型客户端（OpenAI 兼容 API /chat/completions + SSE 流式）
 class CloudLLMClient(private val context: Context) {
 
     private val connectTimeout = 30000
     private val readTimeout = 60000
 
-    // 发送消息并流式收集响应，返回完整响应文本 + 用量信息
+    // 发送消息并流式收集响应，返回完整响应文本 + 用量信息 + 原生工具调用
     suspend fun sendMessage(
         config: CloudModelConfig,
         systemPrompt: String,
         messages: List<ChatMessage>,
         onChunk: (String) -> Unit,
-    ): Pair<String, ApiUsage> = withContext(Dispatchers.IO) {
+        toolsJson: String? = null,
+    ): Triple<String, ApiUsage, List<CloudToolCall>> = withContext(Dispatchers.IO) {
         val endpoint = config.apiEndpoint.trimEnd('/') + "/chat/completions"
 
         val msgs = JSONArray().apply {
@@ -68,6 +76,20 @@ class CloudLLMClient(private val context: Context) {
                     ChatRole.Model -> {
                         obj.put("role", "assistant")
                         obj.put("content", msg.content)
+                        // 如果消息包含原生 tool_calls，附加到 assistant 消息
+                        if (msg.toolCallId != null) {
+                            val tcId = msg.toolCallId ?: "call_${msg.id.take(8)}"
+                            obj.put("tool_calls", JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("id", tcId)
+                                    put("type", "function")
+                                    put("function", JSONObject().apply {
+                                        put("name", "?")
+                                        put("arguments", "{}")
+                                    })
+                                })
+                            })
+                        }
                     }
                     ChatRole.Tool -> {
                         obj.put("role", "tool")
@@ -86,6 +108,9 @@ class CloudLLMClient(private val context: Context) {
             put("stream", true)
             put("max_tokens", config.maxTokens)
             put("temperature", 0.7)
+            if (!toolsJson.isNullOrBlank()) {
+                put("tools", JSONArray(toolsJson))
+            }
         }
 
         val conn = URL(endpoint).openConnection() as HttpURLConnection
@@ -99,8 +124,11 @@ class CloudLLMClient(private val context: Context) {
             doOutput = true
         }
 
-            val fullText = StringBuilder()
+        val fullText = StringBuilder()
         var usage = ApiUsage()
+        // 累积 tool_calls 按 index 分组（流式分块）
+        data class TcAccumulator(var id: String = "", var name: String = "", val args: StringBuilder = StringBuilder())
+        val toolCallAccumulators = mutableMapOf<Int, TcAccumulator>()
 
         try {
             OutputStreamWriter(conn.outputStream).use { it.write(body.toString()) }
@@ -127,7 +155,6 @@ class CloudLLMClient(private val context: Context) {
                     if (data == "[DONE]") break
                     try {
                         val json = JSONObject(data)
-                        // 提取 token 用量（部分 API 在最后一个 chunk 中返回）
                         val usageObj = json.optJSONObject("usage")
                         if (usageObj != null) {
                             usage = ApiUsage(
@@ -138,14 +165,31 @@ class CloudLLMClient(private val context: Context) {
                         val choices = json.optJSONArray("choices")
                         if (choices == null || choices.length() == 0) continue
                         val delta = choices.getJSONObject(0).optJSONObject("delta") ?: continue
+                        // 原生 tool_calls
+                        val tcArray = delta.optJSONArray("tool_calls")
+                        if (tcArray != null) {
+                            for (i in 0 until tcArray.length()) {
+                                val tc = tcArray.getJSONObject(i)
+                                val idx = tc.optInt("index", 0)
+                                val builder = toolCallAccumulators.getOrPut(idx) { TcAccumulator() }
+                                val id = tc.optString("id", "")
+                                if (id.isNotEmpty()) builder.id = id
+                                val func = tc.optJSONObject("function")
+                                if (func != null) {
+                                    val name = func.optString("name", "")
+                                    if (name.isNotEmpty()) builder.name = name
+                                    val args = func.optString("arguments", "")
+                                    if (args.isNotEmpty()) builder.args.append(args)
+                                }
+                            }
+                        }
+                        // 文本内容
                         val content = delta.optString("content", "")
                         if (content.isNotEmpty()) {
                             fullText.append(content)
                             onChunk(content)
                         }
-                    } catch (_: Exception) {
-                        // 跳过无法解析的 SSE 行
-                    }
+                    } catch (_: Exception) { }
                 }
             }
         } catch (e: Exception) {
@@ -153,7 +197,18 @@ class CloudLLMClient(private val context: Context) {
             throw e
         }
         conn.disconnect()
-        Pair(fullText.toString(), usage)
+
+        val toolCalls = toolCallAccumulators.entries
+            .sortedBy { it.key }
+            .mapNotNull { (_, b) ->
+                val args = b.args.toString()
+                if (b.name.isNotEmpty()) CloudToolCall(
+                    id = b.id.ifEmpty { "call_${b.name.take(8)}" },
+                    functionName = b.name,
+                    arguments = args.ifEmpty { "{}" },
+                ) else null
+            }
+        Triple(fullText.toString(), usage, toolCalls)
     }
 
     // 验证 API 连接是否正常（非流式短请求）

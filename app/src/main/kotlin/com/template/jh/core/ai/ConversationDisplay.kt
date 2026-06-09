@@ -16,7 +16,6 @@ private val thinkRegex = Regex("""\[think\](.*?)\[/think]""", RegexOption.DOT_MA
 private val toolJsonRegex = Regex(
     """\{\s*"tool_name"\s*:\s*"[^"]*"\s*(?:,\s*"arguments"\s*:\s*\{[^}]*\}\s*)?\}""",
 )
-private val toolCallMarkerRegex = Regex("""\[工具调用:\s*\w+\]""")
 
 /**
  * 移除用户消息中注入给 AI 模型看的控制前缀，仅保留用户实际输入内容。
@@ -44,14 +43,10 @@ private fun stripToolCalls(text: String): String {
     // 移除独立行的工具调用 JSON
     result = toolJsonRegex.replace(result) { match ->
         val before = result.substring(0, match.range.first)
-        // 仅移除独立行的 JSON（行首仅空白 → {）
         val lineStart = before.lastIndexOf('\n') + 1
         val isStandalone = before.substring(lineStart).all { it == ' ' || it == '\t' }
         if (isStandalone) "" else match.value
     }
-    // 移除 [工具调用: xxx] 标记（仅标记本身，不删除其后文本）
-    result = toolCallMarkerRegex.replace(result, "")
-    // 清理多余空行
     result = result.replace(Regex("""\n{3,}"""), "\n\n").trim()
     return result
 }
@@ -60,75 +55,67 @@ fun toDisplayItems(messages: List<ChatMessage>): List<DisplayItem> {
     if (messages.isEmpty()) return emptyList()
 
     val result = mutableListOf<DisplayItem>()
-
-    // 按用户消息分组：每个用户消息与其后的模型消息为一组
     var i = 0
+
     while (i < messages.size) {
         val msg = messages[i]
         when (msg.role) {
             ChatRole.User -> {
                 result.add(DisplayItem(
-                    id = msg.id,
-                    role = DisplayRole.User,
+                    id = msg.id, role = DisplayRole.User,
                     content = stripUserControlPrefixes(msg.content),
-                    thinkBlocks = emptyList(),
-                    isStreaming = false,
-                    timestamp = msg.timestamp,
-                    imageUris = msg.imageUris,
+                    thinkBlocks = emptyList(), isStreaming = false,
+                    timestamp = msg.timestamp, imageUris = msg.imageUris,
                 ))
                 i++
             }
             ChatRole.Model -> {
-                // 收集从当前位置开始的连续模型消息（含 isToolMessage）
                 val modelMsgs = mutableListOf<ChatMessage>()
+                val toolMsgs = mutableListOf<ChatMessage>()
                 while (i < messages.size && messages[i].role == ChatRole.Model) {
-                    modelMsgs.add(messages[i])
-                    i++
+                    modelMsgs.add(messages[i]); i++
                 }
-                // 跳过中间的 Tool 消息（但已由 ViewModel 在 model 消息后插入）
-                // 如果后面还有 model 消息，也一起合并
                 while (i < messages.size && messages[i].role == ChatRole.Tool) {
-                    i++
+                    toolMsgs.add(messages[i]); i++
                 }
-                // 模型消息合并为一条显示条目
-                result.add(mergeModelMessages(modelMsgs))
+                result.add(mergeModelMessages(modelMsgs, toolMsgs))
             }
-            ChatRole.Tool, ChatRole.System -> {
-                i++
-            }
+            ChatRole.Tool, ChatRole.System -> { i++ }
         }
     }
-
     return result
 }
 
-private fun mergeModelMessages(msgs: List<ChatMessage>): DisplayItem {
+/** 合并模型消息及紧随的工具结果，生成一条显示条目 */
+private fun mergeModelMessages(modelMsgs: List<ChatMessage>, toolMsgs: List<ChatMessage> = emptyList()): DisplayItem {
     val allThinkBlocks = mutableListOf<String>()
     val contentParts = mutableListOf<String>()
 
-    for (msg in msgs) {
+    for (msg in modelMsgs) {
         val (blocks, cleaned) = thinkBlocks(msg.content)
         allThinkBlocks.addAll(blocks)
-
         val stripped = stripToolCalls(cleaned)
         if (stripped.isNotBlank()) contentParts.add(stripped)
     }
 
-    // 若所有消息都被过滤（只有工具调用），取第一条消息的 think 块后的开头文本作为内容
-    val last = msgs.lastOrNull()
-    if (contentParts.isEmpty() && last != null) {
+    // 追加工具结果到显示内容
+    for (tMsg in toolMsgs) {
+        if (tMsg.content.isNotBlank()) contentParts.add(tMsg.content)
+    }
+
+    if (contentParts.isEmpty() && modelMsgs.isNotEmpty()) {
+        val last = modelMsgs.last()
         val (_, cleaned) = thinkBlocks(last.content)
         val stripped = stripToolCalls(cleaned)
         if (stripped.isNotBlank()) contentParts.add(stripped)
+        else if (toolMsgs.isNotEmpty()) contentParts.addAll(toolMsgs.mapNotNull { it.content.takeIf { it.isNotBlank() } })
     }
 
-    val mergedContent = contentParts.joinToString("\n\n").trim()
     return DisplayItem(
-        id = msgs.first().id,
-        role = DisplayRole.Model,
-        content = mergedContent,
+        id = modelMsgs.first().id, role = DisplayRole.Model,
+        content = contentParts.joinToString("\n\n").trim(),
         thinkBlocks = allThinkBlocks,
-        isStreaming = msgs.any { it.isStreaming },
-        timestamp = msgs.first().timestamp,
+        isStreaming = modelMsgs.any { it.isStreaming },
+        timestamp = modelMsgs.first().timestamp,
     )
 }

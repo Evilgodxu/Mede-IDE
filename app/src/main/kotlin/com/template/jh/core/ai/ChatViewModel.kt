@@ -274,6 +274,20 @@ class ChatViewModel(
                         if (tempFile != null) tempImagePaths.add(tempFile.absolutePath)
                     } catch (_: Exception) {}
                 }
+                // 自动包含活动图片（当无手动附加图片时）
+                if (tempImagePaths.isEmpty()) {
+                    val activePath = _state.value.activeFilePath
+                    if (activePath.isNotBlank()) {
+                        val fileName = activePath.substringAfterLast('/')
+                        if (com.template.jh.screens.home.FileTypeUtil.isImageFile(fileName)) {
+                            try {
+                                val uri = android.net.Uri.parse(activePath)
+                                val tempFile = uriToTempFile(ctx, uri)
+                                if (tempFile != null) tempImagePaths.add(tempFile.absolutePath)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
                 val useHybrid = isCloud && liteRTManager.isInitialized
                 if (useHybrid) {
                     processHybrid(text, modelMsgId, ctx)
@@ -1000,7 +1014,25 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 }
             }
             Pair(toolName, args)
-        } catch (_: Exception) { null }
+        } catch (_: Exception) {
+            // 尝试修复 Python 三引号等常见本地模型问题（来自 open-multi-agent）
+            repairToolArgs(jsonStr)
+        }
+    }
+
+    /** 修复本地模型常见的单参 JSON 格式错误（Python 三引号、未转义引号等） */
+    private fun repairToolArgs(raw: String): Pair<String, Map<String, String>>? {
+        val args = raw.trim()
+        val match = Regex("""\{\s*"([^"]+)"\s*:\s*([\s\S]*?)\s*\}""").find(args) ?: return null
+        val paramName = match.groupValues[1]
+        var valStr = match.groupValues[2].trim()
+        when {
+            valStr.startsWith("\"\"\"") && valStr.endsWith("\"\"\"") -> valStr = valStr.slice(3..valStr.length - 4)
+            valStr.startsWith("'''") && valStr.endsWith("'''") -> valStr = valStr.slice(3..valStr.length - 4)
+            valStr.startsWith("\"") && valStr.endsWith("\"") -> valStr = valStr.slice(1..valStr.length - 2)
+                .replace("\\\"", "\"").replace("\\\\", "\\")
+        }
+        return Pair(paramName, mapOf(paramName to valStr))
     }
 
     private fun executeAiTool(name: String, args: Map<String, String>): String = try {
@@ -1093,8 +1125,9 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         var currentMessage = firstMessage
         var rounds = 0
         var failedParses = 0
-        // 重复工具调用检测：记录最近 5 轮的工具名+参数摘要
-        val lastToolCalls = ArrayDeque<String>(5)
+        // 重复检测
+        val lastToolCalls = ArrayDeque<String>(5)     // 工具调用指纹
+        var lastTextResponse = ""                       // 上一轮纯文本响应
 
         while (true) {
             val fullResponse = StringBuilder()
@@ -1150,8 +1183,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 if (lastToolCalls.size > 5) lastToolCalls.removeFirst()
                 // 连续 3 轮相同工具调用 → 强制终止循环
                 if (lastToolCalls.size >= 3 && lastToolCalls.toSet().size == 1) {
-                    FileLogger.w("ChatViewModel", "quality: repetitive tool calls detected, forcing exit round=$rounds")
-                    currentMessage = Message.user("[检测到重复工具调用，已自动终止。请直接给出最终回答。]")
+                    FileLogger.w("ChatViewModel", "quality: repetitive tool calls detected round=$rounds")
+                    currentMessage = Message.user("[当前方案陷入循环，请换一个思路：检查已有信息是否足够？工具调用参数是否正确？是否需要搜索其他文件？尝试不同方向。]")
                     lastToolCalls.clear()
                     continue
                 }
@@ -1188,6 +1221,18 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                     return
                 }
                 // 无工具调用，视为最终回答
+                // 文本重复检测：连续 2 轮内容相同 → 中断退出
+                val textContent = response.let { r ->
+                    r.removePrefix("```").removeSuffix("```").take(200)
+                }
+                if (rounds > 0 && textContent == lastTextResponse) {
+                    FileLogger.w("ChatViewModel", "quality: repetitive text response round=$rounds")
+                    currentMessage = Message.user("[输出内容重复，请换一个思路重新分析。检查已有信息是否充分，换用不同工具或搜索不同内容。]")
+                    lastTextResponse = ""
+                    continue
+                }
+                lastTextResponse = textContent
+
                 val duration = System.currentTimeMillis() - startTime
                 val totalTokens = totalOutputChars / 2
                 recordUsage(LlmCallRecord(
@@ -1221,17 +1266,16 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 }.map { it.await() }
             }
 
-            // 构建显示文本
-            val allDisplays = StringBuilder()
-            for (i in toolCalls.indices) {
-                val name = toolCalls[i].second
-                val res = results[i]
-                allDisplays.appendLine("[工具调用: $name]")
-                allDisplays.appendLine(res)
-                if (i < toolCalls.size - 1) allDisplays.appendLine()
-            }
-            updateModelMessage(currentMsgId, "\n\n${allDisplays.toString().trimEnd()}", true)
+            // 工具结果作为独立 Tool 消息存储（不再是模型消息的附属）
             finalizeModelMessage(currentMsgId)
+            val combinedResult = results.joinToString("\n\n")
+            val toolMsgId = java.util.UUID.randomUUID().toString()
+            _state.update {
+                it.copy(messages = it.messages + ChatMessage(
+                    id = toolMsgId, role = ChatRole.Tool, content = combinedResult,
+                    toolCallId = "call_${toolMsgId.take(8)}",
+                ))
+            }
 
             // 创建新消息气泡用于下一轮模型回复
             currentMsgId = java.util.UUID.randomUUID().toString()
@@ -1244,8 +1288,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 )
             }
 
-            // 将工具结果合并为一条 tool 消息发给模型
-            val combinedResult = results.joinToString("\n\n")
+            // 将工具结果合并为一条 tool 消息发给 LiteRT Conversation
             currentMessage = Message.tool(Contents.of(listOf(Content.ToolResponse("call_${currentMsgId.take(8)}", combinedResult))))
 
             rounds++
@@ -1616,8 +1659,10 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             val fullResponse = StringBuilder()
             val roundStartTime = System.currentTimeMillis()
             var apiUsage = com.template.jh.core.ai.ApiUsage()
+            val toolsJson = AIToolSet.buildOpenAIToolsJson()
+            val nativeToolCalls = mutableListOf<com.template.jh.core.ai.CloudToolCall>()
             try {
-                val (resp, usage) = cloudLLMClient.sendMessage(
+                val (resp, usage, tcs) = cloudLLMClient.sendMessage(
                     config = cfg,
                     systemPrompt = buildSystemInstruction(),
                     messages = historyMessages,
@@ -1625,8 +1670,10 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                         fullResponse.append(chunk)
                         updateModelMessage(currentMsgId, chunk, true)
                     },
+                    toolsJson = toolsJson,
                 )
                 apiUsage = usage
+                nativeToolCalls.addAll(tcs)
             } catch (e: Exception) {
                 val duration = System.currentTimeMillis() - roundStartTime
                 val errMsg = e.message ?: "Unknown error"
@@ -1659,14 +1706,21 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             ))
 
             val response = fullResponse.toString().trim()
-            if (response.isBlank()) {
-                finalizeModelMessage(currentMsgId)
-                _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
-                return
+
+            // 优先使用原生 tool_calls，其次退化到文本 JSON 解析
+            val toolCalls = if (nativeToolCalls.isNotEmpty()) {
+                nativeToolCalls.map { tc ->
+                    val argsMap = try {
+                        val obj = org.json.JSONObject(tc.arguments)
+                        obj.keys().asSequence().associate { key -> key to obj.optString(key, "") }
+                    } catch (_: Exception) { emptyMap() }
+                    Triple(tc.id, tc.functionName, argsMap)
+                }
+            } else {
+                extractJsonToolCalls(response)
             }
 
-            val toolCalls = extractJsonToolCalls(response)
-            if (toolCalls == null) {
+            if (toolCalls == null || (toolCalls.isEmpty() && response.isBlank())) {
                 // 最终回答：添加到历史并结束
                 historyMessages.add(ChatMessage(role = ChatRole.Model, content = response))
                 finalizeModelMessage(currentMsgId)

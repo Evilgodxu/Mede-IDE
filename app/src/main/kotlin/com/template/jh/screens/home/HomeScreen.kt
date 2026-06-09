@@ -66,15 +66,15 @@ fun HomeScreen(
 
     // Tab 持久化 - 使用相对路径
     editorState.onSaveTabs = {
-        val fileTabs = editorState.tabs.filter { it.type == TabType.File }
+        val fileTabs = editorState.tabs.filter { it.type == TabType.File || it.type == TabType.Image }
         val paths = fileTabs.map { it.id }
-        if (paths.isNotEmpty()) viewModel.saveOpenedTabs(paths)
+        viewModel.saveOpenedTabs(paths.filter { !it.startsWith("content://") })
         chatViewModel.setOpenedFilePaths(paths)
         val activeTab = editorState.tabs.getOrNull(editorState.activeTabIndex)
-        if (activeTab != null && activeTab.type == TabType.File) {
+        if (activeTab != null && activeTab.type != TabType.Settings) {
             chatViewModel.setActiveFileContext(activeTab.id, cursorLine)
         }
-        val modifiedPaths = fileTabs.filter { editorState.isFileModified(it.id) }.map { it.id }
+        val modifiedPaths = editorState.tabs.filter { it.type == TabType.File && editorState.isFileModified(it.id) }.map { it.id }
         chatViewModel.setModifiedFilePaths(modifiedPaths)
     }
 
