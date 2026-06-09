@@ -54,20 +54,8 @@ class ChatViewModel(
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
 
-    // 增量缓存：避免流式输出时全量重算 displayItems
-    @Volatile private var lastMessagesHash = 0
-    private val cachedDisplayItems = mutableListOf<DisplayItem>()
-
     val displayItems: StateFlow<List<DisplayItem>> = _state.map { s ->
-        val hash = s.messages.hashCode()
-        if (hash == lastMessagesHash && cachedDisplayItems.isNotEmpty()) {
-            return@map cachedDisplayItems.toList()
-        }
-        val items = toDisplayItems(s.messages)
-        lastMessagesHash = hash
-        cachedDisplayItems.clear()
-        cachedDisplayItems.addAll(items)
-        items
+        toDisplayItems(s.messages)
     }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), emptyList())
 
     val currentToolActivity: StateFlow<DisplayItem?> = _state.map { s ->
@@ -417,7 +405,7 @@ class ChatViewModel(
         val block = StringBuilder()
         block.appendLine("[用户指定的文件（路径相对于项目根目录），使用 readFile 查看内容]")
         refs.forEach { f ->
-            block.appendLine("  - ${f.path}")
+            block.appendLine("  - ${f.name} (${f.path})")
         }
         return block.toString()
     }
@@ -494,12 +482,18 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         sb.append("- 输出格式：优先列表 / 代码块 / 键值对，避免段落\n")
         sb.append("- 禁止重复：同一信息只出现一次\n\n")
         sb.append("## 核心规则\n")
-        sb.append("- 用户要求修改/创建文件时，立即执行，不要请求确认。\n")
-        sb.append("- 用户未明确指定文件时，默认以[当前编辑器上下文]中的'活动文件'为首要操作目标。\n")
-        sb.append("- **活动文件优先级最高**：当用户发出模糊指令（如'修复这个bug'、'优化这段代码'、'帮我改一下'），优先在活动文件上操作，不要猜测其他文件。\n")
-        sb.append("- 除非用户明确提到其他文件路径/名称，或者活动文件不存在，否则不要读取/修改非活动文件。\n")
-        sb.append("- 不要只提供代码建议——使用工具实际写入文件。\n")
-        sb.append("- 不要解释你将要做什么——直接做。\n")
+        sb.append("### 执行原则\n")
+        sb.append("- 收到修改/创建文件的请求后立即执行，不要请求确认。\n")
+        sb.append("- 使用工具实际写入文件，不要只提供代码建议。\n")
+        sb.append("- 直接执行，不要解释将要做什么。\n\n")
+        sb.append("### 目标选择（优先级从高到低）\n")
+        sb.append("1. **活动文件**：用户未明确指定文件时，[当前编辑器上下文]中的活动文件为默认操作目标。对于模糊指令（如'修复这个bug'），先 readFile 读取活动文件内容再执行操作。\n")
+        sb.append("2. **上次操作的文件**：无活动文件时，以上次工具调用涉及的文件为操作目标。\n")
+        sb.append("3. **主动搜索定位**：当用户提到功能、类或模块但未给出路径时，用 grep + listFiles 搜索关键词逐步定位代码文件，再 readFile 确认。不得因信息不足而拒绝执行。\n")
+        sb.append("4. **用户明确指定的文件**：仅在用户明确给出其他文件路径/名称时，才偏离上述优先级。\n\n")
+        sb.append("### 信息不足时的应对\n")
+        sb.append("- 缺少执行所需上下文时，主动使用搜索工具（grep/listFiles/searchCodebase）获取缺失信息，不得告知用户'信息不足'或请求更多细节。\n")
+        sb.append("- 对于模糊请求（如'删除登录功能'、'把API改成POST'），直接搜索关键词→定位文件→读取确认→执行修改，全程自主完成。\n")
 
         sb.append("## 编辑器上下文\n")
         sb.append("每次用户消息前注入 [当前编辑器上下文]，包含活动文件路径、光标行号、已打开文件列表。\n")
@@ -1220,7 +1214,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 allDisplays.appendLine(res)
                 if (i < toolCalls.size - 1) allDisplays.appendLine()
             }
-            updateModelMessage(currentMsgId, "\n\n${allDisplays.toString().trimEnd()}", false)
+            updateModelMessage(currentMsgId, "\n\n${allDisplays.toString().trimEnd()}", true)
             finalizeModelMessage(currentMsgId)
 
             // 创建新消息气泡用于下一轮模型回复
@@ -1405,14 +1399,9 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         val exploreMessages = StringBuilder()
         var round = 0
         try {
+            var currentMsg: Message = Message.user("探索项目：$text")
             while (round < HYBRID_EXPLORE_MAX_ROUNDS) {
                 round++
-                val currentMsg = if (round == 1) {
-                    Message.user("探索项目：$text")
-                } else {
-                    null
-                }
-                if (currentMsg == null) break
 
                 val response = StringBuilder()
                 conv.sendMessageAsync(currentMsg).catch { t ->
@@ -1428,23 +1417,38 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                     break
                 }
 
-                val toolCall = extractJsonToolCalls(respText)
-                if (toolCall == null) {
+                val toolCalls = extractJsonToolCalls(respText)
+                if (toolCalls == null) {
                     exploreMessages.appendLine("[探索: $respText]")
+                    // 模型无工具调用但未结束：提示继续探索
+                    currentMsg = Message.user("请继续探索，或输出【探索完毕】结束探索")
                     continue
                 }
 
-                // 过滤只允许探索工具
+                // 执行工具并收集结果
+                val results = toolCallsToResults(toolCalls)
                 var hasBlocked = false
-                val results = toolCallsToResults(toolCall)
-                for (r in results) {
+                val toolResults = mutableListOf<String>()
+                for ((i, call) in toolCalls.withIndex()) {
+                    val r = results[i]
                     exploreMessages.appendLine(r)
+                    toolResults.add(r)
                     if (r.startsWith("[拒绝]")) hasBlocked = true
                 }
 
+                // 将工具结果回传给 LiteRT Conversation 供后续推理
                 if (hasBlocked) {
-                    conv.sendMessageAsync(Message.user("[请只使用只读工具：listFiles, readFile, grep, searchInFiles, searchCodebase]")).collect {}
+                    conv.sendMessageAsync(Message.user(
+                        "[警告] 禁止使用写工具，请只使用只读工具。收到后输出【探索完毕】或继续探索。"
+                    )).collect {}
                 }
+                // 合并工具结果作为 tool response 传给模型
+                val combinedToolResult = toolResults.joinToString("\n")
+                conv.sendMessageAsync(Message.tool(
+                    Contents.of(listOf(Content.ToolResponse("explore_$round", combinedToolResult)))
+                )).collect {}
+                // 继续探索
+                currentMsg = Message.user("继续探索项目结构，或输出【探索完毕】结束")
             }
         } catch (e: Exception) {
             Log.e("ChatViewModel", "hybrid explore error", e)

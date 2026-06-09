@@ -74,10 +74,19 @@ fun TreeContextMenu(
             leadingIcon = { Icon(Icons.Default.DriveFileRenameOutline, null, Modifier.size(16.dp)) },
         )
         DropdownMenuItem(
+            text = { Text("复制名称") },
+            onClick = {
+                onDismiss()
+                val clip = ClipData.newPlainText("fileName", node.name)
+                (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+            },
+            leadingIcon = { Icon(Icons.Default.ContentCopy, null, Modifier.size(16.dp)) },
+        )
+        DropdownMenuItem(
             text = { Text("复制路径") },
             onClick = {
                 onDismiss()
-                val clip = ClipData.newPlainText("path", node.uri.toString())
+                val clip = ClipData.newPlainText("path", node.relativePath)
                 (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
             },
             leadingIcon = { Icon(Icons.Default.ContentCopy, null, Modifier.size(16.dp)) },

@@ -56,6 +56,13 @@ class AIToolSet(
         private const val TRUNCATE_WARNING_LINES = 500
     }
 
+    /** 替换后清理多余空行：3+ 连续换行 → 2，首尾空行 */
+    private fun normalizeBlankLines(text: String): String {
+        return text
+            .replace(Regex("""\n{3,}"""), "\n\n")
+            .trimEnd('\n')
+    }
+
     @Tool(description = "Read content of any text file in the project. Returns exact file content without line numbers - you can copy code directly for use in replaceInFile. Supports pagination (use offset/limit). Files larger than 150 lines are auto-truncated to 60 lines to protect context window — use grep for deeper search.")
     fun readFile(
         @ToolParam(description = "File path relative to project root, e.g. 'app/src/main.kt' or 'build.gradle.kts'") path: String,
@@ -165,7 +172,7 @@ class AIToolSet(
 
             when (val result = CodeEditTool.replace(original, old_string, new_string)) {
                 is CodeEditTool.ReplaceResult.Success -> {
-                    val newContent = result.newText
+                    val newContent = normalizeBlankLines(result.newText)
                     val writeResult = fm.writeFile(path, newContent)
                     if (writeResult.startsWith("Failed") || writeResult.startsWith("No project")) {
                         FileLogger.e("AIToolSet", "replaceInFile: replace OK but write failed: $writeResult")
@@ -223,7 +230,8 @@ class AIToolSet(
 
             when (val result = CodeEditTool.batchReplace(original, edits)) {
                 is CodeEditTool.ReplaceResult.Success -> {
-                    val writeResult = fm.writeFile(path, result.newText)
+                    val newContent = normalizeBlankLines(result.newText)
+                    val writeResult = fm.writeFile(path, newContent)
                     if (writeResult.startsWith("Failed") || writeResult.startsWith("No project")) {
                         FileLogger.e("AIToolSet", "batchReplaceInFile: replace OK but write failed: $writeResult")
                         return "Edit succeeded but write failed: $writeResult"

@@ -261,7 +261,10 @@ fun HomeScreen(
                     onOpenRecentFolder = { folderPickerLauncher.launch(null) },
                     tabs = editorState.tabs,
                     activeTabIndex = editorState.activeTabIndex,
-                    onSelectTab = { editorState.activeTabIndex = it },
+                    onSelectTab = { idx ->
+                        val tab = editorState.tabs.getOrNull(idx)
+                        if (tab != null) editorState.openTab(tab)
+                    },
                     onCloseTab = { idx ->
                         val tab = editorState.tabs.getOrNull(idx) ?: return@MainContentArea
                         if (tab.id == editorState.settingsTabId) {
