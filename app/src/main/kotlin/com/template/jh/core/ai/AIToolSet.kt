@@ -63,7 +63,7 @@ class AIToolSet(
             .trimEnd('\n')
     }
 
-    @Tool(description = "Read content of any text file in the project. Returns exact file content without line numbers - you can copy code directly for use in replaceInFile. Supports pagination (use offset/limit). Files larger than 150 lines are auto-truncated to 60 lines to protect context window — use grep for deeper search.")
+    @Tool(description = "Read content of any text file in the project. Returns exact file content without line numbers — you can copy code directly for use in replaceInFile. Supports pagination: use offset to start from a specific line, limit to set max lines (default 1000). Large files over 500 lines auto-show first 200 lines with a warning — use grep to search relevant sections first.")
     fun readFile(
         @ToolParam(description = "File path relative to project root, e.g. 'app/src/main.kt' or 'build.gradle.kts'") path: String,
         @ToolParam(description = "Starting line number (1-based). Default 1.") offset: Int = 1,
@@ -310,7 +310,7 @@ class AIToolSet(
         }
     }
 
-    @Tool(description = "Create a new directory in the project.")
+    @Tool(description = "Create a new directory. Automatically creates parent directories as needed. For creating nested paths, provide the full path.")
     fun createDirectory(
         @ToolParam(description = "Directory path relative to project root, e.g. 'src/utils' or 'assets/images'") path: String,
     ): String {
@@ -704,7 +704,7 @@ class AIToolSet(
         return result
     }
 
-    @Tool(description = "Search file contents by exact substring match. Use grep instead when you need regex patterns.")
+    @Tool(description = "Search file contents by exact substring match (case-insensitive). Simpler than grep, use when you know the exact text to find. For regex patterns, use grep instead.")
     fun searchInFiles(
         @ToolParam(description = "Text to search for (exact match, case insensitive)") query: String,
         @ToolParam(description = "File extension filter, e.g. 'kt' for Kotlin files only. Leave empty for all text files.") extension: String = "",
@@ -721,7 +721,7 @@ class AIToolSet(
         return result
     }
 
-    @Tool(description = "Search codebase by meaning/semantics using TF-IDF vector search with cosine similarity. Converts query into a sparse vector and finds nearest-neighbor code chunks across the project. Use for exploring unfamiliar code or finding implementations by behavior. Prefer over grep when you don't know exact terms.")
+    @Tool(description = "Search codebase by meaning using semantic similarity. Converts query into a search vector and finds related code across the project. Use for exploring unfamiliar code or finding implementations by behavior (e.g. 'where is user authentication?' or 'how does error handling work?'). Prefer over grep when you don't know exact terms.")
     fun searchCodebase(
         @ToolParam(description = "Natural language query describing what you're looking for, e.g. 'Where is user authentication implemented?' or 'How does error handling work?'") query: String,
         @ToolParam(description = "Specific directories to search within, relative to project root. Leave empty to search entire project.") targetDirectories: String = "",

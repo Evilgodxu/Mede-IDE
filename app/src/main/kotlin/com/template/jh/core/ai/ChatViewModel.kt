@@ -530,8 +530,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         sb.append("每个工具有固定名称和参数，调用时必须严格按照下方格式。\n\n")
         sb.append("文件操作:\n")
         sb.append("  - listFiles(subPath?): 列出目录内容，subPath 为空列出根目录\n")
-        sb.append("  - readFile(path, offset?, limit?): 读取文件内容（含行号），offset=起始行(1-based,默认1), limit=最大行数(默认1000)\n")
-        sb.append("  - writeFile(path, content): 创建新文件或完全覆写已有文件\n")
+        sb.append("  - readFile(path, offset?, limit?): 读取文件内容（不含行号，可直接复制用于 replaceInFile），offset=起始行(1-based,默认1), limit=最大行数(默认1000)\n")
+        sb.append("  - writeFile(path, content): 创建新文件（仅限新文件，存在则拒绝）。修改已有文件用 replaceInFile\n")
         sb.append("  - replaceInFile(path, old_string, new_string): 编辑文件（单处修改），old_string 必须唯一匹配含缩进\n")
         sb.append("  - batchReplaceInFile(path, edits): 编辑文件（一次修改多处），edits 为 JSON 数组，每项含 old_string/new_string\n")
         sb.append("  - deleteFile(path): 删除文件或目录\n")
@@ -539,7 +539,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         sb.append("  - createDirectory(path): 创建目录\n\n")
         sb.append("搜索:\n")
         sb.append("  - grep(pattern, extension?, glob?, ignoreCase?, contextLines?): 正则搜索文件内容\n")
-        sb.append("  - searchCodebase(query, targetDirectories?): 语义向量检索（TF-IDF），按含义查找代码实现\n\n")
+        sb.append("  - searchCodebase(query, targetDirectories?): 语义搜索，按含义查找代码实现（如'用户认证在哪实现？'）\n\n")
         sb.append("其他:\n")
         sb.append("  - runCommand(command): 执行 shell 命令（adb、git、gradle 等）\n")
         sb.append("  - searchWeb(query): 互联网搜索\n")
@@ -555,10 +555,10 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         sb.append("{\"tool_name\":\"FUNCTION_NAME\",\"arguments\":{\"PARAM_NAME\":\"PARAM_VALUE\"}}\n\n")
         sb.append("参数名用工具定义名称，多个参数用逗号分隔，字符串值必须用双引号。\n\n")
         sb.append("示例:\n")
-        sb.append("  {\"tool_name\":\"readFile\",\"arguments\":{\"path\":\"app/src/main.kt\",\"limit\":\"50\"}}\n")
+        sb.append("  {\"tool_name\":\"readFile\",\"arguments\":{\"path\":\"app/src/main.kt\",\"offset\":\"1\",\"limit\":\"50\"}}\n")
         sb.append("  {\"tool_name\":\"createDirectory\",\"arguments\":{\"path\":\"app/src/utils\"}}\n")
         sb.append("  {\"tool_name\":\"grep\",\"arguments\":{\"pattern\":\"fun\\\\s+\\\\w+\",\"extension\":\"kt\"}}\n")
-        sb.append("  {\"tool_name\":\"writeFile\",\"arguments\":{\"path\":\"app/test.txt\",\"content\":\"hello\"}}\n")
+        sb.append("  {\"tool_name\":\"replaceInFile\",\"arguments\":{\"path\":\"app/src/main.kt\",\"old_string\":\"val x = 1\",\"new_string\":\"val x = 2\"}}\n")
         sb.append("  {\"tool_name\":\"runCommand\",\"arguments\":{\"command\":\"git status\"}}\n\n")
         sb.append("工具执行结果会自动返回。根据结果决定下一步：继续调用工具或给出最终回答。\n")
         sb.append("任务完成后直接输出最终回答，不要再输出 JSON 工具调用。\n\n")
@@ -1093,6 +1093,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         var currentMessage = firstMessage
         var rounds = 0
         var failedParses = 0
+        // 重复工具调用检测：记录最近 5 轮的工具名+参数摘要
+        val lastToolCalls = ArrayDeque<String>(5)
 
         while (true) {
             val fullResponse = StringBuilder()
@@ -1140,6 +1142,20 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             }
 
             val toolCalls = extractJsonToolCalls(response)
+
+            // Quality monitor: 重复工具调用检测
+            if (toolCalls != null) {
+                val callKey = toolCalls.joinToString("|") { "${it.second}(${it.third})" }
+                lastToolCalls.addLast(callKey)
+                if (lastToolCalls.size > 5) lastToolCalls.removeFirst()
+                // 连续 3 轮相同工具调用 → 强制终止循环
+                if (lastToolCalls.size >= 3 && lastToolCalls.toSet().size == 1) {
+                    FileLogger.w("ChatViewModel", "quality: repetitive tool calls detected, forcing exit round=$rounds")
+                    currentMessage = Message.user("[检测到重复工具调用，已自动终止。请直接给出最终回答。]")
+                    lastToolCalls.clear()
+                    continue
+                }
+            }
 
             if (toolCalls == null) {
                 // Quality monitor: 检查是否疑似工具调用但解析失败
