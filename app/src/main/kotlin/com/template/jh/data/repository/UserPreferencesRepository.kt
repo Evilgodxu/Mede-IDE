@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.template.jh.data.model.McpServer
@@ -27,6 +28,8 @@ class UserPreferencesRepository(private val context: Context) {
         val SKILLS_JSON = stringPreferencesKey("skills_json")
         val MCP_SERVERS_JSON = stringPreferencesKey("mcp_servers_json")
         val SHOW_TOOL_CALLS = booleanPreferencesKey("show_tool_calls")
+        val DEEP_THINK_ENABLED = booleanPreferencesKey("deep_think_enabled")
+        val THINKING_ROUNDS = intPreferencesKey("thinking_rounds")
         val LAST_OPENED_FOLDER_URI = stringPreferencesKey("last_opened_folder_uri")
         val OPENED_FILE_TABS = stringPreferencesKey("opened_file_tabs")
         // 模型自动加载
@@ -221,8 +224,22 @@ class UserPreferencesRepository(private val context: Context) {
     val showToolCalls: Flow<Boolean> = context.dataStore.data
         .map { it[PreferencesKeys.SHOW_TOOL_CALLS] ?: false }
 
+    val deepThinkEnabled: Flow<Boolean> = context.dataStore.data
+        .map { it[PreferencesKeys.DEEP_THINK_ENABLED] ?: true }
+
+    val thinkingRounds: Flow<Int> = context.dataStore.data
+        .map { (it[PreferencesKeys.THINKING_ROUNDS] ?: 2).coerceIn(1, 10) }
+
     suspend fun setShowToolCalls(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.SHOW_TOOL_CALLS] = enabled }
+    }
+
+    suspend fun setDeepThinkEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DEEP_THINK_ENABLED] = enabled }
+    }
+
+    suspend fun setThinkingRounds(rounds: Int) {
+        context.dataStore.edit { it[PreferencesKeys.THINKING_ROUNDS] = rounds.coerceIn(1, 10) }
     }
 
     val lastOpenedFolderUri: Flow<String?> = context.dataStore.data

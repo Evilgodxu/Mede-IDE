@@ -52,8 +52,8 @@ class AIToolSet(
 
     companion object {
         // 自动截断阈值：超过此行数且未明确指定 limit 时，仅显示前 N 行
-        private const val MAX_AUTO_LINES = 60
-        private const val TRUNCATE_WARNING_LINES = 150
+        private const val MAX_AUTO_LINES = 200
+        private const val TRUNCATE_WARNING_LINES = 500
     }
 
     @Tool(description = "Read content of any text file in the project. Returns exact file content without line numbers - you can copy code directly for use in replaceInFile. Supports pagination (use offset/limit). Files larger than 150 lines are auto-truncated to 60 lines to protect context window — use grep for deeper search.")

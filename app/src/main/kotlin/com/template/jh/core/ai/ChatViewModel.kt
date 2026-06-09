@@ -292,18 +292,18 @@ class ChatViewModel(
                 } else if (isCloud) {
                     processWithCloudTools(text, modelMsgId, ctx)
                 } else {
-                    // LiteRT: 上下文超出阈值时压缩并重建 Conversation
+                    // LiteRT: 每次交流都显式重建 Conversation 确保历史完整
                     val currentMsgs = _state.value.messages
                     if (estimateContextTokens(currentMsgs) > getCompressThreshold()) {
                         val compressed = compressMessages(currentMsgs)
                         _state.update { it.copy(messages = compressed) }
-                        resetConversation()
-                        // 将保留的消息（不含压缩通知）转为 LiteRT Messages 重建上下文
-                        val contextMsgs = compressed.filterNot {
-                            it.role == ChatRole.Model && it.content.startsWith("[上下文压缩累计]")
-                        }
-                        pendingInitialMessages = chatMessagesToLiteRT(contextMsgs)
                     }
+                    // 排除当前轮刚添加的用户消息 + 占位符，避免与 processWithJsonTools 中的 sendMessageAsync 重复
+                    val historyMsgs = _state.value.messages.dropLast(2).filterNot {
+                        it.role == ChatRole.Model && it.content.startsWith("[上下文压缩累计]")
+                    }
+                    pendingInitialMessages = chatMessagesToLiteRT(historyMsgs)
+                    resetConversation()
                     val conv = ensureConversation()
                     processWithJsonTools(text, modelMsgId, ctx, tempImagePaths)
                 }
@@ -496,6 +496,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         sb.append("## 核心规则\n")
         sb.append("- 用户要求修改/创建文件时，立即执行，不要请求确认。\n")
         sb.append("- 用户未明确指定文件时，默认以[当前编辑器上下文]中的'活动文件'为首要操作目标。\n")
+        sb.append("- **活动文件优先级最高**：当用户发出模糊指令（如'修复这个bug'、'优化这段代码'、'帮我改一下'），优先在活动文件上操作，不要猜测其他文件。\n")
+        sb.append("- 除非用户明确提到其他文件路径/名称，或者活动文件不存在，否则不要读取/修改非活动文件。\n")
         sb.append("- 不要只提供代码建议——使用工具实际写入文件。\n")
         sb.append("- 不要解释你将要做什么——直接做。\n")
 
@@ -503,6 +505,33 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         sb.append("每次用户消息前注入 [当前编辑器上下文]，包含活动文件路径、光标行号、已打开文件列表。\n")
         sb.append("用户附加的文件内容会以 [文件: path] ```...``` 块拼接在消息末尾。\n")
         sb.append("文件路径相对于项目根目录，如: app/src/main/kotlin/com/example/MainActivity.kt\n\n")
+        val deepThink = runBlocking { preferencesRepo.deepThinkEnabled.first() }
+        if (deepThink) {
+            val rounds = runBlocking { preferencesRepo.thinkingRounds.first() }
+            sb.append("## 深度思考（必须使用）\n")
+            sb.append("在每次采取行动（工具调用或最终回答）之前，必须在 [think]...[/think] 标签内进行系统化推理。\n\n")
+            sb.append("### 思考流程（必须完成以下每一步）：\n")
+            sb.append("1. 理解需求：分析用户请求的真实目标和隐含需求\n")
+            sb.append("2. 现状评估：基于 [当前编辑器上下文] 和已有对话，评估当前状态和可用信息\n")
+            sb.append("3. 方案规划：列出 2-3 种可能的实现方案，评估利弊\n")
+            sb.append("4. 选择决策：说明选择某个方案的理由\n")
+            sb.append("5. 前置检查：是否需要先读取文件？需要创建/修改哪些文件？是否存在依赖关系？\n")
+            sb.append("6. 执行计划：明确下一步要调用的工具和参数\n")
+            sb.append("7. 风险评估：评估修改可能带来的副作用（如破坏其他模块、遗漏配置等）\n")
+            sb.append("8. 结果验证：工具返回后，验证结果是否符合预期，如不符合则调整方案\n\n")
+            sb.append("### 示例：\n")
+            sb.append("[think]\n")
+            sb.append("1. 用户要求修改登录页面的密码验证逻辑\n")
+            sb.append("2. 当前活动文件是 LoginScreen.kt，已有用户名密码输入框\n")
+            sb.append("3. 方案A：增强现有验证函数（最小改动）；方案B：重写整个验证模块（风险高）\n")
+            sb.append("4. 选择方案A，因为现有结构良好，只需加强验证规则\n")
+            sb.append("5. 需要先读取 LoginScreen.kt 了解现有验证逻辑\n")
+            sb.append("6. 下一步：readFile(path=\"app/src/main/.../LoginScreen.kt\")\n")
+            sb.append("[/think]\n\n")
+            sb.append("思考轮数不低于 ${rounds} 轮，复杂任务应增加轮数。\n")
+            sb.append("思考内容仅你可见，用户不会看到。\n\n")
+        }
+
         sb.append("## 可用工具\n")
         sb.append("每个工具有固定名称和参数，调用时必须严格按照下方格式。\n\n")
         sb.append("文件操作:\n")
@@ -714,8 +743,9 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             }
         }
 
-        // 云端摘要失败 或 本地路径：退回到优先级保护
+        // 云端摘要失败 或 本地路径：优先保留含关键信息的消息，其余摘要保留
         if (!_state.value.cloudModelEnabled || summaryJson.isBlank()) {
+            // 优先消息（工具结果、代码块、路径信息）
             val priorityEarly = earlyMessages.filter { msg ->
                 (msg.role == ChatRole.Tool) ||
                 msg.content.contains("```") ||
@@ -723,13 +753,29 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 msg.content.contains("filePath") ||
                 msg.content.contains("\"path\":")
             }
+            // 普通对话消息（简短摘要形式保留）
+            val normalEarly = earlyMessages.filter { it !in priorityEarly }
             var priorityLines = 0
             for (msg in priorityEarly.reversed()) {
-                if (msg !in combined) {
-                    combined.add(0, msg)
-                    priorityLines += msg.content.lines().size
-                    if (priorityLines > KEEP_PRIORITY_LINES) break
+                combined.add(0, msg)
+                priorityLines += msg.content.lines().size
+                if (priorityLines > KEEP_PRIORITY_LINES) break
+            }
+            // 非优先消息以摘要行形式保留，避免完全丢失
+            if (normalEarly.isNotEmpty()) {
+                val summary = normalEarly.joinToString(" | ") { msg ->
+                    val preview = msg.content.take(80).replace('\n', ' ')
+                    when (msg.role) {
+                        ChatRole.User -> "用户: $preview"
+                        ChatRole.Model -> "助手: $preview"
+                        else -> preview
+                    }
                 }
+                combined.add(0, ChatMessage(
+                    role = ChatRole.Model,
+                    content = "[早期对话摘要]\n$summary",
+                    timestamp = System.currentTimeMillis(),
+                ))
             }
         }
 
@@ -1091,16 +1137,6 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             }
 
             val response = fullResponse.toString().trim()
-
-            // 本地模型输出长度截断
-            if (response.length > liteRTManager.modelParams.maxOutputTokens * 4) {
-                val maxChars = liteRTManager.modelParams.maxOutputTokens * 4
-                val truncated = response.take(maxChars) + "\n\n[... 输出已被截断，达到 maxOutputTokens=${liteRTManager.modelParams.maxOutputTokens} tokens 限制 ...]"
-                updateModelMessage(currentMsgId, truncated, false)
-                // 重置 fullResponse 为截断后的完整内容
-                fullResponse.clear()
-                fullResponse.append(truncated)
-            }
 
             // Quality monitor: 空响应检测
             if (response.length < 3 && rounds > 0) {

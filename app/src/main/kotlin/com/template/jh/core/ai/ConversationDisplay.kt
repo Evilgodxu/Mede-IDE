@@ -49,11 +49,8 @@ private fun stripToolCalls(text: String): String {
         val isStandalone = before.substring(lineStart).all { it == ' ' || it == '\t' }
         if (isStandalone) "" else match.value
     }
-    // 移除 [工具调用: xxx] 标记及其后的内容
+    // 移除 [工具调用: xxx] 标记（仅标记本身，不删除其后文本）
     result = toolCallMarkerRegex.replace(result, "")
-    // 移除工具调用后的结果文本块（跟随 [工具调用: xxx] 之后的大段文本）
-    // 从标记到下一个非空行或末尾
-    result = result.replace(Regex("""\[工具调用:\s*\w+\].*"""), "")
     // 清理多余空行
     result = result.replace(Regex("""\n{3,}"""), "\n\n").trim()
     return result

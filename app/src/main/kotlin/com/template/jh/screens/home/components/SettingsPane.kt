@@ -198,6 +198,8 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val preferencesRepo = remember { com.template.jh.data.repository.UserPreferencesRepository(context) }
     val autoLoad by preferencesRepo.autoLoadLastModel.collectAsState(initial = true)
+    val deepThinkEnabled by preferencesRepo.deepThinkEnabled.collectAsState(initial = true)
+    val thinkingRounds by preferencesRepo.thinkingRounds.collectAsState(initial = 2)
     var topK by remember(chatState.modelParams) { mutableIntStateOf(chatState.modelParams.topK) }
     var topP by remember(chatState.modelParams) { mutableFloatStateOf(chatState.modelParams.topP.toFloat()) }
     var temperature by remember(chatState.modelParams) { mutableFloatStateOf(chatState.modelParams.temperature.toFloat()) }
@@ -258,6 +260,38 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
                     // seed
                     Text("Seed: $seed (0=随机)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Slider(value = seed.toFloat(), onValueChange = { seed = it.toInt() }, valueRange = 0f..9999f, steps = 9998, modifier = Modifier.fillMaxWidth())
+
+                    // 深度思考
+                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    Text("深度思考", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("启用深度思考", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = deepThinkEnabled,
+                            onCheckedChange = {
+                                kotlinx.coroutines.runBlocking { preferencesRepo.setDeepThinkEnabled(it) }
+                            },
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("思考轮数: $thinkingRounds", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    }
+                    Slider(
+                        value = thinkingRounds.toFloat(),
+                        onValueChange = { kotlinx.coroutines.runBlocking { preferencesRepo.setThinkingRounds(it.toInt()) } },
+                        valueRange = 1f..10f,
+                        steps = 8,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = deepThinkEnabled,
+                    )
 
                     Button(onClick = {
                         val params = ModelParams(topK = topK, topP = topP.toDouble(), temperature = temperature.toDouble(), seed = seed)
