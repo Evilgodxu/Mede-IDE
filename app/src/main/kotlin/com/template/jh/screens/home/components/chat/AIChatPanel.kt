@@ -682,16 +682,15 @@ private fun VoiceInputButton(
     onInputChange: (String) -> Unit,
     enabled: Boolean = true,
 ) {
-    val context = LocalContext.current
-    val appContext = context.applicationContext
     var isListening by remember { mutableStateOf(false) }
     var hasPermission by remember { mutableStateOf(false) }
     var partialText by remember { mutableStateOf("") }
-    val recognizerManager = remember { VoiceRecognizerManager(appContext) }
+    val recognizerManager = remember { VoiceRecognizerManager() }
 
+    val permissionContext = LocalContext.current
     LaunchedEffect(Unit) {
         hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
-            context, android.Manifest.permission.RECORD_AUDIO
+            permissionContext, android.Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
@@ -773,14 +772,12 @@ private fun VoiceInputButton(
 /**
  * 语音识别管理器 - 支持连续识别、自动重连、静音超时控制
  *
- * 基于官方文档最佳实践：
- * 1. API 33+ 使用 EXTRA_SEGMENTED_SESSION 无需手动重启
- * 2. API 33 以下在 onResults 后重建 recognizer 继续识别
- * 3. EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS 值为 Int 类型
- * 4. onPartialResults 只做预览，不提交到输入文本
- * 5. ERROR_SPEECH_TIMEOUT / ERROR_NO_MATCH 自动重启
+ * 使用 MyApplication.instance 获取 Application Context，绕过 Compose LocalContext 包装。
+ * 不依赖 isRecognitionAvailable() 预检（部分设备该 API 返回异常），
+ * 直接 createSpeechRecognizer 并判空，兼容更多设备。
  */
-private class VoiceRecognizerManager(private val context: Context) {
+private class VoiceRecognizerManager {
+    private val appContext: android.content.Context = com.template.jh.MyApplication.instance
     private var recognizer: android.speech.SpeechRecognizer? = null
     private var isActive = false
     private var onFinalCallback: ((String) -> Unit)? = null
@@ -798,11 +795,6 @@ private class VoiceRecognizerManager(private val context: Context) {
     ) {
         destroy()
         retryCount = 0
-        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(context)) {
-            isListeningState(false)
-            android.widget.Toast.makeText(context, "设备不支持语音识别", android.widget.Toast.LENGTH_SHORT).show()
-            return
-        }
         isActive = true
         onFinalCallback = onFinalResult
         onPartialCallback = onPartialResult
@@ -831,7 +823,12 @@ private class VoiceRecognizerManager(private val context: Context) {
     }
 
     private fun createAndStartRecognizer() {
-        val r = android.speech.SpeechRecognizer.createSpeechRecognizer(context)
+        val r = android.speech.SpeechRecognizer.createSpeechRecognizer(appContext)
+        if (r == null) {
+            onListeningCallback?.invoke(false)
+            android.widget.Toast.makeText(appContext, "未找到语音识别服务", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         recognizer = r
         var hasActiveResult = false
         r.setRecognitionListener(object : android.speech.RecognitionListener {
@@ -844,7 +841,6 @@ private class VoiceRecognizerManager(private val context: Context) {
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {
-                // SEGMENTED_SESSION 模式下不重置 isListening，避免说话间隙闪烁
                 if (!useSegmentedSession) {
                     onListeningCallback?.invoke(false)
                 }
@@ -920,7 +916,6 @@ private class VoiceRecognizerManager(private val context: Context) {
             }
         }
         r.startListening(intent)
-        // 同步设置 isListening=true（startListening 后立即生效，不依赖回调）
         onListeningCallback?.invoke(true)
     }
 
@@ -930,7 +925,7 @@ private class VoiceRecognizerManager(private val context: Context) {
             createAndStartRecognizer()
         } catch (e: Exception) {
             onListeningCallback?.invoke(false)
-            android.widget.Toast.makeText(context, "语音识别启动失败", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(appContext, "语音识别启动失败", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 }

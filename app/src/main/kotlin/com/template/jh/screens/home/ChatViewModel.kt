@@ -1,6 +1,8 @@
 package com.template.jh.screens.home
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -1096,12 +1098,41 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         }
 
 
+    /** 将图片 URI 转为临时文件，非 JPEG/PNG 格式自动转 JPEG 保证 LiteRT 兼容 */
     private fun uriToTempFile(ctx: android.content.Context, uri: Uri): File? = try {
-        val input = ctx.contentResolver.openInputStream(uri) ?: return null
-        val ext = uri.lastPathSegment?.substringAfterLast('.', "jpg") ?: "jpg"
-        val tempFile = File.createTempFile("img_", ".$ext", ctx.cacheDir)
-        FileOutputStream(tempFile).use { out -> input.use { it.copyTo(out) } }
-        tempFile
+        // 优先 contentResolver 的 MIME，回退到文件扩展名
+        var mimeType = ctx.contentResolver.getType(uri) ?: ""
+        if (mimeType.isBlank()) {
+            val ext = uri.lastPathSegment?.substringAfterLast('.', "")?.lowercase() ?: ""
+            mimeType = when (ext) {
+                "jpg", "jpeg" -> "image/jpeg"
+                "png" -> "image/png"
+                "webp" -> "image/webp"
+                "gif" -> "image/gif"
+                "bmp" -> "image/bmp"
+                else -> ""
+            }
+        }
+        val isDirectlySupported = mimeType in listOf("image/jpeg", "image/png")
+        if (isDirectlySupported) {
+            val ext = mimeType.substringAfterLast('/')
+            val input = ctx.contentResolver.openInputStream(uri) ?: return null
+            val tempFile = File.createTempFile("img_", ".$ext", ctx.cacheDir)
+            FileOutputStream(tempFile).use { out -> input.use { it.copyTo(out) } }
+            tempFile
+        } else {
+            // 不支持的格式或无 MIME 时转码为 JPEG
+            val input = ctx.contentResolver.openInputStream(uri) ?: return null
+            val bitmap = BitmapFactory.decodeStream(input)
+            input.close()
+            if (bitmap == null) return null
+            val tempFile = File.createTempFile("img_", ".jpg", ctx.cacheDir)
+            FileOutputStream(tempFile).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+            }
+            bitmap.recycle()
+            tempFile
+        }
     } catch (e: Exception) { null }
 
 
