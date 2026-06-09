@@ -42,6 +42,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -52,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -62,6 +65,7 @@ import com.template.jh.R
 import com.template.jh.core.ai.CloudModelProfile
 import com.template.jh.core.ai.EngineStatus
 import com.template.jh.core.ai.ModelInfo
+import com.template.jh.data.repository.RecentEntry
 
 // 主窗口顶部工具栏组件
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,7 +85,10 @@ fun MainTopBar(
     onCloseFolder: () -> Unit = {},
     onOpenFile: () -> Unit = {},
     onOpenFolder: () -> Unit = {},
-    onRecentFiles: () -> Unit = {},
+    recentFiles: List<RecentEntry> = emptyList(),
+    recentFolders: List<RecentEntry> = emptyList(),
+    onOpenRecentFile: (String) -> Unit = {},
+    onOpenRecentFolder: (String) -> Unit = {},
     onSaveAll: () -> Unit = {},
     // 音频播放
     audioPlaybackState: AudioPlaybackState? = null,
@@ -100,6 +107,9 @@ fun MainTopBar(
     var editMenuExpanded by remember { mutableStateOf(false) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
     var musicMenuExpanded by remember { mutableStateOf(false) }
+    var searchActive by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var searchDropdownExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val dropdownMaxHeight = (screenHeightDp * 0.75f).dp
@@ -151,14 +161,6 @@ fun MainTopBar(
                                 onClick = {
                                     try { fileMenuExpanded = false; onOpenFolder() }
                                     catch (e: Exception) { Log.e("MainTopBar", "open folder failed", e) }
-                                }
-                            )
-                            // 最近文件
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.file_menu_recent_files)) },
-                                onClick = {
-                                    try { fileMenuExpanded = false; onRecentFiles() }
-                                    catch (e: Exception) { Log.e("MainTopBar", "recent files failed", e) }
                                 }
                             )
                             HorizontalDivider()
@@ -266,6 +268,107 @@ fun MainTopBar(
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
+
+                    // 搜索按钮 / 搜索输入框
+                    Box {
+                        if (searchActive) {
+                            TextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it; searchDropdownExpanded = true },
+                                placeholder = { Text("搜索最近文件...", style = MaterialTheme.typography.bodySmall) },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
+                                modifier = Modifier
+                                    .width(180.dp)
+                                    .height(32.dp)
+                                    .padding(0.dp),
+                                colors = TextFieldDefaults.colors(
+                                    unfocusedContainerColor = Color.Transparent,
+                                    focusedContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    cursorColor = MaterialTheme.colorScheme.primary,
+                                ),
+                                trailingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "关闭搜索",
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clickable {
+                                                searchActive = false
+                                                searchQuery = ""
+                                                searchDropdownExpanded = false
+                                            },
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                            )
+                        } else {
+                            IconButton(
+                                onClick = { searchActive = true; searchDropdownExpanded = true },
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "搜索最近文件",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+
+                        // 搜索下拉结果
+                        DropdownMenu(
+                            expanded = searchDropdownExpanded,
+                            onDismissRequest = { searchDropdownExpanded = false },
+                            modifier = Modifier.heightIn(max = dropdownMaxHeight).widthIn(min = 220.dp),
+                        ) {
+                            val allRecent = recentFolders.map { it to "目录" } + recentFiles.map { it to "文件" }
+                            val filtered = if (searchQuery.isBlank()) allRecent
+                            else allRecent.filter { (e, _) ->
+                                e.name.contains(searchQuery, ignoreCase = true) ||
+                                e.path.contains(searchQuery, ignoreCase = true)
+                            }
+
+                            if (filtered.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text(if (searchQuery.isBlank()) stringResource(R.string.recent_files_empty) else "无匹配结果") },
+                                    onClick = { searchDropdownExpanded = false },
+                                    enabled = false,
+                                )
+                            } else {
+                                filtered.take(10).forEach { (entry, type) ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text(
+                                                    text = entry.name,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                Text(
+                                                    text = entry.path,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            searchDropdownExpanded = false
+                                            searchQuery = ""
+                                            searchActive = false
+                                            if (type == "目录") onOpenRecentFolder(entry.path)
+                                            else onOpenRecentFile(entry.path)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
 
 
                 }

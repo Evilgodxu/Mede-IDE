@@ -11,6 +11,7 @@ import com.template.jh.core.storage.FileManager
 import com.template.jh.data.model.McpServer
 import com.template.jh.data.model.Rule
 import com.template.jh.data.model.SkillItem
+import com.template.jh.data.repository.RecentEntry
 import com.template.jh.data.repository.UserPreferencesRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -97,6 +98,7 @@ class HomeViewModel(
     fun openAsProjectDirectory(absolutePath: String): Boolean {
         val dir = File(absolutePath)
         if (!dir.isDirectory) return false
+        recordRecentFolder(absolutePath, dir.name)
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 fileManager.setProjectDir(absolutePath)
@@ -202,6 +204,37 @@ class HomeViewModel(
     fun saveOpenedTabs(paths: List<String>) {
         viewModelScope.launch { userPreferencesRepository.setOpenedFileTabs(paths) }
     }
+
+    val recentFiles: StateFlow<List<RecentEntry>> = userPreferencesRepository.recentFiles
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val recentFolders: StateFlow<List<RecentEntry>> = userPreferencesRepository.recentFolders
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun recordRecentFile(path: String, name: String) {
+        viewModelScope.launch { userPreferencesRepository.addRecentFile(path, name) }
+    }
+
+    fun recordRecentFolder(path: String, name: String) {
+        viewModelScope.launch { userPreferencesRepository.addRecentFolder(path, name) }
+    }
+
+    /** 在项目中搜索文件内容 */
+    fun searchInFiles(
+        pattern: String,
+        extension: String = "",
+        ignoreCase: Boolean = true,
+        maxResults: Int = 100,
+    ): List<FileManager.SearchMatch> {
+        return fileManager.grepStructured(pattern, extension, ignoreCase = ignoreCase, maxResults = maxResults)
+    }
+
+    /** 在项目中搜索并替换 */
+    fun replaceInFiles(pattern: String, replacement: String, extension: String = "", ignoreCase: Boolean = true): Int {
+        return fileManager.replaceInFiles(pattern, replacement, extension, ignoreCase)
+    }
+
+    fun getAbsolutePath(relativePath: String): String = fileManager.getAbsolutePath(relativePath)
 
     fun closeFolder() {
         fileManager.clearProjectUri()

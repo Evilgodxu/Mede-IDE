@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -23,7 +24,7 @@ import androidx.compose.ui.unit.dp
 import com.template.jh.R
 
 enum class SidebarTab {
-    Explorer
+    Explorer, Search
 }
 
 @Composable
@@ -50,6 +51,12 @@ fun Sidebar(
                 contentDescription = stringResource(R.string.resource_manager_title),
                 isSelected = selectedTab == SidebarTab.Explorer,
                 onClick = { onTabClick(SidebarTab.Explorer) }
+            )
+            SidebarItem(
+                icon = Icons.Default.Search,
+                contentDescription = "搜索",
+                isSelected = selectedTab == SidebarTab.Search,
+                onClick = { onTabClick(SidebarTab.Search) }
             )
 
             // 任务清单侧边栏项已移除

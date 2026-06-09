@@ -14,6 +14,13 @@ import com.template.jh.data.model.SkillItem
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
+import org.json.JSONObject
+
+data class RecentEntry(
+    val path: String,
+    val name: String,
+    val timestamp: Long,
+)
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "user_preferences")
 
@@ -32,6 +39,8 @@ class UserPreferencesRepository(private val context: Context) {
         val THINKING_ROUNDS = intPreferencesKey("thinking_rounds")
         val LAST_OPENED_FOLDER_URI = stringPreferencesKey("last_opened_folder_uri")
         val OPENED_FILE_TABS = stringPreferencesKey("opened_file_tabs")
+        val RECENT_FILES = stringPreferencesKey("recent_files_json")
+        val RECENT_FOLDERS = stringPreferencesKey("recent_folders_json")
         // 模型自动加载
         val LAST_MODEL_PATH = stringPreferencesKey("last_model_path")
         val AUTO_LOAD_LAST_MODEL = booleanPreferencesKey("auto_load_last_model")
@@ -262,6 +271,66 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit {
             it[PreferencesKeys.OPENED_FILE_TABS] = org.json.JSONArray(paths).toString()
         }
+    }
+
+    // 最近打开文件（最多 10 条）
+    val recentFiles: Flow<List<RecentEntry>> = context.dataStore.data
+        .map { prefs ->
+            val json = prefs[PreferencesKeys.RECENT_FILES] ?: return@map emptyList()
+            parseRecentEntries(json)
+        }
+
+    // 最近打开目录（最多 10 条）
+    val recentFolders: Flow<List<RecentEntry>> = context.dataStore.data
+        .map { prefs ->
+            val json = prefs[PreferencesKeys.RECENT_FOLDERS] ?: return@map emptyList()
+            parseRecentEntries(json)
+        }
+
+    suspend fun addRecentFile(path: String, name: String) {
+        context.dataStore.edit { prefs ->
+            val list = prefs[PreferencesKeys.RECENT_FILES]?.let { parseRecentEntries(it) } ?: emptyList()
+            prefs[PreferencesKeys.RECENT_FILES] = recentEntriesToJson(insertRecent(list, path, name))
+        }
+    }
+
+    suspend fun addRecentFolder(path: String, name: String) {
+        context.dataStore.edit { prefs ->
+            val list = prefs[PreferencesKeys.RECENT_FOLDERS]?.let { parseRecentEntries(it) } ?: emptyList()
+            prefs[PreferencesKeys.RECENT_FOLDERS] = recentEntriesToJson(insertRecent(list, path, name))
+        }
+    }
+
+    private fun insertRecent(list: List<RecentEntry>, path: String, name: String): List<RecentEntry> {
+        val deduped = list.filter { it.path != path }
+        val entry = RecentEntry(path, name, System.currentTimeMillis())
+        return (listOf(entry) + deduped).take(10)
+    }
+
+    private fun parseRecentEntries(json: String): List<RecentEntry> {
+        return try {
+            val arr = JSONArray(json)
+            (0 until arr.length()).map { i ->
+                val obj = arr.getJSONObject(i)
+                RecentEntry(
+                    path = obj.optString("path", ""),
+                    name = obj.optString("name", ""),
+                    timestamp = obj.optLong("timestamp", 0L),
+                )
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+
+    private fun recentEntriesToJson(entries: List<RecentEntry>): String {
+        val arr = JSONArray()
+        entries.forEach { e ->
+            val obj = JSONObject()
+            obj.put("path", e.path)
+            obj.put("name", e.name)
+            obj.put("timestamp", e.timestamp)
+            arr.put(obj)
+        }
+        return arr.toString()
     }
 
     // 上次加载的模型路径

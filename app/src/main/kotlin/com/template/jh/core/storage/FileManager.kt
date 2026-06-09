@@ -772,6 +772,127 @@ class FileManager(private val context: Context) {
         )
     }
 
+    /** 公有的搜索匹配行 */
+    data class MatchLine(val text: String, val isMatch: Boolean)
+
+    /** 公有的搜索匹配结果 */
+    data class SearchMatch(
+        val filePath: String,
+        val lineNumber: Int,
+        val matchText: String,
+        val contextLines: List<MatchLine>,
+    )
+
+    /** 结构化 grep 搜索 */
+    fun grepStructured(
+        pattern: String,
+        extension: String = "",
+        glob: String = "",
+        ignoreCase: Boolean = true,
+        contextLines: Int = 2,
+        maxResults: Int = 100,
+    ): List<SearchMatch> {
+        val root = if (isDirectMode) getProjectRootFile() else rootDocFile ?: return emptyList()
+        if (pattern.isBlank()) return emptyList()
+        val results = Collections.synchronizedList<GrepResult>(mutableListOf())
+        val regex = if (ignoreCase) Regex(pattern, RegexOption.IGNORE_CASE) else Regex(pattern)
+        val extLower = extension.lowercase().trimStart('.')
+
+        if (isDirectMode && root is File) {
+            grepRecursiveDirect(root, "", regex, extLower, glob, results, mutableListOf(), contextLines)
+        } else if (!isDirectMode && root is DocumentFile) {
+            grepRecursiveSaf(root, "", regex, extLower, glob, results, mutableListOf(), contextLines)
+        }
+
+        return results.take(maxResults).map { r ->
+            SearchMatch(
+                filePath = r.filePath,
+                lineNumber = r.lineNumber,
+                matchText = r.contextLines.find { it.third }?.second ?: "",
+                contextLines = r.contextLines.map { (_, text, isMatch) ->
+                    MatchLine(text = text, isMatch = isMatch)
+                }
+            )
+        }
+    }
+
+    /** 在文件中搜索并替换，返回修改的文件数 */
+    fun replaceInFiles(
+        pattern: String,
+        replacement: String,
+        extension: String = "",
+        ignoreCase: Boolean = true,
+    ): Int {
+        val root = if (isDirectMode) getProjectRootFile() else rootDocFile ?: return 0
+        if (pattern.isBlank()) return 0
+        val regex = if (ignoreCase) Regex(pattern, RegexOption.IGNORE_CASE) else Regex(pattern)
+        val extLower = extension.lowercase().trimStart('.')
+        val filesToModify = mutableListOf<String>()
+
+        if (isDirectMode && root is File) {
+            collectReplaceFilesDirect(root, "", regex, extLower, filesToModify)
+        } else if (!isDirectMode && root is DocumentFile) {
+            collectReplaceFilesSaf(root, "", regex, extLower, filesToModify)
+        }
+
+        var count = 0
+        for (filePath in filesToModify) {
+            val content = readFileRaw(filePath) ?: continue
+            val newContent = content.replace(regex, replacement)
+            if (newContent != content) {
+                writeFile(filePath, newContent)
+                count++
+            }
+        }
+        return count
+    }
+
+    private fun collectReplaceFilesDirect(
+        dir: File, relativePath: String, regex: Regex,
+        extLower: String, files: MutableList<String>,
+    ) {
+        val children = dir.listFiles() ?: return
+        for (file in children) {
+            val name = file.name
+            if (name.startsWith(".") && name.lowercase() !in skippedDirNames) continue
+            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+            if (file.isDirectory) {
+                if (name.lowercase() in skippedDirNames) continue
+                if (currentPath.count { it == '/' } >= 10) continue
+                collectReplaceFilesDirect(file, currentPath, regex, extLower, files)
+            } else {
+                val fileExt = file.extension.lowercase()
+                if (extLower.isNotBlank() && fileExt != extLower) continue
+                if (extLower.isBlank() && fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
+                if (file.length() > 512 * 1024) continue
+                files.add(currentPath)
+            }
+        }
+    }
+
+    private fun collectReplaceFilesSaf(
+        dirDoc: DocumentFile, relativePath: String, regex: Regex,
+        extLower: String, files: MutableList<String>,
+    ) {
+        val children = dirDoc.listFiles()
+        for (doc in children) {
+            val name = doc.name ?: continue
+            if (name.startsWith(".") && name.lowercase() !in skippedDirNames) continue
+            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+            if (doc.isDirectory) {
+                if (name.lowercase() in skippedDirNames) continue
+                if (currentPath.count { it == '/' } >= 10) continue
+                collectReplaceFilesSaf(doc, currentPath, regex, extLower, files)
+            } else {
+                val fileExt = name.substringAfterLast('.', "").lowercase()
+                if (extLower.isNotBlank() && fileExt != extLower) continue
+                if (extLower.isBlank() && fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
+                if (doc.length() > 512 * 1024) continue
+                files.add(currentPath)
+            }
+        }
+    }
+
     private data class GrepResult(
         val filePath: String,
         val lineNumber: Int,

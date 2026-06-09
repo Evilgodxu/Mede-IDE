@@ -274,8 +274,8 @@ class ChatViewModel(
                         if (tempFile != null) tempImagePaths.add(tempFile.absolutePath)
                     } catch (_: Exception) {}
                 }
-                // 自动包含活动图片（当无手动附加图片时）
-                if (tempImagePaths.isEmpty()) {
+                // 自动包含活动图片（当用户未手动附加图片时）
+                if (images.isEmpty()) {
                     val activePath = _state.value.activeFilePath
                     if (activePath.isNotBlank()) {
                         val fileName = activePath.substringAfterLast('/')
@@ -290,9 +290,9 @@ class ChatViewModel(
                 }
                 val useHybrid = isCloud && liteRTManager.isInitialized
                 if (useHybrid) {
-                    processHybrid(text, modelMsgId, ctx)
+                    processHybrid(text, modelMsgId, ctx, tempImagePaths)
                 } else if (isCloud) {
-                    processWithCloudTools(text, modelMsgId, ctx)
+                    processWithCloudTools(text, modelMsgId, ctx, tempImagePaths)
                 } else {
                     // LiteRT: 每次交流都显式重建 Conversation 确保历史完整
                     var currentMsgs = _state.value.messages
@@ -1471,6 +1471,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     private suspend fun processHybrid(
         text: String, msgId: String,
         ctx: Application,
+        imagePaths: List<String> = emptyList(),
     ) {
         _state.update { it.copy(modelActivity = ModelActivity.Thinking, activityDetail = "") }
         FileLogger.d("ChatViewModel", "processHybrid: starting hybrid mode")
@@ -1490,7 +1491,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
 
         // Phase 3: 带上下文的云端推理
         val enrichedText = if (compressed.isNotBlank()) "$compressed\n\n$text" else text
-        processWithCloudTools(enrichedText, msgId, ctx)
+        processWithCloudTools(enrichedText, msgId, ctx, imagePaths)
     }
 
     /**
@@ -1669,6 +1670,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     private suspend fun processWithCloudTools(
         text: String, msgId: String,
         ctx: Application,
+        imagePaths: List<String> = emptyList(),
     ) {
         val profile = _state.value.cloudModelProfiles.find { it.id == _state.value.activeCloudProfileId }
         if (profile == null) {
@@ -1694,16 +1696,14 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         _state.update { it.copy(modelActivity = ModelActivity.Thinking, activityDetail = "") }
 
         val historyMessages = mutableListOf<ChatMessage>()
-        var lastUserSkipped = false
-        for (msg in _state.value.messages) {
+        // 找到最后一条 User 消息（即 sendMessage() 刚添加的那条），用于后续跳过并重新构造
+        val lastUserIdx = _state.value.messages.indexOfLast { it.role == ChatRole.User && it.id != currentMsgId }
+        for ((idx, msg) in _state.value.messages.withIndex()) {
             if (msg.id == currentMsgId) continue
             if (msg.role == ChatRole.User || msg.role == ChatRole.Model || msg.role == ChatRole.Tool) {
-                // 跳过 sendMessage() 已添加到 UI 状态的用户消息，
+                // 跳过 sendMessage() 已添加到 UI 状态的用户消息（最后一条 User 消息），
                 // 后续会重新构造带编辑器上下文的用户消息
-                if (msg.role == ChatRole.User && !lastUserSkipped) {
-                    lastUserSkipped = true
-                    continue
-                }
+                if (msg.role == ChatRole.User && idx == lastUserIdx) continue
                 if (msg.content.isNotBlank() || msg.role == ChatRole.Model) historyMessages.add(msg)
             }
         }
@@ -1741,6 +1741,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                         updateModelMessage(currentMsgId, chunk, true)
                     },
                     toolsJson = toolsJson,
+                    imagePaths = imagePaths,
                 )
                 apiUsage = usage
                 nativeToolCalls.addAll(tcs)

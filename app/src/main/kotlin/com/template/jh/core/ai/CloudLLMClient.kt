@@ -6,10 +6,13 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.File
+import java.io.FileInputStream
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Base64
 
 // 云端大模型配置（单个配置）
 data class CloudModelConfig(
@@ -50,6 +53,18 @@ class CloudLLMClient(private val context: Context) {
     private val connectTimeout = 30000
     private val readTimeout = 60000
 
+    /** 将图片文件读为 base64 data URI */
+    private fun imageFileToDataUri(path: String): String? = try {
+        val file = File(path)
+        if (!file.exists()) return null
+        val ext = path.substringAfterLast('.', "jpg").lowercase()
+        FileInputStream(file).use { input ->
+            val bytes = input.readBytes()
+            val b64 = Base64.getEncoder().encodeToString(bytes)
+            "data:image/$ext;base64,$b64"
+        }
+    } catch (_: Exception) { null }
+
     // 发送消息并流式收集响应，返回完整响应文本 + 用量信息 + 原生工具调用
     suspend fun sendMessage(
         config: CloudModelConfig,
@@ -57,21 +72,43 @@ class CloudLLMClient(private val context: Context) {
         messages: List<ChatMessage>,
         onChunk: (String) -> Unit,
         toolsJson: String? = null,
+        imagePaths: List<String> = emptyList(),
     ): Triple<String, ApiUsage, List<CloudToolCall>> = withContext(Dispatchers.IO) {
         val endpoint = config.apiEndpoint.trimEnd('/') + "/chat/completions"
+
+        // 预加载图片 data URI（避免多次文件读取）
+        val imageDataUris = imagePaths.mapNotNull { imageFileToDataUri(it) }
 
         val msgs = JSONArray().apply {
             put(JSONObject().apply {
                 put("role", "system")
                 put("content", systemPrompt)
             })
-            for (msg in messages) {
+            for ((idx, msg) in messages.withIndex()) {
                 if (msg.content.isBlank() && msg.role != ChatRole.Model) continue
                 val obj = JSONObject()
                 when (msg.role) {
                     ChatRole.User -> {
                         obj.put("role", "user")
-                        obj.put("content", msg.content)
+                        // 如果存在图片且是最后一条 User 消息，构造多模态 content 数组
+                        val isLastUser = idx == messages.indexOfLast { it.role == ChatRole.User }
+                        if (imageDataUris.isNotEmpty() && isLastUser) {
+                            val contentArr = JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("type", "text")
+                                    put("text", msg.content)
+                                })
+                                for (dataUri in imageDataUris) {
+                                    put(JSONObject().apply {
+                                        put("type", "image_url")
+                                        put("image_url", JSONObject().apply { put("url", dataUri) })
+                                    })
+                                }
+                            }
+                            obj.put("content", contentArr)
+                        } else {
+                            obj.put("content", msg.content)
+                        }
                     }
                     ChatRole.Model -> {
                         obj.put("role", "assistant")

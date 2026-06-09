@@ -44,6 +44,7 @@ import com.template.jh.core.storage.FileManager
 import com.template.jh.screens.home.components.AIChatPanel
 import com.template.jh.screens.home.components.MainContentArea
 import com.template.jh.screens.home.components.MainTopBar
+import com.template.jh.screens.home.components.SearchPanel
 import com.template.jh.screens.home.components.Sidebar
 import com.template.jh.screens.home.components.SidebarTab
 import com.template.jh.screens.home.components.ThreeColumnLayout
@@ -103,6 +104,7 @@ fun HomeScreen(
         while (true) {
             if (Environment.isExternalStorageManager()) {
                 viewModel.openDirectStorage()
+                viewModel.recordRecentFolder("/storage/emulated/0", "存储根目录")
                 chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
                 selectedTab = SidebarTab.Explorer
                 permissionPolling = false
@@ -214,6 +216,7 @@ fun HomeScreen(
     val onOpenFolder: () -> Unit = {
         if (Environment.isExternalStorageManager()) {
             viewModel.openDirectStorage()
+            viewModel.recordRecentFolder("/storage/emulated/0", "存储根目录")
             chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
             selectedTab = SidebarTab.Explorer
         } else {
@@ -241,9 +244,11 @@ fun HomeScreen(
 
     var showNewFileDialog by remember { mutableStateOf(false) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
-    var showRecentFilesDialog by remember { mutableStateOf(false) }
     var newFileName by remember { mutableStateOf("") }
     var newFolderName by remember { mutableStateOf("") }
+    // 最近文件/目录数据
+    val recentFiles by viewModel.recentFiles.collectAsState()
+    val recentFolders by viewModel.recentFolders.collectAsState()
     // 工具栏音乐播放
     var scannedAudioTracks by remember { mutableStateOf<List<com.template.jh.screens.home.components.AudioTrack>>(emptyList()) }
     var audioScanRequested by remember { mutableStateOf(false) }
@@ -331,7 +336,23 @@ fun HomeScreen(
                 onCloseFolder = closeFolder,
                 onOpenFile = { fileOpenLauncher.launch(arrayOf("*/*")) },
                 onOpenFolder = onOpenFolder,
-                onRecentFiles = { showRecentFilesDialog = true },
+                recentFiles = recentFiles,
+                recentFolders = recentFolders,
+                onOpenRecentFile = { path ->
+                    val fileName = path.substringAfterLast('/')
+                    when {
+                        FileTypeUtil.isImageFile(fileName) ->
+                            editorState.openTab(TabItem(path, fileName, TabType.Image))
+                        FileTypeUtil.isAudioFile(fileName) ->
+                            editorState.openTab(TabItem(path, fileName, TabType.Audio))
+                        FileTypeUtil.isVideoFile(fileName) ->
+                            editorState.openTab(TabItem(path, fileName, TabType.Video))
+                        FileTypeUtil.isArchiveFile(fileName) ->
+                            editorState.openTab(TabItem(path, fileName, TabType.Archive))
+                        else -> editorState.openFileTab(path, fileName)
+                    }
+                },
+                onOpenRecentFolder = { path -> viewModel.openAsProjectDirectory(path) },
                 onSaveAll = { editorState.tabs.filter { it.type == TabType.File }.forEach { editorState.saveFile(it.id) } },
                 audioPlaybackState = audioPlaybackState,
                 scannedAudioTracks = scannedAudioTracks,
@@ -368,6 +389,7 @@ fun HomeScreen(
                             fileItem.relativePath.isNotEmpty() -> fileItem.relativePath
                             else -> fileItem.uri.toString()
                         }
+                        viewModel.recordRecentFile(filePath, fileItem.name)
                         when (FileTypeUtil.openMode(fileItem.name, fileItem.size)) {
                             FileOpenMode.IMAGE -> {
                                 val id = if (fileItem.filePath.isNotEmpty()) fileItem.filePath else fileItem.uri.toString()
@@ -513,30 +535,6 @@ fun HomeScreen(
             dismissButton = { TextButton(onClick = { showNewFolderDialog = false }) { Text(stringResource(R.string.chat_cancel)) } },
         )
     }
-
-    val openFileTabs = editorState.tabs.filter { it.type == TabType.File }
-    if (showRecentFilesDialog) {
-        AlertDialog(
-            onDismissRequest = { showRecentFilesDialog = false },
-            title = { Text(stringResource(R.string.file_menu_recent_files)) },
-            text = {
-                if (openFileTabs.isEmpty()) {
-                    Text(stringResource(R.string.recent_files_empty))
-                } else {
-                    androidx.compose.foundation.layout.Column {
-                        openFileTabs.forEach { tab ->
-                            TextButton(onClick = {
-                                showRecentFilesDialog = false
-                                val idx = editorState.tabs.indexOf(tab)
-                                if (idx >= 0) editorState.activeTabIndex = idx
-                            }) { Text(tab.title) }
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showRecentFilesDialog = false }) { Text(stringResource(R.string.chat_cancel)) } },
-        )
-    }
 }
 
 @Composable
@@ -572,6 +570,19 @@ private fun LeftPanelContent(
                 },
                 onOpenAsProject = { filePath ->
                     viewModel.openAsProjectDirectory(filePath)
+                },
+            )
+        }
+        SidebarTab.Search -> {
+            SearchPanel(
+                onSearch = { pattern, ext, ignoreCase ->
+                    viewModel.searchInFiles(pattern, ext, ignoreCase)
+                },
+                onReplaceAll = { pattern, replacement, ext, ignoreCase ->
+                    viewModel.replaceInFiles(pattern, replacement, ext, ignoreCase)
+                },
+                onOpenFileAtLine = { path, line ->
+                    editorState.openFileAtLine(path, line)
                 },
             )
         }

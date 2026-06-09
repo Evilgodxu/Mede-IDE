@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import com.template.jh.core.ai.ChatViewModel
 import com.template.jh.core.storage.FileManager
 
@@ -46,6 +47,26 @@ class EditorScreenState(
 
     fun openFileTab(path: String, displayName: String? = null) {
         openTab(TabItem(path, displayName ?: displayNameFromPath(path), TabType.File))
+    }
+
+    /** 打开文件并将光标定位到指定行 */
+    fun openFileAtLine(path: String, line: Int, displayName: String? = null) {
+        openFileTab(path, displayName)
+        val content = editorContent.getOrPut(path) { TextFieldValue(readFileFromSource(path)) }
+        if (line <= 1 || content.text.isEmpty()) return
+        val offset = calculateLineOffset(content.text, line).coerceAtMost(content.text.length)
+        editorContent[path] = content.copy(selection = TextRange(offset))
+    }
+
+    private fun calculateLineOffset(text: String, line: Int): Int {
+        var charCount = 0
+        var currentLine = 1
+        for (ch in text) {
+            if (currentLine >= line) break
+            charCount++
+            if (ch == '\n') currentLine++
+        }
+        return charCount
     }
 
     fun openSettingsTab(settingsTabTitle: String) {
