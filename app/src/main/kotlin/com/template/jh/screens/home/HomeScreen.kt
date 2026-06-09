@@ -17,6 +17,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -27,6 +28,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -71,25 +75,38 @@ fun HomeScreen(
 
     // 权限请求状态（EdgeGesture 模式：启动 Intent 后轮询检测授权结果）
     var permissionPolling by remember { mutableStateOf(false) }
+    var permissionRequested by remember { mutableStateOf(false) }
 
     // MANAGE_EXTERNAL_STORAGE → 系统设置 Intent
     val storagePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        // 从系统设置返回后，启动轮询等待授权
-        permissionPolling = true
+        // 从系统设置返回后，标记已请求（生命周期监听会触发轮询）
+        permissionRequested = true
     }
 
-    // EdgeGesture 模式：轮询等待授权，一旦通过立即打开存储根目录
+    // 生命周期感知：Activity 回到前台时触发权限检测（兼容 Activity 重建等场景）
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, permissionRequested) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && permissionRequested && !Environment.isExternalStorageManager()) {
+                permissionPolling = true
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // 轮询等待授权，一旦通过立即打开存储根目录
     LaunchedEffect(permissionPolling) {
         if (!permissionPolling) return@LaunchedEffect
-        // 持续轮询（EdgeGesture 的 monitorPermission 模式，500ms 间隔）
         while (true) {
             if (Environment.isExternalStorageManager()) {
                 viewModel.openDirectStorage()
                 chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
                 selectedTab = SidebarTab.Explorer
                 permissionPolling = false
+                permissionRequested = false
                 break
             }
             kotlinx.coroutines.delay(500)
@@ -200,6 +217,7 @@ fun HomeScreen(
             chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
             selectedTab = SidebarTab.Explorer
         } else {
+            permissionRequested = true
             val intent = android.content.Intent(
                 android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
             ).apply {
