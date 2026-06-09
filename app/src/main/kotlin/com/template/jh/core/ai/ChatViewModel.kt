@@ -1139,7 +1139,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         val startTime = System.currentTimeMillis()
         var totalOutputChars = 0
 
-        val userInput = if (editorCtx.isNotBlank()) "$editorCtx\n[用户消息]\n$text" else text
+        val userInput = if (editorCtx.isNotBlank()) "$editorCtx\n$text" else text
         val firstMessage: Message = if (hasImages) {
             val contentList = mutableListOf<Content>().apply {
                 add(Content.Text(userInput))
@@ -1704,7 +1704,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         historyMessages.addAll(compressed)
         // 注入编辑器上下文 + 当前用户消息
         val editorCtx = buildEditorContext()
-        val userContent = if (editorCtx.isNotBlank()) "$editorCtx\n[用户消息]\n$text" else text
+        val userContent = if (editorCtx.isNotBlank()) "$editorCtx\n$text" else text
         historyMessages.add(ChatMessage(role = ChatRole.User, content = userContent))
 
         // 注入已有上下文摘要（渐进式摘要的锚定状态）

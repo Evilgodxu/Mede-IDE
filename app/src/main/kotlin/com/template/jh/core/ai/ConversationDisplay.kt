@@ -21,9 +21,8 @@ private val toolJsonRegex = Regex(
  * 移除用户消息中注入给 AI 模型看的控制前缀，仅保留用户实际输入内容。
  */
 private fun stripUserControlPrefixes(text: String): String {
-    // 移除开头的 [用户请求] 或 [用户消息] 标记行
+    // 移除开头的 [用户请求] 标记行
     val cleaned = text.replace(Regex("^\\[用户请求]\\s*"), "")
-        .replace(Regex("^\\[用户消息]\\s*"), "")
         .trimStart('\n', '\r')
         // 移除末尾的 [已附加 X 张图片] 及 [用户指定的文件...] 块
         .replace(Regex("\\n\\[已附加.*]$"), "")
