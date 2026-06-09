@@ -68,7 +68,7 @@ fun TreeContextMenu(
             if (showOpenAsProject) {
                 DropdownMenuItem(
                     text = { Text("以项目目录打开") },
-                    onClick = { onDismiss(); onOpenAsProject!!() },
+                    onClick = { onDismiss(); onOpenAsProject() },
                     leadingIcon = { Icon(Icons.Default.FolderOpen, null, Modifier.size(16.dp)) },
                 )
             }

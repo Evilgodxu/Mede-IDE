@@ -363,13 +363,10 @@ class ChatViewModel(
 
     fun requestOpenFile(path: String) { _openFileRequests.tryEmit(path) }
 
-    /** 从工具调用参数 JSON 中提取 path 字段 */
-    private fun extractPathFromArgs(args: String): String? {
-        return try {
-            val obj = org.json.JSONObject(args)
-            val path = obj.optString("path", "")
-            path.ifBlank { null }
-        } catch (_: Exception) { null }
+    /** 从工具调用参数 Map 中提取 path 字段 */
+    private fun extractPathFromArgs(args: Map<String, String>): String? {
+        val path = args["path"]
+        return if (path.isNullOrBlank()) null else path
     }
 
     /** 将工具传入的路径转为绝对路径（同 AIToolSet.resolvePathOrAbsolute） */
