@@ -234,12 +234,12 @@ fun HomeScreen(
     val isStorageActive = homeState.openedFolderName != null
 
     val closeFolder: () -> Unit = {
-        viewModel.closeFolder()
-        chatViewModel.setProjectRoot(null)
+        viewModel.openDirectStorage()
+        chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
         editorState.closeAllTabs()
         editorState.editorContent.clear()
         isSettingsOpen = false
-        selectedTab = null
+        selectedTab = SidebarTab.Explorer
     }
 
     var showNewFileDialog by remember { mutableStateOf(false) }
