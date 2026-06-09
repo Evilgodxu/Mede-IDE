@@ -96,6 +96,7 @@ import com.template.jh.model.SkillItem
 import com.template.jh.model.chat.DownloadStatus
 import com.template.jh.model.chat.EngineStatus
 import com.template.jh.model.chat.ModelParams
+import com.template.jh.model.chat.BackendType
 import com.template.jh.screens.home.ChatViewModel
 import com.template.jh.screens.home.HomeUiState
 import com.template.jh.screens.home.HomeViewModel
@@ -225,6 +226,44 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
                         }
                     },
                 )
+            }
+        }
+
+        // 推理后端选择
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("推理后端", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Text("切换 CPU/GPU/NPU 后端，切换后需重新加载模型", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val currentBackend = chatState.backendType
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    BackendType.entries.forEach { type ->
+                        val isSelected = currentBackend == type
+                        androidx.compose.material3.FilterChip(
+                            selected = isSelected,
+                            onClick = { chatViewModel.setBackendType(type) },
+                            label = { Text(type.displayName, style = MaterialTheme.typography.labelMedium) },
+                        )
+                    }
+                }
+                // NPU 模式下显示库目录输入
+                if (currentBackend == BackendType.NPU) {
+                    var npuDir by remember(chatState.npuLibraryDir) { mutableStateOf(chatState.npuLibraryDir) }
+                    OutlinedTextField(
+                        value = npuDir,
+                        onValueChange = { npuDir = it },
+                        label = { Text("NPU 库目录") },
+                        placeholder = { Text("如: /vendor/lib64") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        supportingText = { Text("指定 NPU 驱动库所在目录，应用重启后生效") },
+                    )
+                    OutlinedButton(
+                        onClick = { chatViewModel.setNpuLibraryDir(npuDir) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("保存 NPU 目录")
+                    }
+                }
             }
         }
 

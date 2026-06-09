@@ -10,6 +10,7 @@ import com.template.jh.model.chat.EngineStatus
 import com.template.jh.model.chat.ModelActivity
 import com.template.jh.model.chat.ModelInfo
 import com.template.jh.model.chat.ModelParams
+import com.template.jh.model.chat.BackendType
 
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
@@ -50,4 +51,7 @@ data class ChatUiState(
     val contextCompressedCount: Int = 0,   // 压缩次数
     val contextSummary: String = "",       // 云端 LLM 生成的上下文结构化摘要 JSON
     val attachedImageUris: List<Uri> = emptyList(),
+    // 本地推理后端配置
+    val backendType: BackendType = BackendType.CPU,
+    val npuLibraryDir: String = "",
 )

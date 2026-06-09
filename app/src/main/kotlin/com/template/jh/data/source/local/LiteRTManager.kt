@@ -11,6 +11,7 @@ import com.template.jh.model.chat.EngineStatus
 import com.template.jh.model.chat.ModelInfo
 import com.template.jh.model.chat.ModelParams
 import com.template.jh.model.chat.RecommendedModel
+import com.template.jh.model.chat.BackendType
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -38,6 +39,13 @@ import java.util.concurrent.TimeUnit
 fun ModelParams.toSamplerConfig(): SamplerConfig =
     SamplerConfig(topK = topK, topP = topP, temperature = temperature, seed = seed)
 
+// 将 BackendType 转为 LiteRT-LM Backend
+fun BackendType.toLiteRtBackend(npuLibDir: String = ""): Backend = when (this) {
+    BackendType.CPU -> Backend.CPU()
+    BackendType.GPU -> Backend.GPU()
+    BackendType.NPU -> Backend.NPU(nativeLibraryDir = npuLibDir)
+}
+
 // LiteRT-LM 引擎管理器
 @OptIn(com.google.ai.edge.litertlm.ExperimentalApi::class)
 class LiteRTManager(private val context: Context) : AutoCloseable {
@@ -54,6 +62,10 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         private set
 
     @Volatile var modelParams: ModelParams = ModelParams()
+
+    // 后端类型（默认 CPU）
+    @Volatile var backendType: BackendType = BackendType.CPU
+    @Volatile var npuLibraryDir: String = ""
 
     // 图像/多模态相关配置
     @Volatile var maxNumImages: Int = 4
@@ -220,7 +232,8 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         try {
             withContext(Dispatchers.IO) {
                 closeEngine()
-                val config = EngineConfig(modelPath = modelPath, backend = Backend.CPU(), visionBackend = Backend.CPU(), maxNumImages = maxNumImages, cacheDir = context.cacheDir.absolutePath)
+                val liteBackend = backendType.toLiteRtBackend(npuLibraryDir)
+                val config = EngineConfig(modelPath = modelPath, backend = liteBackend, visionBackend = liteBackend, maxNumImages = maxNumImages, cacheDir = context.cacheDir.absolutePath)
                 val newEngine = Engine(config)
                 newEngine.initialize()
                 engine = newEngine

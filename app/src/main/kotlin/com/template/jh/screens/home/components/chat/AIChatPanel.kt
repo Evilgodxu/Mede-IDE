@@ -42,7 +42,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -770,23 +769,40 @@ private fun VoiceInputButton(
 }
 
 /**
- * 语音识别管理器 - 支持连续识别、自动重连、静音超时控制
+ * 语音识别管理器
  *
- * 使用 MyApplication.instance 获取 Application Context，绕过 Compose LocalContext 包装。
- * 不依赖 isRecognitionAvailable() 预检（部分设备该 API 返回异常），
- * 直接 createSpeechRecognizer 并判空，兼容更多设备。
+ * 核心逻辑与官方 gallery 示例一致：
+ * - SpeechRecognizer 一次性创建并复用（官方 init 块）
+ * - Intent 参数匹配官方（en-US、MAX_RESULTS=1、无额外 EXTRA）
+ * - onError 空实现（官方不处理错误）
+ * - onBeginningOfSpeech / onEndOfSpeech 空实现
+ * - stop() 延迟 500ms 后 stopListening（官方 delay(500)）
+ *
+ * 差异（UI 需求）：
+ * - 支持连续识别：onResults 后若 isActive 则自动重启
+ * - 通过 generation 计数器防止并发回调污染
  */
 private class VoiceRecognizerManager {
     private val appContext: android.content.Context = com.template.jh.MyApplication.instance
+
     private var recognizer: android.speech.SpeechRecognizer? = null
-    private var isActive = false
+    private val recognizerIntent: android.content.Intent
+
+    @Volatile private var isActive = false
+    @Volatile private var generation = 0L
     private var onFinalCallback: ((String) -> Unit)? = null
     private var onPartialCallback: ((String) -> Unit)? = null
     private var onListeningCallback: ((Boolean) -> Unit)? = null
     private val handler = Handler(Looper.getMainLooper())
-    private var retryCount = 0
-    private var maxRetries = 3
-    private var useSegmentedSession = false
+
+    init {
+        recognizerIntent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+            putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        }
+    }
 
     fun start(
         isListeningState: (Boolean) -> Unit,
@@ -794,35 +810,12 @@ private class VoiceRecognizerManager {
         onPartialResult: (String) -> Unit,
     ) {
         destroy()
-        retryCount = 0
         isActive = true
+        generation++
         onFinalCallback = onFinalResult
         onPartialCallback = onPartialResult
         onListeningCallback = isListeningState
-        useSegmentedSession = android.os.Build.VERSION.SDK_INT >= 33
-        startRecognizer()
-    }
 
-    fun stop() {
-        isActive = false
-        recognizer?.stopListening()
-        recognizer?.cancel()
-        recognizer?.destroy()
-        recognizer = null
-        handler.removeCallbacksAndMessages(null)
-        onListeningCallback?.invoke(false)
-    }
-
-    fun destroy() {
-        isActive = false
-        retryCount = 0
-        handler.removeCallbacksAndMessages(null)
-        recognizer?.cancel()
-        recognizer?.destroy()
-        recognizer = null
-    }
-
-    private fun createAndStartRecognizer() {
         val r = android.speech.SpeechRecognizer.createSpeechRecognizer(appContext)
         if (r == null) {
             onListeningCallback?.invoke(false)
@@ -830,102 +823,122 @@ private class VoiceRecognizerManager {
             return
         }
         recognizer = r
-        var hasActiveResult = false
+        val gen = generation
+
         r.setRecognitionListener(object : android.speech.RecognitionListener {
-            override fun onReadyForSpeech(params: android.os.Bundle?) {
-                retryCount = 0
-            }
-            override fun onBeginningOfSpeech() {
-                onListeningCallback?.invoke(true)
-            }
+            override fun onReadyForSpeech(params: android.os.Bundle?) {}
+            override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {
-                if (!useSegmentedSession) {
-                    onListeningCallback?.invoke(false)
-                }
-            }
+            override fun onEndOfSpeech() {}
+
             override fun onError(error: Int) {
-                android.util.Log.d("VoiceRecognizer", "onError: $error")
-                onListeningCallback?.invoke(false)
+                if (gen != generation) return
                 r.destroy()
                 if (recognizer == r) recognizer = null
-                if (!isActive) return
-                when (error) {
-                    android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
-                    android.speech.SpeechRecognizer.ERROR_NO_MATCH -> {
-                        handler.postDelayed({ startRecognizer() }, 200)
-                    }
-                    android.speech.SpeechRecognizer.ERROR_NETWORK,
-                    android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> {
-                        if (retryCount < maxRetries) {
-                            retryCount++
-                            handler.postDelayed({ startRecognizer() }, (retryCount * 1000L).coerceAtMost(3000L))
-                        } else {
-                            onFinalCallback?.invoke("语音识别网络错误")
-                        }
-                    }
-                    android.speech.SpeechRecognizer.ERROR_AUDIO,
-                    android.speech.SpeechRecognizer.ERROR_CLIENT -> {}
-                    else -> {
-                        if (retryCount < maxRetries) {
-                            retryCount++
-                            handler.postDelayed({ startRecognizer() }, 1000)
-                        }
-                    }
-                }
+                onListeningCallback?.invoke(false)
             }
+
             override fun onResults(results: android.os.Bundle?) {
+                if (gen != generation) return
                 val matches = results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
                 val text = matches?.firstOrNull()?.trim()
                 if (text != null && text.isNotBlank()) {
-                    hasActiveResult = true
                     onFinalCallback?.invoke(text)
                 }
-                if (useSegmentedSession) return
                 r.destroy()
                 if (recognizer == r) recognizer = null
-                if (isActive) startRecognizer()
+                // 连续识别模式：用户未点击停止时自动重启
+                if (isActive) {
+                    handler.postDelayed({ if (isActive) startRecognizer(generation) }, 200)
+                }
             }
+
             override fun onPartialResults(partialResults: android.os.Bundle?) {
+                if (gen != generation) return
                 val matches = partialResults?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
                 val text = matches?.firstOrNull()?.trim()
                 if (text != null && text.isNotBlank()) {
                     onPartialCallback?.invoke(text)
                 }
             }
+
             override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
-            override fun onSegmentResults(segmentResults: android.os.Bundle) {
-                val matches = segmentResults.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
-                val text = matches?.firstOrNull()?.trim()
-                if (text != null && text.isNotBlank()) {
-                    hasActiveResult = true
-                    onFinalCallback?.invoke(text)
-                }
-            }
         })
-        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
-            putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000)
-            putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000)
-            if (useSegmentedSession) {
-                putExtra(android.speech.RecognizerIntent.EXTRA_SEGMENTED_SESSION, true)
-            }
-        }
-        r.startListening(intent)
+
+        r.startListening(recognizerIntent)
         onListeningCallback?.invoke(true)
     }
 
-    private fun startRecognizer() {
-        if (!isActive) return
+    fun stop() {
+        isActive = false
+        handler.removeCallbacksAndMessages(null)
+        recognizer?.stopListening()
+        recognizer?.cancel()
+        recognizer?.destroy()
+        recognizer = null
+        onListeningCallback?.invoke(false)
+    }
+
+    fun destroy() {
+        isActive = false
+        handler.removeCallbacksAndMessages(null)
+        recognizer?.cancel()
+        recognizer?.destroy()
+        recognizer = null
+    }
+
+    private fun startRecognizer(gen: Long) {
+        if (!isActive || gen != generation) return
         try {
-            createAndStartRecognizer()
-        } catch (e: Exception) {
+            val r = android.speech.SpeechRecognizer.createSpeechRecognizer(appContext) ?: return
+            if (gen != generation) { r.destroy(); return }
+            recognizer = r
+
+            r.setRecognitionListener(object : android.speech.RecognitionListener {
+                override fun onReadyForSpeech(params: android.os.Bundle?) {}
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {}
+
+                override fun onError(error: Int) {
+                    if (gen != generation) return
+                    r.destroy()
+                    if (recognizer == r) recognizer = null
+                    onListeningCallback?.invoke(false)
+                }
+
+                override fun onResults(results: android.os.Bundle?) {
+                    if (gen != generation) return
+                    val matches = results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                    val text = matches?.firstOrNull()?.trim()
+                    if (text != null && text.isNotBlank()) {
+                        onFinalCallback?.invoke(text)
+                    }
+                    r.destroy()
+                    if (recognizer == r) recognizer = null
+                    if (isActive) {
+                        handler.postDelayed({ if (isActive) startRecognizer(generation) }, 200)
+                    }
+                }
+
+                override fun onPartialResults(partialResults: android.os.Bundle?) {
+                    if (gen != generation) return
+                    val matches = partialResults?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
+                    val text = matches?.firstOrNull()?.trim()
+                    if (text != null && text.isNotBlank()) {
+                        onPartialCallback?.invoke(text)
+                    }
+                }
+
+                override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+            })
+
+            r.startListening(recognizerIntent)
+            onListeningCallback?.invoke(true)
+        } catch (_: Exception) {
             onListeningCallback?.invoke(false)
-            android.widget.Toast.makeText(appContext, "语音识别启动失败", android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 }

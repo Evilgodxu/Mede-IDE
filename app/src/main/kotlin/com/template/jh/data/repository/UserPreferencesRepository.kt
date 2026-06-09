@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.template.jh.model.McpServer
 import com.template.jh.model.Rule
 import com.template.jh.model.SkillItem
+import com.template.jh.model.chat.BackendType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -48,6 +49,9 @@ class UserPreferencesRepository(private val context: Context) {
         val CLOUD_MODEL_ENABLED = booleanPreferencesKey("cloud_model_enabled")
         val CLOUD_PROFILES_JSON = stringPreferencesKey("cloud_profiles_json")
         val ACTIVE_CLOUD_PROFILE_ID = stringPreferencesKey("active_cloud_profile_id")
+        // 本地推理后端
+        val BACKEND_TYPE = stringPreferencesKey("backend_type")
+        val NPU_LIBRARY_DIR = stringPreferencesKey("npu_library_dir")
     }
 
     val themeMode: Flow<String> = context.dataStore.data
@@ -347,6 +351,22 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun setAutoLoadLastModel(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.AUTO_LOAD_LAST_MODEL] = enabled }
+    }
+
+    // 本地推理后端类型
+    val backendType: Flow<BackendType> = context.dataStore.data
+        .map { it[PreferencesKeys.BACKEND_TYPE]?.let { BackendType.fromName(it) } ?: BackendType.CPU }
+
+    suspend fun setBackendType(type: BackendType) {
+        context.dataStore.edit { it[PreferencesKeys.BACKEND_TYPE] = type.name }
+    }
+
+    // NPU 库目录路径
+    val npuLibraryDir: Flow<String> = context.dataStore.data
+        .map { it[PreferencesKeys.NPU_LIBRARY_DIR] ?: "" }
+
+    suspend fun setNpuLibraryDir(dir: String) {
+        context.dataStore.edit { it[PreferencesKeys.NPU_LIBRARY_DIR] = dir }
     }
 
     private fun rulesToJson(rules: List<Rule>): String {

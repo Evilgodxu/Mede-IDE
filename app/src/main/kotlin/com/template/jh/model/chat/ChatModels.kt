@@ -106,6 +106,17 @@ data class ModelParams(
     }
 }
 
+// LiteRT-LM 后端类型（CPU/GPU/NPU）
+enum class BackendType(val displayName: String) {
+    CPU("CPU"),
+    GPU("GPU"),
+    NPU("NPU");
+    companion object {
+        fun fromName(name: String): BackendType =
+            entries.find { it.name.equals(name, ignoreCase = true) } ?: CPU
+    }
+}
+
 data class ModelInfo(val path: String, val name: String, val size: Long) {
     val sizeText: String get() = when {
         size < 1024 -> "$size B"

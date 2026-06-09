@@ -39,6 +39,7 @@ import com.template.jh.model.chat.DisplayRole
 import com.template.jh.model.chat.EngineStatus
 import com.template.jh.model.chat.ModelActivity
 import com.template.jh.model.chat.ModelParams
+import com.template.jh.model.chat.BackendType
 import com.template.jh.screens.home.components.chat.toDisplayItems
 import com.template.jh.screens.home.logic.utils.FileTypeUtil
 import kotlinx.coroutines.Dispatchers
@@ -161,20 +162,37 @@ class ChatViewModel(
                 }
             }
         }
-        // 启动时自动加载上次模型
+        // 启动时自动加载上次模型（已读取最新的 backend 配置）
         viewModelScope.launch {
             try {
                 val autoLoad = preferencesRepo.autoLoadLastModel.first()
                 val lastPath = preferencesRepo.lastModelPath.first()
+                val backend = preferencesRepo.backendType.first()
+                val npuDir = preferencesRepo.npuLibraryDir.first()
                 if (autoLoad && !lastPath.isNullOrEmpty()) {
                     val file = java.io.File(lastPath)
                     if (file.exists()) {
+                        liteRTManager.backendType = backend
+                        liteRTManager.npuLibraryDir = npuDir
                         liteRTManager.loadModel(lastPath)
                         preferencesRepo.setCloudModelEnabled(false)
-                        _state.update { it.copy(cloudModelEnabled = false) }
+                        _state.update { it.copy(cloudModelEnabled = false, backendType = backend, npuLibraryDir = npuDir) }
                     }
                 }
             } catch (_: Exception) {}
+        }
+        // 同步 backend 配置到 LiteRTManager
+        viewModelScope.launch {
+            preferencesRepo.backendType.collect { type ->
+                liteRTManager.backendType = type
+                _state.update { it.copy(backendType = type) }
+            }
+        }
+        viewModelScope.launch {
+            preferencesRepo.npuLibraryDir.collect { dir ->
+                liteRTManager.npuLibraryDir = dir
+                _state.update { it.copy(npuLibraryDir = dir) }
+            }
         }
         viewModelScope.launch {
             liteRTManager.downloadState.collect { ds ->
@@ -241,6 +259,10 @@ class ChatViewModel(
 
     fun loadModel(modelPath: String) {
         viewModelScope.launch {
+            val backend = _state.value.backendType
+            val npuDir = _state.value.npuLibraryDir
+            liteRTManager.backendType = backend
+            liteRTManager.npuLibraryDir = npuDir
             liteRTManager.loadModel(modelPath)
             // 切换到本地模型时自动关闭云端
             preferencesRepo.setCloudModelEnabled(false)
@@ -276,6 +298,20 @@ class ChatViewModel(
     fun setModelParams(params: ModelParams) {
         liteRTManager.modelParams = params
         _state.update { it.copy(modelParams = params) }
+    }
+
+    // 切换本地推理后端
+    fun setBackendType(type: BackendType) {
+        viewModelScope.launch {
+            preferencesRepo.setBackendType(type)
+            // 设置后立即生效，下次加载模型时使用新 backend
+        }
+    }
+
+    fun setNpuLibraryDir(dir: String) {
+        viewModelScope.launch {
+            preferencesRepo.setNpuLibraryDir(dir)
+        }
     }
 
     fun toggleModelPicker() { _state.update { it.copy(isModelPickerOpen = !it.isModelPickerOpen) } }
