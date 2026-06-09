@@ -1665,10 +1665,6 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         }
     }
 
-
-
-
-
     /** 查找从 start 处开始的 JSON 对象结束位置，跳过字符串字面量内的 {} */
     private fun findJsonBlockEnd(text: String, start: Int): Int {
         if (start >= text.length || text[start] != '{') return -1
