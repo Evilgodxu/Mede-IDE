@@ -217,19 +217,20 @@ class AIToolSet(
             FileLogger.w("AIToolSet", "writeFile: no project folder open")
             return "No project folder is open."
         }
+        val resolvedPath = resolvePathOrAbsolute(path)
         // Write-guard: 文件已存在时拒绝写入
-        if (fm.exists(path)) {
-            val msg = ("Write refused — $path already exists.\n" +
+        if (fm.exists(resolvedPath)) {
+            val msg = ("Write refused — $resolvedPath already exists.\n" +
                 "Write is for creating NEW files only.\n" +
                 "To modify an existing file, use replaceInFile or batchReplaceInFile with the exact code block.\n" +
                 "Read the file first if you don't know its current content.")
-            FileLogger.w("AIToolSet", "writeFile blocked by write-guard: $path exists")
+            FileLogger.w("AIToolSet", "writeFile blocked by write-guard: $resolvedPath exists")
             return msg
         }
         return try {
-            val result = fm.writeFile(path, content)
+            val result = fm.writeFile(resolvedPath, content)
             if (!result.startsWith("Failed") && !result.startsWith("No project")) {
-                FileOperationEvents.notify(path, "create")
+                FileOperationEvents.notify(resolvedPath, "create")
                 FileLogger.d("AIToolSet", "writeFile succeeded: $result")
             } else {
                 FileLogger.w("AIToolSet", "writeFile failed: $result")
@@ -254,27 +255,28 @@ class AIToolSet(
             FileLogger.w("AIToolSet", "replaceInFile: no project folder open")
             return "No project folder is open."
         }
+        val resolvedPath = resolvePathOrAbsolute(path)
         return try {
-            Log.d("AIToolSet", "replaceInFile: path=$path oldLen=${old_string.length} newLen=${new_string.length}")
-            FileLogger.d("AIToolSet", "replaceInFile: path=$path oldLen=${old_string.length} newLen=${new_string.length}")
-            val original = readFileRaw(path)
+            Log.d("AIToolSet", "replaceInFile: path=$resolvedPath oldLen=${old_string.length} newLen=${new_string.length}")
+            FileLogger.d("AIToolSet", "replaceInFile: path=$resolvedPath oldLen=${old_string.length} newLen=${new_string.length}")
+            val original = readFileRaw(resolvedPath)
             if (original == null) {
-                Log.w("AIToolSet", "replaceInFile: file not found: $path")
-                FileLogger.w("AIToolSet", "replaceInFile: file not found: $path")
+                Log.w("AIToolSet", "replaceInFile: file not found: $resolvedPath")
+                FileLogger.w("AIToolSet", "replaceInFile: file not found: $resolvedPath")
                 return "Cannot replace: file not found. Use writeFile to create first."
             }
 
             when (val result = CodeEditTool.replace(original, old_string, new_string)) {
                 is CodeEditTool.ReplaceResult.Success -> {
                     val newContent = normalizeBlankLines(result.newText)
-                    val writeResult = fm.writeFile(path, newContent)
+                    val writeResult = fm.writeFile(resolvedPath, newContent)
                     if (writeResult.startsWith("Failed") || writeResult.startsWith("No project")) {
                         FileLogger.e("AIToolSet", "replaceInFile: replace OK but write failed: $writeResult")
                         return "Replace succeeded but write failed: $writeResult"
                     }
-                    FileOperationEvents.notify(path, "modify")
-                    FileLogger.d("AIToolSet", "replaceInFile succeeded: $path")
-                    "Replace succeeded: $path. ${result.message}"
+                    FileOperationEvents.notify(resolvedPath, "modify")
+                    FileLogger.d("AIToolSet", "replaceInFile succeeded: $resolvedPath")
+                    "Replace succeeded: $resolvedPath. ${result.message}"
                 }
                 is CodeEditTool.ReplaceResult.Error -> {
                     FileLogger.w("AIToolSet", "replaceInFile: CodeEditTool rejected: ${result.message.take(200)}")
@@ -298,13 +300,14 @@ class AIToolSet(
             FileLogger.w("AIToolSet", "batchReplaceInFile: no project folder open")
             return "No project folder is open."
         }
+        val resolvedPath = resolvePathOrAbsolute(path)
         return try {
-            Log.d("AIToolSet", "batchReplaceInFile: path=$path editsLen=${editsJson.length}")
-            FileLogger.d("AIToolSet", "batchReplaceInFile: path=$path editsLen=${editsJson.length}")
-            val original = readFileRaw(path)
+            Log.d("AIToolSet", "batchReplaceInFile: path=$resolvedPath editsLen=${editsJson.length}")
+            FileLogger.d("AIToolSet", "batchReplaceInFile: path=$resolvedPath editsLen=${editsJson.length}")
+            val original = readFileRaw(resolvedPath)
             if (original == null) {
-                Log.w("AIToolSet", "batchReplaceInFile: file not found: $path")
-                FileLogger.w("AIToolSet", "batchReplaceInFile: file not found: $path")
+                Log.w("AIToolSet", "batchReplaceInFile: file not found: $resolvedPath")
+                FileLogger.w("AIToolSet", "batchReplaceInFile: file not found: $resolvedPath")
                 return "Cannot edit: file not found. Use writeFile to create first."
             }
 
@@ -324,14 +327,14 @@ class AIToolSet(
             when (val result = CodeEditTool.batchReplace(original, edits)) {
                 is CodeEditTool.ReplaceResult.Success -> {
                     val newContent = normalizeBlankLines(result.newText)
-                    val writeResult = fm.writeFile(path, newContent)
+                    val writeResult = fm.writeFile(resolvedPath, newContent)
                     if (writeResult.startsWith("Failed") || writeResult.startsWith("No project")) {
                         FileLogger.e("AIToolSet", "batchReplaceInFile: replace OK but write failed: $writeResult")
                         return "Edit succeeded but write failed: $writeResult"
                     }
-                    FileOperationEvents.notify(path, "modify")
-                    FileLogger.d("AIToolSet", "batchReplaceInFile succeeded: $path")
-                    "Batch edit succeeded: $path. ${result.message}"
+                    FileOperationEvents.notify(resolvedPath, "modify")
+                    FileLogger.d("AIToolSet", "batchReplaceInFile succeeded: $resolvedPath")
+                    "Batch edit succeeded: $resolvedPath. ${result.message}"
                 }
                 is CodeEditTool.ReplaceResult.Error -> {
                     FileLogger.w("AIToolSet", "batchReplaceInFile: rejected: ${result.message.take(200)}")
@@ -354,17 +357,18 @@ class AIToolSet(
     fun deleteFile(
         @ToolParam(description = "File or directory path relative to project root, e.g. 'src/OldFile.kt' or 'temp/'") path: String,
     ): String {
-        Log.d("AIToolSet", "deleteFile: path=$path")
-        FileLogger.d("AIToolSet", "deleteFile: path=$path")
+        val resolvedPath = resolvePathOrAbsolute(path)
+        Log.d("AIToolSet", "deleteFile: path=$resolvedPath")
+        FileLogger.d("AIToolSet", "deleteFile: path=$resolvedPath")
         val fm = fileManager ?: run {
             FileLogger.w("AIToolSet", "deleteFile: no project folder open")
             return "No project folder is open."
         }
-        val result = fm.deleteFile(path)
+        val result = fm.deleteFile(resolvedPath)
         if (result.startsWith("Failed") || result.startsWith("No project")) {
             FileLogger.w("AIToolSet", "deleteFile failed: $result")
         } else {
-            FileOperationEvents.notify(path, "delete")
+            FileOperationEvents.notify(resolvedPath, "delete")
             FileLogger.d("AIToolSet", "deleteFile succeeded: $result")
         }
         return result
@@ -381,7 +385,8 @@ class AIToolSet(
             val paths = org.json.JSONArray(pathsJson)
             val results = mutableListOf<String>()
             for (i in 0 until paths.length()) {
-                val path = paths.getString(i)
+                val rawPath = paths.getString(i)
+                val path = resolvePathOrAbsolute(rawPath)
                 val result = fm.deleteFile(path)
                 if (result.startsWith("Failed") || result.startsWith("No project")) {
                     results.add("$path: $result")
@@ -407,17 +412,18 @@ class AIToolSet(
     fun createDirectory(
         @ToolParam(description = "Directory path relative to project root, e.g. 'src/utils' or 'assets/images'") path: String,
     ): String {
-        Log.d("AIToolSet", "createDirectory: path=$path")
-        FileLogger.d("AIToolSet", "createDirectory: path=$path")
+        val resolvedPath = resolvePathOrAbsolute(path)
+        Log.d("AIToolSet", "createDirectory: path=$resolvedPath")
+        FileLogger.d("AIToolSet", "createDirectory: path=$resolvedPath")
         val fm = fileManager ?: run {
             FileLogger.w("AIToolSet", "createDirectory: no project folder open")
             return "No project folder is open."
         }
-        val result = fm.createDirectory(path)
+        val result = fm.createDirectory(resolvedPath)
         if (result.startsWith("Failed") || result.startsWith("No project")) {
             FileLogger.w("AIToolSet", "createDirectory failed: $result")
         } else {
-            FileOperationEvents.notify(path, "create")
+            FileOperationEvents.notify(resolvedPath, "create")
             FileLogger.d("AIToolSet", "createDirectory succeeded: $result")
         }
         return result

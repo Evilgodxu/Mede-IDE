@@ -43,6 +43,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -72,9 +73,12 @@ fun MainContentArea(
     activeTabIndex: Int = -1,
     onSelectTab: (Int) -> Unit = {},
     onCloseTab: (Int) -> Unit = {},
+    onSaveAndCloseTab: (Int) -> Unit = {},
+    onForceCloseTab: (Int) -> Unit = {},
     onCloseAllTabs: () -> Unit = {},
     onSaveAllTabs: () -> Unit = {},
     onSaveCurrent: () -> Unit = {},
+    isFileModified: (String) -> Boolean = { false },
 
     tabContent: @Composable (String) -> Unit = {},
 ) {
@@ -91,9 +95,12 @@ fun MainContentArea(
                 activeIndex = activeTabIndex,
                 onSelectTab = onSelectTab,
                 onCloseTab = onCloseTab,
+                onSaveAndCloseTab = onSaveAndCloseTab,
+                onForceCloseTab = onForceCloseTab,
                 onCloseAllTabs = onCloseAllTabs,
                 onSaveAllTabs = onSaveAllTabs,
                 onSaveCurrent = onSaveCurrent,
+                isFileModified = isFileModified,
             )
             // 当前路径指示
             if (activeTabIndex in tabs.indices) {
@@ -189,11 +196,15 @@ private fun EditorTabBar(
     activeIndex: Int,
     onSelectTab: (Int) -> Unit = {},
     onCloseTab: (Int) -> Unit,
+    onSaveAndCloseTab: (Int) -> Unit = {},
+    onForceCloseTab: (Int) -> Unit = {},
     onCloseAllTabs: () -> Unit = {},
     onSaveAllTabs: () -> Unit = {},
     onSaveCurrent: () -> Unit = {},
+    isFileModified: (String) -> Boolean = { false },
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var closeConfirmTabIndex by remember { mutableIntStateOf(-1) }
 
     Row(
         modifier = Modifier
@@ -245,16 +256,44 @@ private fun EditorTabBar(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.widthIn(max = 120.dp)
                     )
-                    IconButton(
-                        onClick = { onCloseTab(index) },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = stringResource(R.string.tab_close),
-                            modifier = Modifier.size(12.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    // 关闭按钮 + 未保存文件的下拉菜单
+                    Box {
+                        IconButton(
+                            onClick = {
+                                if (tab.type == TabType.File && isFileModified(tab.id)) {
+                                    closeConfirmTabIndex = index
+                                } else {
+                                    onCloseTab(index)
+                                }
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = stringResource(R.string.tab_close),
+                                modifier = Modifier.size(12.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = closeConfirmTabIndex == index,
+                            onDismissRequest = { closeConfirmTabIndex = -1 },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("不保存关闭") },
+                                onClick = {
+                                    closeConfirmTabIndex = -1
+                                    onForceCloseTab(index)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("保存并关闭") },
+                                onClick = {
+                                    closeConfirmTabIndex = -1
+                                    onSaveAndCloseTab(index)
+                                },
+                            )
+                        }
                     }
                 }
             }

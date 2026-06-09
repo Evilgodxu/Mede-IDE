@@ -113,7 +113,7 @@ fun ResourcePanel(
                                 if (node.isDirectory) {
                                     treeState.toggle(node, onListChildren)
                                 } else {
-                                    onFileClick(FileItem(node.name, node.uri, false, relativePath = node.relativePath))
+                                    onFileClick(FileItem(node.name, node.uri, false, relativePath = node.relativePath, filePath = node.filePath))
                                 }
                             },
                             onLongClick = {},
@@ -122,8 +122,8 @@ fun ResourcePanel(
                                     expanded = expanded,
                                     node = node,
                                     onDismiss = onDismiss,
-                                    onOpenFile = { onFileClick(FileItem(node.name, node.uri, false, relativePath = node.relativePath)) },
-                                    onAddToConversation = { onAddToConversation(FileItem(node.name, node.uri, node.isDirectory, relativePath = node.relativePath)) },
+                                    onOpenFile = { onFileClick(FileItem(node.name, node.uri, false, relativePath = node.relativePath, filePath = node.filePath)) },
+                                    onAddToConversation = { onAddToConversation(FileItem(node.name, node.uri, node.isDirectory, relativePath = node.relativePath, filePath = node.filePath)) },
                                     onCreateFile = { createTarget = node; createIsDir = false },
                                     onCreateDirectory = { createTarget = node; createIsDir = true },
                                     onRename = { renameTarget = node },

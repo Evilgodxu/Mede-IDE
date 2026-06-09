@@ -221,7 +221,6 @@ fun HomeScreen(
         selectedTab = null
     }
 
-    var closeConfirmPath by remember { mutableStateOf<String?>(null) }
     var showNewFileDialog by remember { mutableStateOf(false) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var showRecentFilesDialog by remember { mutableStateOf(false) }
@@ -249,7 +248,7 @@ fun HomeScreen(
             }
         }
     }
-    val onPlayAudioTrack: (com.template.jh.screens.home.components.AudioTrack) -> Unit = { track ->
+    fun playAudioTrack(track: com.template.jh.screens.home.components.AudioTrack) {
         try {
             if (audioPlaybackState.exoPlayer == null) {
                 val player = androidx.media3.exoplayer.ExoPlayer.Builder(context).build()
@@ -261,7 +260,7 @@ fun HomeScreen(
                             if (pl.size > 1) {
                                 val next = (ci + 1) % pl.size
                                 val nextTrack = pl[next]
-                                onPlayAudioTrack(nextTrack)
+                                playAudioTrack(nextTrack)
                             } else {
                                 audioPlaybackState.isPlaying = false
                                 audioPlaybackState.currentPosition = 0f
@@ -292,6 +291,7 @@ fun HomeScreen(
             audioPlaybackState.errorMsg = e.message
         }
     }
+    val onPlayAudioTrack: (com.template.jh.screens.home.components.AudioTrack) -> Unit = { playAudioTrack(it) }
     val onStopAudio: () -> Unit = {
         audioPlaybackState.release()
     }
@@ -343,7 +343,8 @@ fun HomeScreen(
                     chatViewModel = chatViewModel,
                     editorState = editorState,
                     onFileClick = { fileItem ->
-                        // 路径优先级: filePath(绝对) > relativePath > content:// URI
+                        // 文本文件使用 filePath（相对/绝对均可，EditorScreenState 会处理)
+                        // 非文本文件需要绝对路径或 content:// URI
                         val filePath = when {
                             fileItem.filePath.isNotEmpty() -> fileItem.filePath
                             fileItem.relativePath.isNotEmpty() -> fileItem.relativePath
@@ -351,16 +352,20 @@ fun HomeScreen(
                         }
                         when (FileTypeUtil.openMode(fileItem.name, fileItem.size)) {
                             FileOpenMode.IMAGE -> {
-                                editorState.openTab(TabItem(filePath, fileItem.name, TabType.Image))
+                                val id = if (fileItem.filePath.isNotEmpty()) fileItem.filePath else fileItem.uri.toString()
+                                editorState.openTab(TabItem(id, fileItem.name, TabType.Image))
                             }
                             FileOpenMode.AUDIO -> {
-                                editorState.openTab(TabItem(filePath, fileItem.name, TabType.Audio))
+                                val id = if (fileItem.filePath.isNotEmpty()) fileItem.filePath else fileItem.uri.toString()
+                                editorState.openTab(TabItem(id, fileItem.name, TabType.Audio))
                             }
                             FileOpenMode.VIDEO -> {
-                                editorState.openTab(TabItem(filePath, fileItem.name, TabType.Video))
+                                val id = if (fileItem.filePath.isNotEmpty()) fileItem.filePath else fileItem.uri.toString()
+                                editorState.openTab(TabItem(id, fileItem.name, TabType.Video))
                             }
                             FileOpenMode.ARCHIVE -> {
-                                editorState.openTab(TabItem(filePath, fileItem.name, TabType.Archive))
+                                val id = if (fileItem.filePath.isNotEmpty()) fileItem.filePath else fileItem.uri.toString()
+                                editorState.openTab(TabItem(id, fileItem.name, TabType.Archive))
                             }
                             FileOpenMode.TEXT -> {
                                 editorState.editorContent.remove(filePath)
@@ -378,9 +383,9 @@ fun HomeScreen(
                     },
                     onAddToConversation = { fileItem ->
                         if (!fileItem.isDirectory) {
+                            // 使用绝对路径或 content:// URI，确保 AI 可读取
                             val attachPath = when {
                                 fileItem.filePath.isNotEmpty() -> fileItem.filePath
-                                fileItem.relativePath.isNotEmpty() -> fileItem.relativePath
                                 else -> fileItem.uri.toString()
                             }
                             chatViewModel.attachFile(attachPath, fileItem.name)
@@ -411,12 +416,22 @@ fun HomeScreen(
                         if (tab.id == editorState.settingsTabId) {
                             editorState.closeSettingsTab()
                             isSettingsOpen = false
-                        } else if (tab.type == TabType.File && editorState.isFileModified(tab.id)) {
-                            closeConfirmPath = tab.id
                         } else {
                             editorState.closeTab(idx)
                         }
                     },
+                    onSaveAndCloseTab = { idx ->
+                        val tab = editorState.tabs.getOrNull(idx) ?: return@MainContentArea
+                        if (tab.type == TabType.File) editorState.saveFile(tab.id)
+                        editorState.closeTab(idx)
+                        if (tab.type == TabType.Video) videoPlaybackState.release()
+                    },
+                    onForceCloseTab = { idx ->
+                        val tab = editorState.tabs.getOrNull(idx) ?: return@MainContentArea
+                        if (tab.type == TabType.Video) videoPlaybackState.release()
+                        editorState.forceCloseTab(idx)
+                    },
+                    isFileModified = { path -> editorState.isFileModified(path) },
                     onCloseAllTabs = {
                         videoPlaybackState.release()
                         editorState.closeAllTabs(); isSettingsOpen = false; viewModel.saveOpenedTabs(emptyList())
@@ -478,22 +493,6 @@ fun HomeScreen(
             text = { OutlinedTextField(value = newFolderName, onValueChange = { newFolderName = it }, placeholder = { Text(stringResource(R.string.dialog_new_folder_name_hint)) }, singleLine = true) },
             confirmButton = { TextButton(onClick = { val name = newFolderName.trim(); if (name.isNotEmpty()) { viewModel.createFile("", name, true); selectedTab = SidebarTab.Explorer; showNewFolderDialog = false } }) { Text(stringResource(R.string.dialog_save)) } },
             dismissButton = { TextButton(onClick = { showNewFolderDialog = false }) { Text(stringResource(R.string.chat_cancel)) } },
-        )
-    }
-
-    closeConfirmPath?.let { path ->
-        val tabTitle = editorState.tabs.find { it.id == path }?.title ?: path
-        AlertDialog(
-            onDismissRequest = { closeConfirmPath = null },
-            title = { Text("文件已修改") },
-            text = { Text("「${tabTitle}」已被修改，是否保存更改？") },
-            confirmButton = { TextButton(onClick = { editorState.saveFile(path); closeConfirmPath = null; editorState.closeTab(editorState.getTabIdxById(path)) }) { Text("保存") } },
-            dismissButton = {
-                Row {
-                    TextButton(onClick = { closeConfirmPath = null; editorState.closeTab(editorState.getTabIdxById(path)) }) { Text("不保存") }
-                    TextButton(onClick = { closeConfirmPath = null }) { Text(stringResource(R.string.chat_cancel)) }
-                }
-            },
         )
     }
 
