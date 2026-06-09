@@ -63,6 +63,7 @@ fun MainTopBar(
     onOpenRecentFile: (String) -> Unit = {},
     onOpenRecentFolder: (String) -> Unit = {},
     onSaveAll: () -> Unit = {},
+    projectDirPath: String = "",
     // 音频播放
     audioPlaybackState: AudioPlaybackState? = null,
     scannedAudioTracks: List<AudioTrack> = emptyList(),
@@ -207,6 +208,7 @@ fun MainTopBar(
                         onOpenRecentFile = onOpenRecentFile,
                         onOpenRecentFolder = onOpenRecentFolder,
                         dropdownMaxHeight = dropdownMaxHeight,
+                        projectDirPath = projectDirPath,
                     )
                 }
             },

@@ -36,6 +36,7 @@ class ConversationMemory(private val context: Context) {
         val filePaths: List<String> = emptyList(),
         val hasCode: Boolean = false,
         val hasToolCall: Boolean = false,
+        val conversationId: String = "", // 所属对话 ID，空表示跨对话
     )
 
     /** 时间段摘要 */
@@ -80,6 +81,7 @@ class ConversationMemory(private val context: Context) {
         role: String,
         content: String,
         filePaths: List<String> = emptyList(),
+        conversationId: String = "",
     ) = withContext(Dispatchers.Default) {
         val entry = Entry(
             id = UUID.randomUUID().toString().take(8),
@@ -91,6 +93,7 @@ class ConversationMemory(private val context: Context) {
             filePaths = filePaths,
             hasCode = content.contains("```") || content.contains("```"),
             hasToolCall = content.contains("[工具调用:") || content.contains("\"tool_name\"") || content.contains("\"name\""),
+            conversationId = conversationId,
         )
 
         // Layer 2: 短期
@@ -113,10 +116,10 @@ class ConversationMemory(private val context: Context) {
     }
 
     /** 从对话消息批量添加（每轮调用一次） */
-    suspend fun addMessages(messages: List<ChatMessageAdapter>) {
+    suspend fun addMessages(messages: List<ChatMessageAdapter>, conversationId: String = "") {
         for (msg in messages) {
             val paths = extractFilePaths(msg.content)
-            addEntry(role = msg.role, content = msg.content, filePaths = paths)
+            addEntry(role = msg.role, content = msg.content, filePaths = paths, conversationId = conversationId)
         }
         // 达到摘要阈值时构建摘要
         if (shortTerm.size % SUMMARY_ENTRY_MIN == 0) {
@@ -125,14 +128,15 @@ class ConversationMemory(private val context: Context) {
         save()
     }
 
-    /** 搜索记忆（跨 Layer 2 + Layer 4） */
-    fun search(query: String, topK: Int = 5): List<Entry> {
+    /** 搜索记忆（跨 Layer 2 + Layer 4），可选按对话隔离 */
+    fun search(query: String, topK: Int = 5, conversationId: String? = null): List<Entry> {
         if (query.isBlank()) return emptyList()
 
         // Layer 2: 短期记忆匹配（关键词命中）
         val queryLower = query.lowercase()
         val queryKeywords = queryLower.split(Regex("\\s+")).filter { it.length > 1 }
         val shortTermHits = shortTerm.filter { entry ->
+            if (conversationId != null && entry.conversationId != conversationId) return@filter false
             queryKeywords.any { kw ->
                 entry.keywords.any { it.contains(kw) } ||
                 entry.summary.lowercase().contains(kw) ||
@@ -144,7 +148,9 @@ class ConversationMemory(private val context: Context) {
         val semanticResults = vectorIndex.search(query, topK = topK * 2)
         val semanticEntries = semanticResults.mapNotNull { match ->
             val id = match.filePath.removePrefix("memory_")
-            shortTerm.find { it.id == id }
+            val entry = shortTerm.find { it.id == id }
+            if (entry != null && conversationId != null && entry.conversationId != conversationId) null
+            else entry
         }.filterNotNull()
 
         // 合并去重，按相关性排序
@@ -154,12 +160,15 @@ class ConversationMemory(private val context: Context) {
         return combined.toList().take(topK)
     }
 
+    /** 搜索记忆（跨对话版本，兼容旧调用） */
+    fun search(query: String, topK: Int = 5): List<Entry> = search(query, topK, null)
+
     /** 获取最近 N 条记忆 */
     fun recent(count: Int = 5): List<Entry> =
         shortTerm.takeLast(count.coerceAtMost(shortTerm.size)).reversed()
 
-    /** 获取摘要上下文（用于注入提示词） */
-    fun getMemoryContext(): String {
+    /** 获取摘要上下文（用于注入提示词），可选按对话隔离 */
+    fun getMemoryContext(conversationId: String = ""): String {
         if (shortTerm.isEmpty() && summaries.isEmpty()) return ""
 
         val sb = StringBuilder()
@@ -173,16 +182,30 @@ class ConversationMemory(private val context: Context) {
             }
         }
 
-        // Layer 2: 最近几条摘要
+        // Layer 2: 最近几条摘要（优先当前对话）
         if (shortTerm.isNotEmpty()) {
-            sb.appendLine("--- 近期对话回顾 ---")
-            shortTerm.takeLast(3).forEach { e ->
-                sb.appendLine("[${e.role}] ${e.summary}")
+            val recentEntries = if (conversationId.isNotBlank()) {
+                // 优先当前对话，不足则补充跨对话
+                val current = shortTerm.filter { it.conversationId == conversationId }.takeLast(3)
+                val others = shortTerm.filter { it.conversationId != conversationId }.takeLast(3 - current.size)
+                (current + others)
+            } else {
+                shortTerm.takeLast(3)
+            }
+            if (recentEntries.isNotEmpty()) {
+                sb.appendLine("--- 近期对话回顾 ---")
+                recentEntries.forEach { e ->
+                    val tag = if (e.conversationId.isNotBlank() && e.conversationId == conversationId) "[当前对话]" else ""
+                    sb.appendLine("$tag[${e.role}] ${e.summary}")
+                }
             }
         }
 
         return sb.toString().trimEnd()
     }
+
+    /** 获取当前对话的记忆上下文（兼容旧调用） */
+    fun getMemoryContext(): String = getMemoryContext("")
 
     /** 获取语义搜索结果的格式化文本（供工具返回） */
     fun searchFormatted(query: String, topK: Int = 5): String {
@@ -236,6 +259,7 @@ class ConversationMemory(private val context: Context) {
                         filePaths = jsonArrToList(obj.optJSONArray("filePaths")),
                         hasCode = obj.optBoolean("hasCode"),
                         hasToolCall = obj.optBoolean("hasToolCall"),
+                        conversationId = obj.optString("conversationId", ""),
                     ))
                 }
             }
@@ -256,8 +280,25 @@ class ConversationMemory(private val context: Context) {
                 }
             }
 
-            Log.d(TAG, "loaded: ${shortTerm.size} entries, ${summaries.size} summaries")
-            FileLogger.d(TAG, "loaded: ${shortTerm.size} entries, ${summaries.size} summaries")
+            // 加载语义索引；若索引为空但 shortTerm 有数据则重建
+            vectorIndex.load(indexDir)
+            if (vectorIndex.size == 0 && shortTerm.isNotEmpty()) {
+                shortTerm.forEach { entry ->
+                    val indexedContent = buildString {
+                        appendLine("角色: ${entry.role}")
+                        appendLine("关键词: ${entry.keywords.joinToString(", ")}")
+                        if (entry.summary.isNotBlank()) appendLine("摘要: ${entry.summary}")
+                        if (entry.hasCode) appendLine("[含代码块]")
+                        append(entry.content)
+                    }
+                    vectorIndex.addDocument("memory_${entry.id}", indexedContent)
+                }
+                vectorIndex.save(indexDir)
+                Log.d(TAG, "vector index rebuilt from ${shortTerm.size} entries")
+            }
+
+            Log.d(TAG, "loaded: ${shortTerm.size} entries, ${summaries.size} summaries, ${vectorIndex.size} indexed")
+            FileLogger.d(TAG, "loaded: ${shortTerm.size} entries, ${summaries.size} summaries, ${vectorIndex.size} indexed")
         } catch (e: Exception) {
             Log.w(TAG, "load failed: ${e.message}")
             FileLogger.w(TAG, "load failed: ${e.message}")
@@ -281,6 +322,7 @@ class ConversationMemory(private val context: Context) {
                     put("filePaths", JSONArray(e.filePaths))
                     put("hasCode", e.hasCode)
                     put("hasToolCall", e.hasToolCall)
+                    put("conversationId", e.conversationId)
                 })
             }
             shortTermFile.writeText(shortArr.toString(2))
@@ -300,20 +342,25 @@ class ConversationMemory(private val context: Context) {
                 summariesDirty = false
             }
 
-            Log.d(TAG, "saved: ${shortTerm.size} entries")
+            // 保存语义索引
+            vectorIndex.save(indexDir)
+
+            Log.d(TAG, "saved: ${shortTerm.size} entries, ${vectorIndex.size} indexed")
+            FileLogger.d(TAG, "saved: ${shortTerm.size} entries, ${vectorIndex.size} indexed")
         } catch (e: Exception) {
             Log.w(TAG, "save failed: ${e.message}")
         }
     }
 
-    /** 清除全部记忆 */
+    /** 清除全部记忆（含磁盘 + 索引） */
     suspend fun clear() = withContext(Dispatchers.IO) {
         shortTerm.clear()
         summaries.clear()
         vectorIndex.clear()
         summariesDirty = true
-        save()
-        Log.d(TAG, "memory cleared")
+        // 清除磁盘文件
+        memoryDir.deleteRecursively()
+        Log.d(TAG, "memory cleared, disk files removed")
     }
 
     // === 内部方法 ===

@@ -489,11 +489,16 @@ class ChatViewModel(
         else "[Lint 诊断]\n$result"
     }
 
-    // 构建编辑器上下文块：工作区结构 + 活动文件 + 已打开文件列表
+    // 构建编辑器上下文块：活动文件优先 + 工作区结构 + 已打开文件列表
     private fun buildEditorContext(): String {
         val s = _state.value
         val ctx = StringBuilder()
         ctx.appendLine("[当前编辑器上下文]")
+        // 活动文件置顶，使用醒目标记强调
+        if (s.activeFilePath.isNotBlank()) {
+            ctx.appendLine(">>> 活动文件（首要操作目标）: ${s.activeFilePath} <<<")
+            ctx.appendLine("用户未指定文件时，以此文件为默认操作目标。")
+        }
         if (s.projectRootName.isNotBlank()) {
             val absoluteRoot = aiToolSet.getProjectRootPath()
             ctx.appendLine("项目: ${s.projectRootName}")
@@ -507,14 +512,12 @@ class ChatViewModel(
                 tree.lines().forEach { ctx.appendLine("  $it") }
             }
         }
-        if (s.activeFilePath.isNotBlank()) {
-            ctx.appendLine("活动文件: ${s.activeFilePath}")
-        }
         if (s.openedFilePaths.isNotEmpty()) {
             ctx.appendLine("已打开文件:")
             s.openedFilePaths.take(10).forEach { path ->
                 val dirty = if (path in s.modifiedFilePaths) " [已修改]" else ""
-                ctx.appendLine("  - $path$dirty")
+                val active = if (path == s.activeFilePath) " ← 活动" else ""
+                ctx.appendLine("  - $path$dirty$active")
             }
             if (s.openedFilePaths.size > 10) {
                 ctx.appendLine("  ... 及其他 ${s.openedFilePaths.size - 10} 个文件")
@@ -719,7 +722,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         if (userName.isNotBlank()) sb.append("\n用户: $userName")
 
         // 注入对话历史记忆（本地模型使用）
-        val memoryCtx = conversationMemory.getMemoryContext()
+        val convId = _state.value.activeConversationId ?: ""
+        val memoryCtx = conversationMemory.getMemoryContext(convId)
         if (memoryCtx.isNotBlank()) {
             sb.append("\n\n$memoryCtx\n")
         }
@@ -1506,7 +1510,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             // Quality monitor: 空响应检测
             if (response.length < 3 && rounds > 0) {
                 FileLogger.w("ChatViewModel", "quality: empty/short response round=$rounds")
-                currentMessage = Message.user("[你似乎没有输出有效内容，请直接输出工具调用或最终答案]")
+                currentMessage = Message.user("[系统指令: 你没有输出有效内容，请直接输出工具调用或最终答案]")
                 continue
             }
 
@@ -1536,7 +1540,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 // 连续 3 轮相同工具调用 → 强制终止循环
                 if (lastToolCalls.size >= 3 && lastToolCalls.toSet().size == 1) {
                     FileLogger.w("ChatViewModel", "quality: repetitive tool calls detected round=$rounds")
-                    currentMessage = Message.user("[当前方案陷入循环，请换一个思路：检查已有信息是否足够？工具调用参数是否正确？是否需要搜索其他文件？尝试不同方向。]")
+                    currentMessage = Message.user("[系统指令: 当前方案陷入循环，请换一个思路：检查已有信息是否足够？工具调用参数是否正确？是否需要搜索其他文件？尝试不同方向。]")
                     lastToolCalls.clear()
                     continue
                 }
@@ -1632,6 +1636,15 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 it.second in setOf("writeFile", "replaceInFile", "batchReplaceInFile", "deleteFile", "createDirectory")
             }
 
+            // 自适应上下文刷新：合并到工具结果（而非伪装成用户消息）
+            rounds++
+            if (hadModifyingTools || rounds % 3 == 0) {
+                val ctxUpdate = if (hadModifyingTools) buildContextDelta() else buildContextDelta().takeIf { it.isNotBlank() } ?: buildEditorContext()
+                if (ctxUpdate.isNotBlank()) {
+                    combinedResult += "\n\n$ctxUpdate"
+                }
+            }
+
             val toolMsgId = java.util.UUID.randomUUID().toString()
             _state.update {
                 it.copy(messages = it.messages + ChatMessage(
@@ -1651,17 +1664,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 )
             }
 
-            // 将工具结果发给 LiteRT Conversation
+            // 将工具结果（含上下文更新）发给 LiteRT Conversation
             currentMessage = Message.tool(Contents.of(listOf(Content.ToolResponse("call_${currentMsgId.take(8)}", combinedResult))))
-
-            // 自适应上下文刷新：修改操作后立即刷新，否则每 3 轮刷新 delta
-            rounds++
-            if (hadModifyingTools || rounds % 3 == 0) {
-                val ctxUpdate = if (hadModifyingTools) buildContextDelta() else buildContextDelta().takeIf { it.isNotBlank() } ?: buildEditorContext()
-                if (ctxUpdate.isNotBlank()) {
-                    currentMessage = Message.user(ctxUpdate)
-                }
-            }
         }
     }
 
@@ -2388,7 +2392,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         recentUser?.let { toSave.add(ChatMessageAdapter("user", it.content.take(2000))) }
         recentModel?.let { toSave.add(ChatMessageAdapter("model", it.content.take(2000))) }
         if (toSave.isNotEmpty()) {
-            conversationMemory.addMessages(toSave)
+            val convId = _state.value.activeConversationId ?: ""
+            conversationMemory.addMessages(toSave, convId)
         }
     }
 

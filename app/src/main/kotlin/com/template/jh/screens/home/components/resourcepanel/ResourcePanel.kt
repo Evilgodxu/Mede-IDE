@@ -40,6 +40,7 @@ fun ResourcePanel(
     onDelete: (String) -> Unit = {},
     onCreate: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onOpenAsProject: ((String) -> Unit)? = null,  // 接收目录的 filePath（绝对路径）
+    projectDirPath: String = "",                  // 当前已打开项目目录，匹配目录时隐藏"以项目目录打开"
 ) {
     val treeState = rememberFlatTreeState()
 
@@ -133,6 +134,7 @@ fun ResourcePanel(
                                     } else {
                                         { onOpenAsProject?.invoke(node.relativePath) }
                                     },
+                                    currentProjectPath = projectDirPath,
                                 )
                             },
                         )

@@ -1,5 +1,8 @@
 package com.template.jh.core.search
 
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 import java.util.PriorityQueue
 import kotlin.math.ln
 import kotlin.math.sqrt
@@ -228,5 +231,87 @@ class VectorIndex {
         val fileCount = chunks.map { it.filePath }.distinct().size
         val totalTerms = vectors.sumOf { it.size }
         return "索引: ${fileCount} 文件, ${chunks.size} 代码块, ${df.size} 唯一词项"
+    }
+
+    // === 持久化 ===
+
+    /** 序列化索引到目录 */
+    fun save(dir: File) {
+        dir.mkdirs()
+        // chunks
+        val chunksArr = JSONArray()
+        chunks.forEach { c ->
+            chunksArr.put(JSONObject().apply {
+                put("filePath", c.filePath)
+                put("startLine", c.startLine)
+                put("endLine", c.endLine)
+                put("text", c.text)
+            })
+        }
+        File(dir, "chunks.json").writeText(chunksArr.toString(2))
+
+        // vectors: List<Map<String, Double>>
+        val vectorsArr = JSONArray()
+        vectors.forEach { vec ->
+            val vecObj = JSONObject()
+            vec.forEach { (term, weight) -> vecObj.put(term, weight) }
+            vectorsArr.put(vecObj)
+        }
+        File(dir, "vectors.json").writeText(vectorsArr.toString(2))
+
+        // df: Map<String, Int>
+        val dfObj = JSONObject()
+        df.forEach { (term, freq) -> dfObj.put(term, freq) }
+        File(dir, "df.json").writeText(JSONObject().apply {
+            put("totalDocs", totalDocs)
+            put("df", dfObj)
+        }.toString(2))
+    }
+
+    /** 从目录反序列化重建索引 */
+    fun load(dir: File) {
+        clear()
+        if (!dir.exists()) return
+
+        try {
+            // chunks
+            val chunksFile = File(dir, "chunks.json")
+            if (chunksFile.exists()) {
+                val chunksArr = JSONArray(chunksFile.readText())
+                for (i in 0 until chunksArr.length()) {
+                    val obj = chunksArr.getJSONObject(i)
+                    chunks.add(IndexedChunk(
+                        filePath = obj.getString("filePath"),
+                        startLine = obj.getInt("startLine"),
+                        endLine = obj.getInt("endLine"),
+                        text = obj.getString("text"),
+                    ))
+                }
+            }
+
+            // vectors
+            val vectorsFile = File(dir, "vectors.json")
+            if (vectorsFile.exists()) {
+                val vectorsArr = JSONArray(vectorsFile.readText())
+                for (i in 0 until vectorsArr.length()) {
+                    val vecObj = vectorsArr.getJSONObject(i)
+                    val vec = mutableMapOf<String, Double>()
+                    vecObj.keys().forEach { key -> vec[key] = vecObj.getDouble(key) }
+                    vectors.add(vec)
+                }
+            }
+
+            // df
+            val dfFile = File(dir, "df.json")
+            if (dfFile.exists()) {
+                val root = JSONObject(dfFile.readText())
+                totalDocs = root.getInt("totalDocs")
+                val dfObj = root.getJSONObject("df")
+                dfObj.keys().forEach { key -> df[key] = dfObj.getInt(key) }
+            }
+        } catch (e: Exception) {
+            clear()
+            throw e
+        }
     }
 }

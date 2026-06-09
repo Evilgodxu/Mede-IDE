@@ -40,6 +40,7 @@ fun SearchBar(
     onOpenRecentFile: (String) -> Unit,
     onOpenRecentFolder: (String) -> Unit,
     dropdownMaxHeight: androidx.compose.ui.unit.Dp,
+    projectDirPath: String = "",  // 当前已打开的项目目录，可隐藏
     modifier: Modifier = Modifier,
 ) {
     var searchActive by remember { mutableStateOf(false) }
@@ -99,7 +100,13 @@ fun SearchBar(
             onDismissRequest = { searchDropdownExpanded = false },
             modifier = Modifier.heightIn(max = dropdownMaxHeight).widthIn(min = 220.dp),
         ) {
-            val allRecent = recentFolders.map { it to "目录" } + recentFiles.map { it to "文件" }
+            // 排除当前已打开的项目目录
+            val filteredFolders = if (projectDirPath.isNotBlank()) {
+                recentFolders.filter { it.path != projectDirPath }
+            } else {
+                recentFolders
+            }
+            val allRecent = filteredFolders.map { it to "目录" } + recentFiles.map { it to "文件" }
             val filtered = if (searchQuery.isBlank()) allRecent
             else allRecent.filter { (e, _) ->
                 e.name.contains(searchQuery, ignoreCase = true) ||

@@ -366,6 +366,7 @@ fun HomeScreen(
                 },
                 onOpenRecentFolder = { path -> viewModel.openAsProjectDirectory(path) },
                 onSaveAll = { editorState.tabs.filter { it.type == TabType.File }.forEach { editorState.saveFile(it.id) } },
+                projectDirPath = homeState.projectDirPath,
                 audioPlaybackState = audioPlaybackState,
                 scannedAudioTracks = scannedAudioTracks,
                 onScanMusic = {
@@ -598,6 +599,7 @@ private fun LeftPanelContent(
                 onOpenAsProject = { filePath ->
                     viewModel.openAsProjectDirectory(filePath)
                 },
+                projectDirPath = homeState.projectDirPath,
             )
         }
         SidebarTab.Search -> {

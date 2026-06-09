@@ -38,8 +38,14 @@ fun TreeContextMenu(
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onOpenAsProject: (() -> Unit)? = null,  // "以项目目录打开"（仅目录可用）
+    currentProjectPath: String = "",        // 当前已打开项目目录路径，匹配时隐藏"以项目目录打开"
 ) {
     val context = LocalContext.current
+    // 判断当前目录是否已是项目目录：对比绝对路径或相对路径
+    val isAlreadyProject = currentProjectPath.isNotBlank() && (
+        node.filePath == currentProjectPath || node.relativePath == currentProjectPath
+    )
+    val showOpenAsProject = onOpenAsProject != null && node.isDirectory && !isAlreadyProject
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
@@ -58,11 +64,11 @@ fun TreeContextMenu(
         )
         if (node.isDirectory) {
             HorizontalDivider()
-            // "以项目目录打开"
-            onOpenAsProject?.let { callback ->
+            // "以项目目录打开"（已是当前项目目录时隐藏）
+            if (showOpenAsProject) {
                 DropdownMenuItem(
                     text = { Text("以项目目录打开") },
-                    onClick = { onDismiss(); callback() },
+                    onClick = { onDismiss(); onOpenAsProject!!() },
                     leadingIcon = { Icon(Icons.Default.FolderOpen, null, Modifier.size(16.dp)) },
                 )
             }
