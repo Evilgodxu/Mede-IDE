@@ -22,7 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.template.jh.R
-import com.template.jh.screens.home.FileItem
+import com.template.jh.model.FileItem
 
 /**
  * 资源管理器面板 - 使用 FileManager 相对路径

@@ -1,7 +1,7 @@
 package com.template.jh.di
 
-import com.template.jh.core.ai.ChatViewModel
-import com.template.jh.core.ai.ConversationRepository
+import com.template.jh.data.repository.ConversationRepository
+import com.template.jh.screens.home.ChatViewModel
 import com.template.jh.core.storage.FileManager
 import com.template.jh.data.repository.UsageAnalyticsRepository
 import com.template.jh.data.repository.UserPreferencesRepository

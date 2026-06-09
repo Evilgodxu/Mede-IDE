@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Settings
@@ -55,9 +56,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.template.jh.R
-import com.template.jh.core.ai.ChatViewModel
-import com.template.jh.screens.home.TabItem
-import com.template.jh.screens.home.TabType
+import com.template.jh.model.TabItem
+import com.template.jh.model.TabType
+import com.template.jh.screens.home.ChatViewModel
+import com.template.jh.screens.home.components.audio.AudioPlaybackState
+import com.template.jh.screens.home.components.audio.AudioPlayer
+import com.template.jh.screens.home.components.preview.ImagePreview
+import com.template.jh.screens.home.components.viewer.ArchiveViewer
+import com.template.jh.screens.home.components.viewer.VideoPlayer
+import com.template.jh.screens.home.components.settings.SettingsPane
+import com.template.jh.screens.home.components.viewer.WebPreview
+import com.template.jh.screens.home.components.viewer.VideoPlaybackState
 
 // 中间主内容区
 @Composable
@@ -79,6 +88,10 @@ fun MainContentArea(
     onSaveAllTabs: () -> Unit = {},
     onSaveCurrent: () -> Unit = {},
     isFileModified: (String) -> Boolean = { false },
+    previewModeTabs: Set<String> = emptySet(),
+    onTogglePreviewMode: (String) -> Unit = {},
+    getEditorContent: (String) -> androidx.compose.ui.text.input.TextFieldValue = { androidx.compose.ui.text.input.TextFieldValue("") },
+    onPreviewContentChange: (String, androidx.compose.ui.text.input.TextFieldValue) -> Unit = { _, _ -> },
 
     tabContent: @Composable (String) -> Unit = {},
 ) {
@@ -107,7 +120,7 @@ fun MainContentArea(
                 val activeTab = tabs[activeTabIndex]
                 if (activeTab.type == TabType.File || activeTab.type == TabType.Image
                     || activeTab.type == TabType.Audio || activeTab.type == TabType.Video
-                    || activeTab.type == TabType.Archive) {
+                    || activeTab.type == TabType.Archive || activeTab.type == TabType.Preview) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -175,6 +188,17 @@ fun MainContentArea(
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
+                    TabType.Preview -> {
+                        val isPreview = activeTab.id in previewModeTabs
+                        WebPreview(
+                            filePath = activeTab.id,
+                            isPreviewMode = isPreview,
+                            onToggleMode = { onTogglePreviewMode(activeTab.id) },
+                            textFieldValue = getEditorContent(activeTab.id),
+                            onTextChange = { onPreviewContentChange(activeTab.id, it) },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             } else if (openedFolderName == null) {
                 // 欢迎页（仅未打开文件夹时）
@@ -239,6 +263,7 @@ private fun EditorTabBar(
                             TabType.Audio -> Icons.Default.MusicNote
                             TabType.Video -> Icons.Default.Videocam
                             TabType.Archive -> Icons.Default.FolderZip
+                            TabType.Preview -> Icons.Default.Language
                         },
                         contentDescription = null,
                         modifier = Modifier

@@ -8,9 +8,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.template.jh.data.model.McpServer
-import com.template.jh.data.model.Rule
-import com.template.jh.data.model.SkillItem
+import com.template.jh.model.McpServer
+import com.template.jh.model.Rule
+import com.template.jh.model.SkillItem
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
@@ -63,14 +63,14 @@ class UserPreferencesRepository(private val context: Context) {
     val cloudModelEnabled: Flow<Boolean> = context.dataStore.data
         .map { it[PreferencesKeys.CLOUD_MODEL_ENABLED] ?: false }
 
-    val cloudModelProfiles: Flow<List<com.template.jh.core.ai.CloudModelProfile>> = context.dataStore.data
+    val cloudModelProfiles: Flow<List<com.template.jh.model.chat.CloudModelProfile>> = context.dataStore.data
         .map { prefs ->
             val json = prefs[PreferencesKeys.CLOUD_PROFILES_JSON] ?: return@map emptyList()
             try {
                 val arr = JSONArray(json)
                 (0 until arr.length()).map { i ->
                     val obj = arr.getJSONObject(i)
-                    com.template.jh.core.ai.CloudModelProfile(
+                    com.template.jh.model.chat.CloudModelProfile(
                         id = obj.optString("id", ""),
                         name = obj.optString("name", ""),
                         apiEndpoint = obj.optString("apiEndpoint", "https://api.openai.com/v1"),
@@ -100,9 +100,9 @@ class UserPreferencesRepository(private val context: Context) {
                         id = obj.optString("id"),
                         name = obj.optString("name"),
                         content = obj.optString("content"),
-                        type = com.template.jh.data.model.RuleType.entries
+                        type = com.template.jh.model.RuleType.entries
                             .find { it.name == obj.optString("type") }
-                            ?: com.template.jh.data.model.RuleType.Global,
+                            ?: com.template.jh.model.RuleType.Global,
                     )
                 }
             } catch (_: Exception) { emptyList() }
@@ -166,7 +166,7 @@ class UserPreferencesRepository(private val context: Context) {
         context.dataStore.edit { it[PreferencesKeys.CLOUD_MODEL_ENABLED] = enabled }
     }
 
-    suspend fun setCloudModelProfiles(profiles: List<com.template.jh.core.ai.CloudModelProfile>) {
+    suspend fun setCloudModelProfiles(profiles: List<com.template.jh.model.chat.CloudModelProfile>) {
         context.dataStore.edit { prefs ->
             val arr = JSONArray()
             profiles.forEach { p ->

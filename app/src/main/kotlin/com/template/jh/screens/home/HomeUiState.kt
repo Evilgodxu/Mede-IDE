@@ -1,8 +1,8 @@
 package com.template.jh.screens.home
 
-import com.template.jh.data.model.McpServer
-import com.template.jh.data.model.Rule
-import com.template.jh.data.model.SkillItem
+import com.template.jh.model.McpServer
+import com.template.jh.model.Rule
+import com.template.jh.model.SkillItem
 
 // 主屏幕 UI 状态
 data class HomeUiState(

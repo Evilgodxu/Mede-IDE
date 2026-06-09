@@ -8,9 +8,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.template.jh.core.ai.FileOperationEvents
 import com.template.jh.core.storage.FileManager
-import com.template.jh.data.model.McpServer
-import com.template.jh.data.model.Rule
-import com.template.jh.data.model.SkillItem
+import com.template.jh.model.FileItem
+import com.template.jh.model.McpServer
+import com.template.jh.model.Rule
+import com.template.jh.model.SkillItem
 import com.template.jh.data.repository.RecentEntry
 import com.template.jh.data.repository.UserPreferencesRepository
 import kotlinx.coroutines.Dispatchers

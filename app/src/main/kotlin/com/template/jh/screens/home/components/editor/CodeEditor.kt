@@ -23,15 +23,20 @@ fun CodeEditor(
     modifier: Modifier = Modifier,
     readOnly: Boolean = false,
     lineDiffs: Map<Int, LineChangeType> = emptyMap(),
-    onCursorChange: ((Int) -> Unit)? = null,
+    onCursorChange: ((line: Int, lineContent: String) -> Unit)? = null,
     onAddToChat: ((String) -> Unit)? = null,
 ) {
     // 光标位置跟踪
     val cursorLine = remember(text.selection) {
         text.text.substring(0, text.selection.start).count { it == '\n' } + 1
     }
-    LaunchedEffect(cursorLine) {
-        onCursorChange?.invoke(cursorLine)
+    val cursorLineContent = remember(text.selection, text.text) {
+        val lines = text.text.lines()
+        val idx = (cursorLine - 1).coerceIn(0, lines.size - 1)
+        lines.getOrElse(idx) { "" }
+    }
+    LaunchedEffect(cursorLine, cursorLineContent) {
+        onCursorChange?.invoke(cursorLine, cursorLineContent)
     }
 
     Column(modifier = modifier.fillMaxSize()) {

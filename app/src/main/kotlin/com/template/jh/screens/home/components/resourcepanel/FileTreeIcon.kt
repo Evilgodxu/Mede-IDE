@@ -11,7 +11,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import com.template.jh.screens.home.FileTypeUtil
+import com.template.jh.screens.home.logic.utils.FileTypeUtil
 
 object FileTreeIcon {
     fun icon(node: ResourceNode, isExpanded: Boolean): ImageVector = when {

@@ -7,7 +7,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import com.template.jh.screens.home.FileItem
+import com.template.jh.model.FileItem
 
 // 扁平目录树状态管理器 - 使用相对路径作为键
 class FlatTreeStateHolder {

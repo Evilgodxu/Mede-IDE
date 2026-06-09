@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Android AI IDE</string>
+    <string name="app_name">Mede IDE</string>
 
     <!-- 资源管理器 -->
     <string name="resource_manager_title">资源管理器</string>

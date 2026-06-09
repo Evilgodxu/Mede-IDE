@@ -38,18 +38,27 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.template.jh.R
-import com.template.jh.core.ai.ChatViewModel
+import com.template.jh.model.FileItem
+import com.template.jh.model.TabItem
+import com.template.jh.model.TabType
+import com.template.jh.screens.home.ChatViewModel
 import com.template.jh.core.ai.FileOperationEvents
 import com.template.jh.core.storage.FileManager
-import com.template.jh.screens.home.components.AIChatPanel
+import com.template.jh.screens.home.components.chat.AIChatPanel
 import com.template.jh.screens.home.components.MainContentArea
 import com.template.jh.screens.home.components.MainTopBar
-import com.template.jh.screens.home.components.SearchPanel
+import com.template.jh.screens.home.components.preview.PreviewPanel
+import com.template.jh.screens.home.components.search.SearchPanel
 import com.template.jh.screens.home.components.Sidebar
 import com.template.jh.screens.home.components.SidebarTab
 import com.template.jh.screens.home.components.ThreeColumnLayout
 import com.template.jh.screens.home.components.editor.CodeEditor
 import com.template.jh.screens.home.components.resourcepanel.ResourcePanel
+import com.template.jh.screens.home.logic.EditorScreenState
+import com.template.jh.screens.home.logic.rememberEditorScreenState
+import com.template.jh.screens.home.logic.utils.FileTypeUtil
+import com.template.jh.screens.home.logic.utils.FileOpenMode
+import com.template.jh.model.displayNameFromPath
 import com.template.jh.ui.adaptive.rememberWindowSizeClass
 import org.koin.androidx.compose.koinViewModel
 
@@ -68,11 +77,13 @@ fun HomeScreen(
     var selectedTab by remember { mutableStateOf<SidebarTab?>(null) }
     var isSettingsOpen by remember { mutableStateOf(false) }
     var cursorLine by remember { mutableIntStateOf(0) }
+    var cursorLineContent by remember { mutableStateOf("") }
+    var previewModeTabs by remember { mutableStateOf(setOf<String>()) }
 
     val fileManager = org.koin.java.KoinJavaComponent.get<FileManager>(FileManager::class.java)
     val editorState = rememberEditorScreenState(chatViewModel, fileManager)
-    val audioPlaybackState = remember { com.template.jh.screens.home.components.AudioPlaybackState() }
-    val videoPlaybackState = remember { com.template.jh.screens.home.components.VideoPlaybackState() }
+    val audioPlaybackState = remember { com.template.jh.screens.home.components.audio.AudioPlaybackState() }
+    val videoPlaybackState = remember { com.template.jh.screens.home.components.viewer.VideoPlaybackState() }
 
     // 权限请求状态（EdgeGesture 模式：启动 Intent 后轮询检测授权结果）
     var permissionPolling by remember { mutableStateOf(false) }
@@ -120,13 +131,14 @@ fun HomeScreen(
     // Tab 持久化
     editorState.onSaveTabs = {
         val fileTabs = editorState.tabs.filter { it.type == TabType.File || it.type == TabType.Image
-            || it.type == TabType.Audio || it.type == TabType.Video || it.type == TabType.Archive }
+            || it.type == TabType.Audio || it.type == TabType.Video || it.type == TabType.Archive
+            || it.type == TabType.Preview }
         val paths = fileTabs.map { it.id }
         viewModel.saveOpenedTabs(paths.filter { !it.startsWith("content://") })
         chatViewModel.setOpenedFilePaths(paths)
         val activeTab = editorState.tabs.getOrNull(editorState.activeTabIndex)
         if (activeTab != null && activeTab.type != TabType.Settings) {
-            chatViewModel.setActiveFileContext(activeTab.id, cursorLine)
+            chatViewModel.setActiveFileContext(activeTab.id, cursorLine, cursorLineContent)
         }
         val modifiedPaths = editorState.tabs.filter { it.type == TabType.File && editorState.isFileModified(it.id) }.map { it.id }
         chatViewModel.setModifiedFilePaths(modifiedPaths)
@@ -187,7 +199,7 @@ fun HomeScreen(
     ) { uri: Uri? ->
         uri?.let { u ->
             val path = u.toString()
-            val fileName = com.template.jh.screens.home.displayNameFromPath(path)
+            val fileName = com.template.jh.model.displayNameFromPath(path)
             when {
                 FileTypeUtil.isImageFile(fileName) ->
                     editorState.openTab(TabItem(path, fileName, TabType.Image))
@@ -250,7 +262,7 @@ fun HomeScreen(
     val recentFiles by viewModel.recentFiles.collectAsState()
     val recentFolders by viewModel.recentFolders.collectAsState()
     // 工具栏音乐播放
-    var scannedAudioTracks by remember { mutableStateOf<List<com.template.jh.screens.home.components.AudioTrack>>(emptyList()) }
+    var scannedAudioTracks by remember { mutableStateOf<List<com.template.jh.screens.home.components.audio.AudioTrack>>(emptyList()) }
     var audioScanRequested by remember { mutableStateOf(false) }
     var hasAudioPermission by remember {
         mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(
@@ -267,11 +279,11 @@ fun HomeScreen(
     LaunchedEffect(audioScanRequested) {
         if (audioScanRequested && hasAudioPermission && scannedAudioTracks.isEmpty()) {
             withContext(Dispatchers.IO) {
-                scannedAudioTracks = com.template.jh.screens.home.components.AudioPlaybackState.scanDeviceAudio(context)
+                scannedAudioTracks = com.template.jh.screens.home.components.audio.AudioPlaybackState.scanDeviceAudio(context)
             }
         }
     }
-    fun playAudioTrack(track: com.template.jh.screens.home.components.AudioTrack) {
+    fun playAudioTrack(track: com.template.jh.screens.home.components.audio.AudioTrack) {
         try {
             if (audioPlaybackState.exoPlayer == null) {
                 val player = androidx.media3.exoplayer.ExoPlayer.Builder(context).build()
@@ -308,13 +320,13 @@ fun HomeScreen(
             audioPlaybackState.playlist = scannedAudioTracks
             audioPlaybackState.currentIndex = scannedAudioTracks.indexOfFirst { it.path == track.path }.coerceAtLeast(0)
             audioScanScope.launch(Dispatchers.IO) {
-                audioPlaybackState.lyrics = com.template.jh.screens.home.components.LyricsParser.loadFromFile(context, track.path)
+                audioPlaybackState.lyrics = com.template.jh.screens.home.components.audio.LyricsParser.loadFromFile(context, track.path)
             }
         } catch (e: Exception) {
             audioPlaybackState.errorMsg = e.message
         }
     }
-    val onPlayAudioTrack: (com.template.jh.screens.home.components.AudioTrack) -> Unit = { playAudioTrack(it) }
+    val onPlayAudioTrack: (com.template.jh.screens.home.components.audio.AudioTrack) -> Unit = { playAudioTrack(it) }
     val onStopAudio: () -> Unit = {
         audioPlaybackState.release()
     }
@@ -481,6 +493,18 @@ fun HomeScreen(
                         if (tab?.type == TabType.File) editorState.saveFile(tab.id)
                     },
                     onSaveAllTabs = { editorState.tabs.filter { it.type == TabType.File }.forEach { editorState.saveFile(it.id) } },
+                    previewModeTabs = previewModeTabs,
+                    onTogglePreviewMode = { path ->
+                        previewModeTabs = if (path in previewModeTabs) previewModeTabs - path else previewModeTabs + path
+                    },
+                    getEditorContent = { path ->
+                        editorState.editorContent.getOrPut(path) { TextFieldValue(editorState.readFileFromSource(path)) }
+                    },
+                    onPreviewContentChange = { path, tfv ->
+                        editorState.handleTextChange(path, tfv)
+                        val modified = editorState.tabs.filter { t -> t.type == TabType.File && editorState.isFileModified(t.id) }.map { it.id }
+                        chatViewModel.setModifiedFilePaths(modified)
+                    },
                     tabContent = { path ->
                         val tfv = editorState.editorContent.getOrPut(path) { TextFieldValue(editorState.readFileFromSource(path)) }
 
@@ -496,7 +520,10 @@ fun HomeScreen(
                                 val current = chatViewModel.state.value.inputText
                                 chatViewModel.setInputText(if (current.isBlank()) selectedText else "$current\n\n$selectedText")
                             },
-                            onCursorChange = { line -> cursorLine = line },
+                            onCursorChange = { line, lineContent ->
+                                cursorLine = line
+                                cursorLineContent = lineContent
+                            },
                         )
                     },
                 )
@@ -583,6 +610,14 @@ private fun LeftPanelContent(
                 },
                 onOpenFileAtLine = { path, line ->
                     editorState.openFileAtLine(path, line)
+                },
+            )
+        }
+        SidebarTab.Preview -> {
+            PreviewPanel(
+                projectDirPath = homeState.projectDirPath,
+                onPreviewFile = { path ->
+                    editorState.openPreviewTab(path)
                 },
             )
         }
