@@ -295,15 +295,18 @@ class ChatViewModel(
                     processWithCloudTools(text, modelMsgId, ctx)
                 } else {
                     // LiteRT: 每次交流都显式重建 Conversation 确保历史完整
-                    val currentMsgs = _state.value.messages
-                    if (estimateContextTokens(currentMsgs) > getCompressThreshold()) {
-                        val compressed = compressMessages(currentMsgs)
+                    var currentMsgs = _state.value.messages
+                    val localThreshold = LOCAL_MODEL_MAX_INPUT - estimateTokens(text) - 512
+                    if (estimateContextTokens(currentMsgs) > localThreshold) {
+                        val compressed = compressMessages(currentMsgs, localThreshold)
                         _state.update { it.copy(messages = compressed) }
+                        currentMsgs = compressed
                     }
-                    // 排除当前轮刚添加的用户消息 + 占位符，避免与 processWithJsonTools 中的 sendMessageAsync 重复
-                    val historyMsgs = _state.value.messages.dropLast(2).filterNot {
+                    // 硬截断：确保初始消息不超过模型输入上限
+                    val available = LOCAL_MODEL_MAX_INPUT - estimateTokens(text) - 256
+                    val historyMsgs = currentMsgs.dropLast(2).filterNot {
                         it.role == ChatRole.Model && it.content.startsWith("[上下文压缩累计]")
-                    }
+                    }.let { truncateToTokenLimit(it, available) }
                     pendingInitialMessages = chatMessagesToLiteRT(historyMsgs)
                     resetConversation()
                     val conv = ensureConversation()
@@ -608,6 +611,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
 
     companion object {
         private const val DEFAULT_CONTEXT_WINDOW = 128000      // 默认上下文窗口
+        private const val LOCAL_MODEL_MAX_INPUT = 4000         // 本地模型最大输入 token（Gemma4 2B = 4096，留余量）
         private const val KEEP_EXCHANGES = 5                   // 保留最后 5 轮用户↔模型交换
         private const val KEEP_PRIORITY_LINES = 200            // 保护早期含代码块/工具结果的最多行数
         private const val SUMMARIZE_INTERVAL = 10              // 云端每 10 轮触发渐进式摘要
@@ -714,8 +718,20 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         }
     }
 
-    private suspend fun compressMessages(messages: List<ChatMessage>): List<ChatMessage> {
-        val threshold = getCompressThreshold()
+    /** 从尾部向前保留消息，使总 token 不超过上限 */
+    private fun truncateToTokenLimit(messages: List<ChatMessage>, maxTokens: Int): List<ChatMessage> {
+        if (maxTokens <= 0) return emptyList()
+        var total = 0
+        val result = mutableListOf<ChatMessage>()
+        for (i in messages.indices.reversed()) {
+            total += estimateTokens(messages[i].content)
+            if (total > maxTokens) break
+            result.add(0, messages[i])
+        }
+        return result
+    }
+
+    private suspend fun compressMessages(messages: List<ChatMessage>, threshold: Int = getCompressThreshold()): List<ChatMessage> {
         val totalTokens = estimateContextTokens(messages)
         if (totalTokens <= threshold) return messages
 
@@ -909,10 +925,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             if (start < 0) break
             if (isInsideThinkBlock(trimmed, start)) { searchStart = start + 1; continue }
             if (!isStandaloneJson(trimmed, start)) { searchStart = start + 1; continue }
-            var depth = 0; var end = -1
-            for (i in start until trimmed.length) {
-                when (trimmed[i]) { '{' -> depth++; '}' -> { depth--; if (depth == 0) { end = i; break } } }
-            }
+            val end = findJsonBlockEnd(trimmed, start)
             if (end < 0) { searchStart = start + 1; continue }
             val jsonStr = trimmed.substring(start, end + 1)
             val repaired = repairJson(jsonStr)
@@ -926,15 +939,36 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         return calls.ifEmpty { null }
     }
 
-    /** 简单修复常见 JSON 错误：未转义引号、尾随逗号 */
+    /** 字符串感知的 JSON 修复：只修复结构层，不破坏字符串内容（如 HTML/CSS 中的 {word:}） */
     private fun repairJson(json: String): String {
-        var r = json
-            // 移除尾随逗号（Android ICU 不支持未转义的 } ] 等元字符）
-            .replace(Regex(""",\s*\}"""), "}")
+        val segments = mutableListOf<Pair<Boolean, String>>()
+        val buf = StringBuilder()
+        var idx = 0
+        var inStr = false
+        while (idx < json.length) {
+            when {
+                !inStr && json[idx] == '"' -> {
+                    if (buf.isNotEmpty()) { segments.add(false to buf.toString()); buf.clear() }
+                    buf.append('"'); idx++; inStr = true
+                }
+                inStr && json[idx] == '\\' -> {
+                    buf.append(json[idx]); idx++
+                    if (idx < json.length) { buf.append(json[idx]); idx++ }
+                }
+                inStr && json[idx] == '"' -> {
+                    buf.append('"'); idx++; inStr = false
+                }
+                else -> { buf.append(json[idx]); idx++ }
+            }
+        }
+        if (buf.isNotEmpty()) segments.add(inStr to buf.toString())
+        return segments.joinToString("") { (isString, content) ->
+            if (isString) content
+            else content
+                .replace(Regex(""",\s*\}"""), "}")
             .replace(Regex(""",\s*\]"""), "]")
-            // 修复 key 的未转义引号（仅行内模式）
-            .replace(Regex("""([{,])\s*(\w+)\s*:""")) { "${it.groupValues[1]}\"${it.groupValues[2]}\":" }
-        return r
+                .replace(Regex("""([{,])\s*(\w+)\s*:""")) { "${it.groupValues[1]}\"${it.groupValues[2]}\":" }
+        }
     }
 
     /** 解析 LFM2 格式: functionName(param1="value1", param2=123) */
@@ -984,10 +1018,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         while (true) {
             val start = text.indexOf('{', pos)
             if (start < 0) break
-            var depth = 0; var end = -1
-            for (i in start until text.length) {
-                when (text[i]) { '{' -> depth++; '}' -> { depth--; if (depth == 0) { end = i; break } } }
-            }
+            val end = findJsonBlockEnd(text, start)
             if (end < 0) break
             val result = parseSingleToolJson(text.substring(start, end + 1))
             if (result != null) yield(Triple(null, result.first, result.second))
@@ -1302,6 +1333,37 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     }
 
 
+
+
+
+    /** 查找从 start 处开始的 JSON 对象结束位置，跳过字符串字面量内的 {} */
+    private fun findJsonBlockEnd(text: String, start: Int): Int {
+        if (start >= text.length || text[start] != '{') return -1
+        var depth = 0
+        var i = start
+        while (i < text.length) {
+            val c = text[i]
+            when {
+                c == '"' -> {
+                    i++
+                    while (i < text.length) {
+                        when (text[i]) {
+                            '\\' -> i++  // 跳过转义字符
+                            '"' -> break
+                        }
+                        i++
+                    }
+                }
+                c == '{' -> depth++
+                c == '}' -> {
+                    depth--
+                    if (depth == 0) return i
+                }
+            }
+            i++
+        }
+        return -1
+    }
 
     private fun isToolLikeContent(text: String): Boolean {
         val trimmed = text.trim()

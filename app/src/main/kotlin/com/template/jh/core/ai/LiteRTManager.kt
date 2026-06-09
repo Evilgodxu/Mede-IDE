@@ -59,13 +59,13 @@ data class ModelParams(
     val topP: Double = 0.9,
     val temperature: Double = 0.2,
     val seed: Int = 0,
-    val maxOutputTokens: Int = 4096,
+    val maxOutputTokens: Int = 1048576,
 ) {
     init {
         require(topK > 0) { "topK must be positive, got $topK" }
         require(topP in 0.0..1.0) { "topP must be 0~1, got $topP" }
         require(temperature >= 0) { "temperature must be >= 0, got $temperature" }
-        require(maxOutputTokens in 256..65536) { "maxOutputTokens must be 256~65536, got $maxOutputTokens" }
+        require(maxOutputTokens in 256..1048576) { "maxOutputTokens must be 256~1048576, got $maxOutputTokens" }
     }
     fun toSamplerConfig() = SamplerConfig(topK = topK, topP = topP, temperature = temperature, seed = seed)
 }

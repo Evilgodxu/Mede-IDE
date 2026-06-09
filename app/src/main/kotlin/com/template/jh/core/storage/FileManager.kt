@@ -8,7 +8,6 @@ import androidx.documentfile.provider.DocumentFile
 import java.io.File
 import java.util.Collections
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 /**
@@ -23,12 +22,6 @@ class FileManager(private val context: Context) {
 
     var projectUri: Uri? = null
         private set
-
-    // 文件级互斥锁，确保同一文件的读写操作完全串行
-    private val fileLocks = ConcurrentHashMap<String, Any>()
-
-    // 路径缓存：key=normalized相对路径, value=DocumentFile
-    private val pathCache = ConcurrentHashMap<String, DocumentFile>()
 
     private val searchableExtensions = setOf(
         "kt", "kts", "java", "xml", "json", "yml", "yaml", "properties",
@@ -50,18 +43,13 @@ class FileManager(private val context: Context) {
         context.contentResolver.takePersistableUriPermission(uri, takeFlags)
         projectUri = uri
         rootDocFile = DocumentFile.fromTreeUri(context, uri)
-        invalidateCache()
     }
 
     // 清除项目根目录
     fun clearProjectUri() {
         projectUri = null
         rootDocFile = null
-        invalidateCache()
     }
-
-    /** 使路径缓存失效 */
-    private fun invalidateCache() { pathCache.clear() }
 
     /**
      * 根据相对路径获取 DocumentFile
@@ -73,9 +61,7 @@ class FileManager(private val context: Context) {
         if (path.isBlank()) return root
 
         val normalizedPath = path.trim('/')
-        return pathCache.getOrPut(normalizedPath) {
-            resolvePathUncached(root, normalizedPath)
-        }
+        return resolvePathUncached(root, normalizedPath)
     }
 
     private fun resolvePathUncached(root: DocumentFile, normalizedPath: String): DocumentFile? {
@@ -289,7 +275,7 @@ class FileManager(private val context: Context) {
     }
 
     /**
-     * 写入文件内容（带备份回滚 + 文件互斥锁）
+     * 写入文件内容
      * @param path 相对于项目根目录的文件路径
      * @param content 要写入的内容
      * @return 操作结果描述
@@ -298,7 +284,6 @@ class FileManager(private val context: Context) {
         val root = rootDocFile ?: return "No project folder is open."
 
         return try {
-            // 路径安全检查
             val pathErr = validatePath(path)
             if (pathErr != null) return pathErr
 
@@ -322,49 +307,10 @@ class FileManager(private val context: Context) {
 
             val opName = if (existingFile != null) "overwrite" else "create"
 
-            // 原子写入：备份 → 写入 → 校验 → 回滚
-            val normalizedKey = trimmedPath.lowercase()
-            val lock = fileLocks.getOrPut(normalizedKey) { Any() }
-            synchronized(lock) {
-                // 1. 备份原始内容
-                val backup = if (existingFile != null) {
-                    try {
-                        context.contentResolver.openInputStream(targetDoc.uri)
-                            ?.bufferedReader()?.use { it.readText() }
-                    } catch (_: Exception) { null }
-                } else null
-
-                try {
-                    // 2. 写入文件
-                    context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
-                        out.write(content.toByteArray(Charsets.UTF_8))
-                    } ?: throw RuntimeException("Failed to open output stream")
-
-                    // 3. 读回校验
-                    val written = try {
-                        context.contentResolver.openInputStream(targetDoc.uri)
-                            ?.bufferedReader()?.use { it.readText() }
-                    } catch (_: Exception) { null }
-
-                    if (written == null || written.length != content.length || !written.contains(content.take(50))) {
-                        if (backup != null) {
-                            context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
-                                out.write(backup.toByteArray(Charsets.UTF_8))
-                            }
-                        }
-                        throw RuntimeException("Write verification failed, rolled back")
-                    }
-                } catch (e: Exception) {
-                    if (backup != null) {
-                        try {
-                            context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
-                                out.write(backup.toByteArray(Charsets.UTF_8))
-                            }
-                        } catch (_: Exception) { }
-                    }
-                    throw e
-                }
-            }
+            // 直接写入，SAF 自身保证原子性
+            context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
+                out.write(content.toByteArray(Charsets.UTF_8))
+            } ?: return "Failed to open output stream for: $path"
 
             notifyFileSystemChange(path)
             "File written: $path (${content.lines().size} lines, $opName)"
@@ -767,7 +713,6 @@ class FileManager(private val context: Context) {
 
     // 通知系统刷新文件，使文件管理器等外部应用可见
     private fun notifyFileSystemChange(path: String) {
-        invalidateCache()
         try {
             val filePath = try {
                 // 尝试将 SAF 路径转为真实文件路径

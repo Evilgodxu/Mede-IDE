@@ -19,12 +19,6 @@ class AIToolSet(
     private val fileManager: FileManager? = null
 ) : ToolSet {
 
-    // Checkpoint：每个文件每会话仅备份一次
-    private val checkpointed = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-    private val checkpointDir: File by lazy {
-        File(context.filesDir, "checkpoints").also { it.mkdirs() }
-    }
-
     // SAF 项目根 URI（用户通过文件夹选择器打开的目录）
     // 优先使用外部传入的 fileManager，否则使用内部 projectUri
     @Volatile var projectUri: Uri? = null
@@ -190,6 +184,11 @@ class AIToolSet(
     ): String {
         Log.d("AIToolSet", "writeFile: path=$path contentLen=${content.length}")
         FileLogger.d("AIToolSet", "writeFile: path=$path contentLen=${content.length}")
+        if (content.isEmpty()) {
+            val msg = "Write refused — content is empty. To create an empty file, include at least a comment or valid content."
+            FileLogger.w("AIToolSet", "writeFile rejected: empty content")
+            return msg
+        }
         val fm = fileManager ?: run {
             FileLogger.w("AIToolSet", "writeFile: no project folder open")
             return "No project folder is open."
@@ -203,26 +202,20 @@ class AIToolSet(
             FileLogger.w("AIToolSet", "writeFile blocked by write-guard: $path exists")
             return msg
         }
-        val result = fm.writeFile(path, content)
-        if (!result.startsWith("Failed") && !result.startsWith("No project")) {
-            FileOperationEvents.notify(path, "create")
-            FileLogger.d("AIToolSet", "writeFile succeeded: $result")
-        } else {
-            FileLogger.w("AIToolSet", "writeFile failed: $result")
+        return try {
+            val result = fm.writeFile(path, content)
+            if (!result.startsWith("Failed") && !result.startsWith("No project")) {
+                FileOperationEvents.notify(path, "create")
+                FileLogger.d("AIToolSet", "writeFile succeeded: $result")
+            } else {
+                FileLogger.w("AIToolSet", "writeFile failed: $result")
+            }
+            result
+        } catch (e: Exception) {
+            val err = "Write failed: ${e.message ?: "unknown error"}"
+            FileLogger.e("AIToolSet", "writeFile exception: $err", e)
+            err
         }
-        return result
-    }
-
-    /** 修改前备份文件快照（每文件每会话仅一次） */
-    private fun checkpoint(path: String) {
-        if (!checkpointed.add(path)) return // 已备份过
-        try {
-            val raw = readFileRaw(path) ?: return
-            val name = path.replace("/", "_").replace("\\", "_")
-            val backupFile = File(checkpointDir, "$name.bak")
-            backupFile.writeText(raw)
-            FileLogger.d("AIToolSet", "checkpoint saved: $path -> ${backupFile.name}")
-        } catch (_: Exception) { }
     }
 
     // 代码编辑工具 - 类似 SearchReplace，只修改指定内容
@@ -246,7 +239,6 @@ class AIToolSet(
                 FileLogger.w("AIToolSet", "replaceInFile: file not found: $path")
                 return "Cannot replace: file not found. Use writeFile to create first."
             }
-            checkpoint(path)
 
             when (val result = CodeEditTool.replace(original, old_string, new_string)) {
                 is CodeEditTool.ReplaceResult.Success -> {
@@ -291,7 +283,6 @@ class AIToolSet(
                 FileLogger.w("AIToolSet", "batchReplaceInFile: file not found: $path")
                 return "Cannot edit: file not found. Use writeFile to create first."
             }
-            checkpoint(path)
 
             // 解析 JSON edits 数组
             val jsonArr = org.json.JSONArray(editsJson)
