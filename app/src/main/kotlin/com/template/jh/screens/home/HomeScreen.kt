@@ -166,11 +166,22 @@ fun HomeScreen(
         FileOperationEvents.events.collect { event ->
             when (event.operation) {
                 "modify", "overwrite" -> {
-                    val path = event.path
-                    if (path in editorState.editorContent) {
-                        val newContent = editorState.readFileFromSource(path)
-                        editorState.editorContent[path] = TextFieldValue(newContent)
-                        editorState.originalContents[path] = newContent
+                    // 匹配 editorContent 中的 key：支持绝对/相对路径不一致
+                    val eventPath = event.path
+                    val matchedKey = editorState.editorContent.keys.firstOrNull { key ->
+                        key == eventPath ||
+                        key.endsWith("/$eventPath") ||
+                        eventPath.endsWith("/$key") ||
+                        // 如果一方是绝对路径另一方是相对路径，去掉项目根目录前缀后比较
+                        (eventPath.startsWith("/") && key.startsWith("/")).not() &&
+                        eventPath.removePrefix("/").let { eventRelative ->
+                            key.removePrefix("/") == eventRelative
+                        }
+                    } ?: eventPath
+                    if (matchedKey in editorState.editorContent) {
+                        val newContent = editorState.readFileFromSource(matchedKey)
+                        editorState.editorContent[matchedKey] = TextFieldValue(newContent)
+                        editorState.originalContents[matchedKey] = newContent
                     }
                     val modifiedPaths = editorState.tabs
                         .filter { it.type == TabType.File && editorState.isFileModified(it.id) }

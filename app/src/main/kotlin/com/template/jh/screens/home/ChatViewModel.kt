@@ -363,6 +363,22 @@ class ChatViewModel(
 
     fun requestOpenFile(path: String) { _openFileRequests.tryEmit(path) }
 
+    /** 从工具调用参数 JSON 中提取 path 字段 */
+    private fun extractPathFromArgs(args: String): String? {
+        return try {
+            val obj = org.json.JSONObject(args)
+            val path = obj.optString("path", "")
+            path.ifBlank { null }
+        } catch (_: Exception) { null }
+    }
+
+    /** 将工具传入的路径转为绝对路径（同 AIToolSet.resolvePathOrAbsolute） */
+    private fun resolveToolPath(path: String): String {
+        if (path.startsWith("/")) return path
+        val root = fileManager.projectDirPath.ifEmpty { fileManager.storageRootPath }
+        return if (root.isNotEmpty()) "$root/$path" else path
+    }
+
     fun setProjectRoot(uri: Uri?) {
         aiToolSet.projectUri = uri
         uri?.let { fileManager.setProjectUri(it) } ?: fileManager.clearProjectUri()
@@ -1634,6 +1650,16 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             }
             val hadModifyingTools = toolCalls.any {
                 it.second in setOf("writeFile", "replaceInFile", "batchReplaceInFile", "deleteFile", "createDirectory")
+            }
+
+            // 工具修改文件后自动打开/切换到该文件
+            if (hadModifyingTools) {
+                toolCalls.forEach { (_, name, args) ->
+                    val rawPath = extractPathFromArgs(args)
+                    if (rawPath != null) {
+                        requestOpenFile(resolveToolPath(rawPath))
+                    }
+                }
             }
 
             // 自适应上下文刷新：合并到工具结果（而非伪装成用户消息）
