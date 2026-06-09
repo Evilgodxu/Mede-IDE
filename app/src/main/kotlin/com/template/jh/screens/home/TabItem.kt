@@ -9,7 +9,7 @@ data class TabItem(
     val type: TabType,
 )
 
-enum class TabType { File, Settings, Image }
+enum class TabType { File, Settings, Image, Audio, Video, Archive }
 
 // 从路径提取显示名称
 fun displayNameFromPath(path: String): String {

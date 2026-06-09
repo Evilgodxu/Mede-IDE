@@ -1,6 +1,7 @@
 package com.template.jh.screens.home.components
 
 import android.graphics.BitmapFactory
+import android.provider.OpenableColumns
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -14,10 +15,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Card
@@ -39,8 +39,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.io.File
 import java.text.SimpleDateFormat
@@ -60,24 +61,48 @@ fun ImagePreview(
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
+    var containerWidth by remember { mutableFloatStateOf(0f) }
+    var containerHeight by remember { mutableFloatStateOf(0f) }
+
+    // 限制平移不超出可视边界
+    fun clampOffsets() {
+        if (scale <= 1f) {
+            offsetX = 0f
+            offsetY = 0f
+            return
+        }
+        val excessX = containerWidth * (scale - 1f) / 2f
+        val excessY = containerHeight * (scale - 1f) / 2f
+        offsetX = offsetX.coerceIn(-excessX, excessX)
+        offsetY = offsetY.coerceIn(-excessY, excessY)
+    }
 
     LaunchedEffect(imagePath) {
         try {
-            val file = if (imagePath.startsWith("content://")) {
+            if (imagePath.startsWith("content://")) {
                 val uri = android.net.Uri.parse(imagePath)
+                // 从 ContentResolver 查询文件名和大小
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        val name = if (nameIdx >= 0) cursor.getString(nameIdx) else "未知"
+                        val size = if (sizeIdx >= 0) cursor.getLong(sizeIdx) else 0L
+                        fileInfo = name to size
+                    }
+                }
+                // 解码图片
                 context.contentResolver.openInputStream(uri)?.use { input ->
-                    BitmapFactory.decodeStream(input)
+                    bitmap = BitmapFactory.decodeStream(input)
                 }
             } else {
-                BitmapFactory.decodeFile(imagePath)
-            }
-            if (file != null) {
-                bitmap = file
+                bitmap = BitmapFactory.decodeFile(imagePath)
                 val f = File(imagePath)
                 if (f.exists()) {
                     fileInfo = f.name to f.length()
                 }
-            } else {
+            }
+            if (bitmap == null && errorMsg == null) {
                 errorMsg = "无法解码图片"
             }
         } catch (e: Exception) {
@@ -85,10 +110,27 @@ fun ImagePreview(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize().background(Color(0xFF1E1E1E))) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF1E1E1E))
+            .onGloballyPositioned { coords ->
+                containerWidth = coords.size.width.toFloat()
+                containerHeight = coords.size.height.toFloat()
+                clampOffsets()
+            }
+    ) {
         if (errorMsg != null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(errorMsg!!, color = MaterialTheme.colorScheme.error)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.BrokenImage, null,
+                        Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
+                    Spacer(Modifier.height(8.dp))
+                    Text(errorMsg!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        textAlign = TextAlign.Center)
+                }
             }
         } else if (bitmap != null) {
             Image(
@@ -96,17 +138,28 @@ fun ImagePreview(
                 contentDescription = "预览图片",
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = scale,
-                        scaleY = scale,
-                        translationX = offsetX,
-                        translationY = offsetY,
-                    )
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offsetX
+                        translationY = offsetY
+                        clip = true
+                    }
                     .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            scale = (scale * zoom).coerceIn(0.5f, 5f)
+                        detectTransformGestures { centroid, pan, zoom, _ ->
+                            val newScale = (scale * zoom).coerceIn(0.5f, 5f)
+                            if (zoom != 1f) {
+                                // 以捏合中心为基准缩放，保持该点不动
+                                val cx = centroid.x
+                                val cy = centroid.y
+                                val ratio = newScale / scale
+                                offsetX = offsetX * ratio + cx * (1f - ratio)
+                                offsetY = offsetY * ratio + cy * (1f - ratio)
+                                scale = newScale
+                            }
                             offsetX += pan.x
                             offsetY += pan.y
+                            clampOffsets()
                         }
                     },
                 contentScale = ContentScale.Fit,

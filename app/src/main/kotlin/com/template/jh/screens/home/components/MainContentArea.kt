@@ -24,10 +24,13 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -60,6 +63,8 @@ import com.template.jh.screens.home.TabType
 fun MainContentArea(
     onOpenFolder: () -> Unit = {},
     chatViewModel: ChatViewModel? = null,
+    audioPlaybackState: AudioPlaybackState? = null,
+    videoPlaybackState: VideoPlaybackState? = null,
     openedFolderName: String? = null,
     recentFolderName: String? = null,
     onOpenRecentFolder: () -> Unit = {},
@@ -90,10 +95,12 @@ fun MainContentArea(
                 onSaveAllTabs = onSaveAllTabs,
                 onSaveCurrent = onSaveCurrent,
             )
-            // 当前文件路径指示
+            // 当前路径指示
             if (activeTabIndex in tabs.indices) {
                 val activeTab = tabs[activeTabIndex]
-                if (activeTab.type == TabType.File || activeTab.type == TabType.Image) {
+                if (activeTab.type == TabType.File || activeTab.type == TabType.Image
+                    || activeTab.type == TabType.Audio || activeTab.type == TabType.Video
+                    || activeTab.type == TabType.Archive) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -102,7 +109,9 @@ fun MainContentArea(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = activeTab.id,
+                            text = if (activeTab.type == TabType.Image || activeTab.type == TabType.Audio
+                                || activeTab.type == TabType.Video || activeTab.type == TabType.Archive
+                            ) activeTab.title else activeTab.id,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                             maxLines = 1,
@@ -137,6 +146,26 @@ fun MainContentArea(
                     TabType.Image -> {
                         ImagePreview(
                             imagePath = activeTab.id,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    TabType.Audio -> {
+                        AudioPlayer(
+                            audioPath = activeTab.id,
+                            state = audioPlaybackState ?: return@Box,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    TabType.Video -> {
+                        VideoPlayer(
+                            videoPath = activeTab.id,
+                            state = videoPlaybackState ?: return@Box,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    TabType.Archive -> {
+                        ArchiveViewer(
+                            archivePath = activeTab.id,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -197,6 +226,9 @@ private fun EditorTabBar(
                             TabType.Settings -> Icons.Default.Settings
                             TabType.File -> Icons.Default.Description
                             TabType.Image -> Icons.Default.Image
+                            TabType.Audio -> Icons.Default.MusicNote
+                            TabType.Video -> Icons.Default.Videocam
+                            TabType.Archive -> Icons.Default.FolderZip
                         },
                         contentDescription = null,
                         modifier = Modifier

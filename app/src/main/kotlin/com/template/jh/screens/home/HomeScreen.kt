@@ -63,10 +63,13 @@ fun HomeScreen(
 
     val fileManager = org.koin.java.KoinJavaComponent.get<FileManager>(FileManager::class.java)
     val editorState = rememberEditorScreenState(chatViewModel, fileManager)
+    val audioPlaybackState = remember { com.template.jh.screens.home.components.AudioPlaybackState() }
+    val videoPlaybackState = remember { com.template.jh.screens.home.components.VideoPlaybackState() }
 
     // Tab 持久化 - 使用相对路径
     editorState.onSaveTabs = {
-        val fileTabs = editorState.tabs.filter { it.type == TabType.File || it.type == TabType.Image }
+        val fileTabs = editorState.tabs.filter { it.type == TabType.File || it.type == TabType.Image
+            || it.type == TabType.Audio || it.type == TabType.Video || it.type == TabType.Archive }
         val paths = fileTabs.map { it.id }
         viewModel.saveOpenedTabs(paths.filter { !it.startsWith("content://") })
         chatViewModel.setOpenedFilePaths(paths)
@@ -81,10 +84,16 @@ fun HomeScreen(
     LaunchedEffect(Unit) {
         chatViewModel.openFileRequests.collect { path ->
             val fileName = displayNameFromPath(path)
-            if (FileTypeUtil.isImageFile(fileName)) {
-                editorState.openTab(TabItem(path, fileName, TabType.Image))
-            } else {
-                editorState.openFileTab(path)
+            when {
+                FileTypeUtil.isImageFile(fileName) ->
+                    editorState.openTab(TabItem(path, fileName, TabType.Image))
+                FileTypeUtil.isAudioFile(fileName) ->
+                    editorState.openTab(TabItem(path, fileName, TabType.Audio))
+                FileTypeUtil.isVideoFile(fileName) ->
+                    editorState.openTab(TabItem(path, fileName, TabType.Video))
+                FileTypeUtil.isArchiveFile(fileName) ->
+                    editorState.openTab(TabItem(path, fileName, TabType.Archive))
+                else -> editorState.openFileTab(path)
             }
         }
     }
@@ -124,7 +133,23 @@ fun HomeScreen(
 
     val fileOpenLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? -> uri?.let { editorState.openFileTab(uri.toString()) } }
+    ) { uri: Uri? ->
+        uri?.let { u ->
+            val path = u.toString()
+            val fileName = com.template.jh.screens.home.displayNameFromPath(path)
+            when {
+                FileTypeUtil.isImageFile(fileName) ->
+                    editorState.openTab(TabItem(path, fileName, TabType.Image))
+                FileTypeUtil.isAudioFile(fileName) ->
+                    editorState.openTab(TabItem(path, fileName, TabType.Audio))
+                FileTypeUtil.isVideoFile(fileName) ->
+                    editorState.openTab(TabItem(path, fileName, TabType.Video))
+                FileTypeUtil.isArchiveFile(fileName) ->
+                    editorState.openTab(TabItem(path, fileName, TabType.Archive))
+                else -> editorState.openFileTab(path)
+            }
+        }
+    }
 
     val saveAsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("*/*")
@@ -227,6 +252,15 @@ fun HomeScreen(
                             FileOpenMode.IMAGE -> {
                                 editorState.openTab(TabItem(fileItem.uri.toString(), fileItem.name, TabType.Image))
                             }
+                            FileOpenMode.AUDIO -> {
+                                editorState.openTab(TabItem(fileItem.uri.toString(), fileItem.name, TabType.Audio))
+                            }
+                            FileOpenMode.VIDEO -> {
+                                editorState.openTab(TabItem(fileItem.uri.toString(), fileItem.name, TabType.Video))
+                            }
+                            FileOpenMode.ARCHIVE -> {
+                                editorState.openTab(TabItem(fileItem.uri.toString(), fileItem.name, TabType.Archive))
+                            }
                             FileOpenMode.TEXT -> {
                                 val path = if (fileItem.relativePath.isNotEmpty()) fileItem.relativePath else fileItem.uri.toString()
                                 editorState.editorContent.remove(path)
@@ -256,6 +290,8 @@ fun HomeScreen(
                 MainContentArea(
                     onOpenFolder = { folderPickerLauncher.launch(null) },
                     chatViewModel = chatViewModel,
+                    audioPlaybackState = audioPlaybackState,
+                    videoPlaybackState = videoPlaybackState,
                     openedFolderName = homeState.openedFolderName,
                     recentFolderName = recentFolderName,
                     onOpenRecentFolder = { folderPickerLauncher.launch(null) },
@@ -267,6 +303,8 @@ fun HomeScreen(
                     },
                     onCloseTab = { idx ->
                         val tab = editorState.tabs.getOrNull(idx) ?: return@MainContentArea
+                        if (tab.type == TabType.Audio) audioPlaybackState.release()
+                        else if (tab.type == TabType.Video) videoPlaybackState.release()
                         if (tab.id == editorState.settingsTabId) {
                             editorState.closeSettingsTab()
                             isSettingsOpen = false
@@ -279,7 +317,11 @@ fun HomeScreen(
                     // TODO: 终端功能已移除，取消下行注释恢复
                     // isTerminalVisible = isTerminalVisible,
                     // onTerminalClose = { isTerminalVisible = false },
-                    onCloseAllTabs = { editorState.closeAllTabs(); isSettingsOpen = false; viewModel.saveOpenedTabs(emptyList()) },
+                    onCloseAllTabs = {
+                        audioPlaybackState.release()
+                        videoPlaybackState.release()
+                        editorState.closeAllTabs(); isSettingsOpen = false; viewModel.saveOpenedTabs(emptyList())
+                    },
                     onSaveCurrent = {
                         val tab = editorState.tabs.getOrNull(editorState.activeTabIndex)
                         if (tab?.type == TabType.File) editorState.saveFile(tab.id)

@@ -832,16 +832,21 @@ private class VoiceRecognizerManager(private val context: Context) {
     private fun createAndStartRecognizer() {
         val r = android.speech.SpeechRecognizer.createSpeechRecognizer(context)
         recognizer = r
+        var hasActiveResult = false
         r.setRecognitionListener(object : android.speech.RecognitionListener {
             override fun onReadyForSpeech(params: android.os.Bundle?) {
                 retryCount = 0
+            }
+            override fun onBeginningOfSpeech() {
                 onListeningCallback?.invoke(true)
             }
-            override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {
-                onListeningCallback?.invoke(false)
+                // SEGMENTED_SESSION 模式下不重置 isListening，避免说话间隙闪烁
+                if (!useSegmentedSession) {
+                    onListeningCallback?.invoke(false)
+                }
             }
             override fun onError(error: Int) {
                 android.util.Log.d("VoiceRecognizer", "onError: $error")
@@ -852,26 +857,20 @@ private class VoiceRecognizerManager(private val context: Context) {
                 when (error) {
                     android.speech.SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
                     android.speech.SpeechRecognizer.ERROR_NO_MATCH -> {
-                        // 静默超时/无匹配：快速重启
                         handler.postDelayed({ startRecognizer() }, 200)
                     }
                     android.speech.SpeechRecognizer.ERROR_NETWORK,
                     android.speech.SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> {
-                        // 网络错误：有限重试
                         if (retryCount < maxRetries) {
                             retryCount++
-                            val delay = (retryCount * 1000L).coerceAtMost(3000L)
-                            handler.postDelayed({ startRecognizer() }, delay)
+                            handler.postDelayed({ startRecognizer() }, (retryCount * 1000L).coerceAtMost(3000L))
                         } else {
                             onFinalCallback?.invoke("语音识别网络错误")
                         }
                     }
                     android.speech.SpeechRecognizer.ERROR_AUDIO,
-                    android.speech.SpeechRecognizer.ERROR_CLIENT -> {
-                        // 不可恢复
-                    }
+                    android.speech.SpeechRecognizer.ERROR_CLIENT -> {}
                     else -> {
-                        // 其他错误：有限重试
                         if (retryCount < maxRetries) {
                             retryCount++
                             handler.postDelayed({ startRecognizer() }, 1000)
@@ -883,11 +882,10 @@ private class VoiceRecognizerManager(private val context: Context) {
                 val matches = results?.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
                 val text = matches?.firstOrNull()?.trim()
                 if (text != null && text.isNotBlank()) {
+                    hasActiveResult = true
                     onFinalCallback?.invoke(text)
                 }
-                // SEGMENTED_SESSION 模式：识别器继续运行，无需重建
                 if (useSegmentedSession) return
-                // 非分段模式：重建 recognizer 继续识别
                 r.destroy()
                 if (recognizer == r) recognizer = null
                 if (isActive) startRecognizer()
@@ -901,10 +899,10 @@ private class VoiceRecognizerManager(private val context: Context) {
             }
             override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
             override fun onSegmentResults(segmentResults: android.os.Bundle) {
-                // API 34+ 分段结果回调
                 val matches = segmentResults.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION)
                 val text = matches?.firstOrNull()?.trim()
                 if (text != null && text.isNotBlank()) {
+                    hasActiveResult = true
                     onFinalCallback?.invoke(text)
                 }
             }
@@ -914,15 +912,15 @@ private class VoiceRecognizerManager(private val context: Context) {
             putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault())
             putExtra(android.speech.RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            // 静音超时参数：官方文档要求 Int 值
             putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 3000)
             putExtra(android.speech.RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000)
-            // API 33+: 分段会话（官方常量）
             if (useSegmentedSession) {
                 putExtra(android.speech.RecognizerIntent.EXTRA_SEGMENTED_SESSION, true)
             }
         }
         r.startListening(intent)
+        // 同步设置 isListening=true（startListening 后立即生效，不依赖回调）
+        onListeningCallback?.invoke(true)
     }
 
     private fun startRecognizer() {

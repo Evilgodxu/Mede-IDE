@@ -17,14 +17,23 @@ object FileTypeUtil {
     // 图片扩展名
     private val imageExtensions = setOf("png", "jpg", "jpeg", "webp", "gif", "bmp", "ico", "svg")
 
+    // 音频扩展名
+    private val audioExtensions = setOf("mp3", "wav", "ogg", "aac", "flac", "wma", "m4a", "opus")
+
+    // 视频扩展名
+    private val videoExtensions = setOf("mp4", "avi", "mkv", "mov", "wmv", "flv", "3gp", "webm")
+
+    // 压缩包扩展名
+    private val archiveExtensions = setOf("zip", "tar", "gz", "bz2", "7z", "rar")
+
     // 已知二进制扩展名（不可文本编辑）
     private val binaryExtensions = setOf(
         "apk", "aar", "jar", "dex", "so", "a", "o", "class",
         "png", "jpg", "jpeg", "webp", "gif", "bmp", "ico",
-        "mp3", "wav", "ogg", "aac", "flac", "wma",
-        "mp4", "avi", "mkv", "mov", "wmv", "flv",
-        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+        "mp3", "wav", "ogg", "aac", "flac", "wma", "m4a", "opus",
+        "mp4", "avi", "mkv", "mov", "wmv", "flv", "3gp", "webm",
         "zip", "tar", "gz", "bz2", "7z", "rar",
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
         "ttf", "otf", "woff", "woff2", "eot",
         "ico", "icns", "psd", "ai", "eps",
         "db", "sqlite", "mdb",
@@ -35,13 +44,28 @@ object FileTypeUtil {
 
     fun isTextFile(name: String): Boolean {
         val ext = name.substringAfterLast('.', "").lowercase()
-        if (ext.isEmpty()) return true // 无扩展名默认尝试打开
+        if (ext.isEmpty()) return true
         return ext in textExtensions
     }
 
     fun isImageFile(name: String): Boolean {
         val ext = name.substringAfterLast('.', "").lowercase()
         return ext in imageExtensions
+    }
+
+    fun isAudioFile(name: String): Boolean {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return ext in audioExtensions
+    }
+
+    fun isVideoFile(name: String): Boolean {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return ext in videoExtensions
+    }
+
+    fun isArchiveFile(name: String): Boolean {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return ext in archiveExtensions
     }
 
     fun isBinaryFile(name: String): Boolean {
@@ -56,9 +80,12 @@ object FileTypeUtil {
 
     fun openMode(name: String, size: Long): FileOpenMode = when {
         isImageFile(name) -> FileOpenMode.IMAGE
+        isAudioFile(name) -> FileOpenMode.AUDIO
+        isVideoFile(name) -> FileOpenMode.VIDEO
+        isArchiveFile(name) -> FileOpenMode.ARCHIVE
         canOpenAsText(name, size) -> FileOpenMode.TEXT
         else -> FileOpenMode.UNSUPPORTED
     }
 }
 
-enum class FileOpenMode { TEXT, IMAGE, UNSUPPORTED }
+enum class FileOpenMode { TEXT, IMAGE, AUDIO, VIDEO, ARCHIVE, UNSUPPORTED }
