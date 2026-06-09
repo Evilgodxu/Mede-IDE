@@ -15,7 +15,6 @@ data class ChatMessage(
     val content: String,
     val isStreaming: Boolean = false,
     val timestamp: Long = System.currentTimeMillis(),
-    val isToolMessage: Boolean = false, // 是否为工具调用中间消息（JSON+执行结果）
     val toolCallId: String? = null,     // 工具调用 ID，用于 API role:tool 匹配
     val imageUris: List<Uri> = emptyList(), // 附加图片 URI（用于聊天消息中显示缩略图）
 )
@@ -34,7 +33,6 @@ enum class ModelActivity {
     SearchingCode,
     SearchingWeb,
     RunningCommand,
-    GitOperation,
     ReadingLints,
     ExecutingTool,
     ProcessingResult;
@@ -51,7 +49,6 @@ enum class ModelActivity {
         SearchingCode -> "正在搜索代码"
         SearchingWeb -> "正在搜索网络"
         RunningCommand -> "正在执行命令"
-        GitOperation -> "正在执行 Git 操作"
         ReadingLints -> "正在检查编译错误"
         ExecutingTool -> "正在执行操作"
         ProcessingResult -> "正在处理结果"

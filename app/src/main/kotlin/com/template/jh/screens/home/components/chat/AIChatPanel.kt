@@ -4,20 +4,26 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
-
-
-
-
-import androidx.compose.foundation.Image
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import kotlinx.coroutines.android.awaitFrame
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.conflate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,7 +63,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -79,15 +84,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.DisposableEffect
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -111,6 +117,7 @@ import com.template.jh.model.chat.ModelActivity
 import com.template.jh.core.analytics.UsageStats
 
 // AI 协作面板
+@OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
 @Composable
 fun AIChatPanel(
     onSettingsClick: () -> Unit = {},
@@ -120,38 +127,47 @@ fun AIChatPanel(
 ) {
     val state by viewModel.state.collectAsState()
     val displayItems by viewModel.displayItems.collectAsState()
+    val streamingContent by viewModel.streamingContent.collectAsState()
     val currentToolActivity by viewModel.currentToolActivity.collectAsState()
     val listState = rememberLazyListState()
-    var userScrolledUp by remember { mutableStateOf(false) }
+    var isAtBottom by remember { mutableStateOf(true) }
 
-    // 检测用户手动向上滚动（基于布局信息，比 firstVisibleItemIndex 更准确）
+    // Gallery 风格: 检测是否在底部，500ms 防抖
     LaunchedEffect(Unit) {
         snapshotFlow {
             val info = listState.layoutInfo
             val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
             val totalItems = info.totalItemsCount
             lastVisible to totalItems
-        }.collect { (lastVisible, totalItems) ->
-            if (state.isLoading && totalItems > 0) {
-                userScrolledUp = lastVisible < totalItems - 2
-            } else {
-                userScrolledUp = false
-            }
+        }.collectLatest { (lastVisible, totalItems) ->
+            val rawAtBottom = totalItems == 0 || lastVisible >= totalItems - 1
+            if (!rawAtBottom) delay(500)
+            isAtBottom = rawAtBottom
         }
     }
 
-    // 流式输出时仅当有新内容时滚动到底部（替代 delay 轮询）
-    LaunchedEffect(state.isLoading) {
-        if (!state.isLoading) {
+    // 流式输出时自动滚动到底部（监听 streamingContent 内容变化）
+    LaunchedEffect(streamingContent) {
+        if (streamingContent != null && isAtBottom) {
             val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
             if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
-            return@LaunchedEffect
         }
-        snapshotFlow { displayItems.size }.collect { size ->
-            if (!userScrolledUp && size > 0) {
-                val idx = size + (if (currentToolActivity != null) 1 else 0) - 1
-                try { listState.scrollToItem(idx) } catch (_: Exception) {}
-            }
+    }
+
+    // 流式结束后自动滚动到底部
+    LaunchedEffect(streamingContent) {
+        if (streamingContent == null && state.isLoading) return@LaunchedEffect
+        if (streamingContent == null && !state.isLoading && isAtBottom) {
+            val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
+            if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
+        }
+    }
+
+    // 新消息/工具活动变化时滚动
+    LaunchedEffect(displayItems.size, currentToolActivity) {
+        if (isAtBottom) {
+            val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
+            if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
         }
     }
 
@@ -173,25 +189,41 @@ fun AIChatPanel(
         if (state.messages.isEmpty() && state.engineStatus != EngineStatus.Loading) {
             Box(modifier = Modifier.weight(1f)) { EmptyChatState(state.engineStatus) }
         } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp),
-                state = listState, verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(displayItems, key = { it.id }) { item ->
-                    ConversationItemView(
-                        item = item,
-                        isActiveStreaming = item.isStreaming && item.role == DisplayRole.Model,
-                    )
-                }
-                // 工具操作指示器（固定在列表底部）
-                item(key = "tool_activity") {
-                    if (currentToolActivity != null) {
-                        ToolActivityView(item = currentToolActivity!!)
-                    } else {
-                        Spacer(Modifier.height(0.dp))
+            Box(modifier = Modifier.weight(1f)) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                    state = listState, verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(displayItems, key = { it.id }) { item ->
+                        ConversationItemView(
+                            item = item,
+                            isActiveStreaming = item.isStreaming && item.role == DisplayRole.Model,
+                        )
                     }
+                    // 工具操作指示器（固定在列表底部）
+                    item(key = "tool_activity") {
+                        if (currentToolActivity != null) {
+                            ToolActivityView(item = currentToolActivity!!)
+                        } else {
+                            Spacer(Modifier.height(0.dp))
+                        }
+                    }
+                    item { Spacer(Modifier.height(1.dp)) }
                 }
-                item { Spacer(Modifier.height(1.dp)) }
+                // Gallery 风格: 滚动到底部按钮
+                ScrollToBottomButton(
+                    isAtBottom = isAtBottom,
+                    onClick = {
+                        val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
+                        if (idx >= 0) {
+                            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                listState.scrollToItem(idx)
+                                isAtBottom = true
+                            }
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 4.dp, bottom = 4.dp),
+                )
             }
         }
 
@@ -252,6 +284,40 @@ fun AIChatPanel(
                 stats = usageStats,
                 onDismiss = { showUsageStatsDialog = false },
                 onReset = { viewModel.resetUsageStats() },
+            )
+        }
+    }
+}
+
+/** Gallery 风格: 浮动 "滚动到底部" 按钮 */
+@Composable
+private fun ScrollToBottomButton(
+    isAtBottom: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.animation.AnimatedVisibility(
+        visible = !isAtBottom,
+        enter = androidx.compose.animation.fadeIn(animationSpec = tween(300)) +
+            androidx.compose.animation.scaleIn(
+                animationSpec = spring(
+                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium,
+                )
+            ),
+        exit = androidx.compose.animation.fadeOut(animationSpec = tween(200)),
+        modifier = modifier,
+    ) {
+        androidx.compose.material3.IconButton(
+            onClick = onClick,
+            colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer
+            ),
+        ) {
+            Text(
+                text = "↓",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
             )
         }
     }
@@ -406,7 +472,7 @@ private fun ModelItemView(
     val thinkRegex = remember { Regex("""\[think\](.*?)\[/think]""", RegexOption.DOT_MATCHES_ALL) }
 
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = Alignment.Start) {
-        Text("AI", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Text("Mede", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
 
         // 思考块：可折叠展示
@@ -454,8 +520,13 @@ private fun ModelItemView(
                     .padding(horizontal = 10.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                Text(item.content, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f, fill = false))
+                BufferedFadingText(
+                    text = item.content,
+                    inProgress = isActiveStreaming,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
                 if (isActiveStreaming) StreamingCursor()
             }
         }
@@ -478,6 +549,71 @@ private fun StreamingCursor() {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.primary.copy(alpha = visible),
     )
+}
+
+/**
+ * 参考 Google AI Edge Gallery BufferedFadingMarkdownText 实现。
+ * 流式文本输出时使用交叉淡入淡出动画，避免逐字文本闪烁。
+ */
+@Composable
+private fun BufferedFadingText(
+    text: String,
+    inProgress: Boolean,
+    modifier: Modifier = Modifier,
+    style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodySmall,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    var text1 by remember { mutableStateOf(text) }
+    var text2 by remember { mutableStateOf("") }
+    val alpha2 = remember { Animatable(0f) }
+    val currentText by rememberUpdatedState(text)
+    var showOverlay by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        snapshotFlow { currentText }
+            .conflate()
+            .collect { newText ->
+                if (newText == text1) return@collect
+                text2 = newText
+                alpha2.snapTo(0f)
+                alpha2.animateTo(1f, animationSpec = tween(120, easing = LinearOutSlowInEasing))
+                text1 = newText
+                val unused = awaitFrame()
+                alpha2.snapTo(0f)
+            }
+    }
+
+    val previousInProgress by rememberUpdatedState(inProgress)
+    LaunchedEffect(inProgress) {
+        if (previousInProgress && !inProgress) {
+            kotlinx.coroutines.delay(240)
+            showOverlay = false
+        }
+    }
+
+    Box(modifier = modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Text(
+                text = text1,
+                style = style,
+                color = color,
+                modifier = Modifier.graphicsLayer { alpha = 1f - alpha2.value },
+            )
+        }
+        if (showOverlay) {
+            Text(
+                text = text2,
+                style = style,
+                color = color,
+                modifier = Modifier
+                    .clearAndSetSemantics {}
+                    .graphicsLayer {
+                        alpha = alpha2.value
+                        blendMode = BlendMode.Plus
+                    },
+            )
+        }
+    }
 }
 
 @Composable
@@ -596,7 +732,7 @@ private fun ChatInputBar(
             // 添加图片按钮
             if (engineStatus == EngineStatus.Ready) {
                 IconButton(onClick = onImagePick, Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Image, "添加图片", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.Add, "添加图片", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                 }
             }
 

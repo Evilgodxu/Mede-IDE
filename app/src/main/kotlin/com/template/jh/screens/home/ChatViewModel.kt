@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -82,10 +83,26 @@ class ChatViewModel(
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
 
-    val displayItems: StateFlow<List<DisplayItem>> = _state.map { s ->
-        toDisplayItems(s.messages)
+    // 独立流式输出状态：避免每次 chunk 更新全量 messages 列表
+    data class StreamingState(val msgId: String, val content: String)
+    private val _streamingContent = MutableStateFlow<StreamingState?>(null)
+    /** 当前正在流式输出的消息内容，UI 层直接 collect 此 flow 实现局部更新 */
+    val streamingContent: StateFlow<StreamingState?> = _streamingContent.asStateFlow()
+
+    val displayItems: StateFlow<List<DisplayItem>> = combine(
+        _state, _streamingContent
+    ) { s, stream ->
+        val items = toDisplayItems(s.messages)
+        if (stream == null) return@combine items
+        // 将流式内容覆盖到最后一个模型消息上
+        val lastModelIdx = items.indexOfLast { it.role == DisplayRole.Model }
+        if (lastModelIdx < 0) return@combine items
+        items.toMutableList().also { list ->
+            val old = list[lastModelIdx]
+            list[lastModelIdx] = old.copy(content = stream.content, isStreaming = true)
+        }
     }.flowOn(Dispatchers.Default)
-    .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), emptyList())
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val currentToolActivity: StateFlow<DisplayItem?> = _state.map { s ->
         if (s.isLoading && s.modelActivity != ModelActivity.Idle
@@ -827,6 +844,10 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             "batchReplaceInFile", "deleteFile", "createDirectory", "runCommand",
             "searchWeb", "readLints", "grep", "searchInFiles", "searchCodebase", "glob",
             "searchConversationMemory", "getRecentConversationMemory")
+        // 修改文件的工具（触发 Lint 检测 + 上下文刷新）
+        private val MODIFYING_TOOLS = setOf("writeFile", "replaceInFile", "batchReplaceInFile", "deleteFile", "createDirectory")
+        // 修改后应打开文件的工具（deleteFile 不打开已删除的文件）
+        private val OPEN_FILE_TOOLS = setOf("writeFile", "replaceInFile", "batchReplaceInFile")
     }
 
     // 根据配置获取上下文窗口大小
@@ -1691,11 +1712,13 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 return
             }
 
-            // 并行执行所有工具调用
-            val knownTools = setOf("listFiles", "readFile", "writeFile", "replaceInFile",
-                "batchReplaceInFile", "deleteFile", "createDirectory", "runCommand",
-                "searchWeb", "readLints", "grep", "searchInFiles", "searchCodebase",
-                "searchConversationMemory", "getRecentConversationMemory")
+            // 设置 tool activity 状态（取第一个工具的类型）
+            val firstTool = toolCalls.firstOrNull()
+            if (firstTool != null) {
+                val act = toolNameToActivity(firstTool.second)
+                val detail = firstTool.third["path"] ?: firstTool.third["command"] ?: firstTool.third["query"] ?: ""
+                _state.update { it.copy(modelActivity = act, activityDetail = detail) }
+            }
 
             // 并行执行所有工具调用
             val results = coroutineScope {
@@ -1703,7 +1726,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                     val funcName = call.second
                     val funcArgs = call.third
                     async(Dispatchers.IO) {
-                        if (funcName !in knownTools) return@async "未知工具: $funcName"
+                        if (funcName !in KNOWN_TOOLS) return@async "未知工具: $funcName"
                         try { executeAiTool(funcName, funcArgs) }
                         catch (e: Exception) { "$funcName 执行失败: ${e.message}" }
                     }
@@ -1719,16 +1742,16 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             if (lintBlock != null) {
                 combinedResult += "\n\n$lintBlock"
             }
-            val hadModifyingTools = toolCalls.any {
-                it.second in setOf("writeFile", "replaceInFile", "batchReplaceInFile", "deleteFile", "createDirectory")
-            }
+            val hadModifyingTools = toolCalls.any { it.second in MODIFYING_TOOLS }
 
-            // 工具修改文件后自动打开/切换到该文件
-            if (hadModifyingTools) {
+            // 工具修改文件后自动打开/切换到该文件（排除 deleteFile）
+            if (toolCalls.any { it.second in OPEN_FILE_TOOLS }) {
                 toolCalls.forEach { (_, name, args) ->
-                    val rawPath = extractPathFromArgs(args)
-                    if (rawPath != null) {
-                        requestOpenFile(resolveToolPath(rawPath))
+                    if (name in OPEN_FILE_TOOLS) {
+                        val rawPath = extractPathFromArgs(args)
+                        if (rawPath != null) {
+                            requestOpenFile(resolveToolPath(rawPath))
+                        }
                     }
                 }
             }
@@ -2218,17 +2241,21 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
                 return
             }
 
+            // 设置 tool activity 状态（取第一个工具的类型）
+            val firstTool = toolCalls.firstOrNull()
+            if (firstTool != null) {
+                val act = toolNameToActivity(firstTool.second)
+                val detail = firstTool.third["path"] ?: firstTool.third["command"] ?: firstTool.third["query"] ?: ""
+                _state.update { it.copy(modelActivity = act, activityDetail = detail) }
+            }
+
             // 并行执行所有工具
-            val knownTools = setOf("listFiles", "readFile", "writeFile", "replaceInFile",
-                "batchReplaceInFile", "deleteFile", "createDirectory", "runCommand",
-                "searchWeb", "readLints", "grep", "searchInFiles", "searchCodebase",
-                "searchConversationMemory", "getRecentConversationMemory")
             val results = coroutineScope {
                 toolCalls.map { call ->
                     val funcName = call.second
                     val funcArgs = call.third
                     async(Dispatchers.IO) {
-                        if (funcName !in knownTools) return@async "未知工具: $funcName"
+                        if (funcName !in KNOWN_TOOLS) return@async "未知工具: $funcName"
                         try { executeAiTool(funcName, funcArgs) }
                         catch (e: Exception) { "$funcName 执行失败: ${e.message}" }
                     }
@@ -2249,9 +2276,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             if (lintBlock != null) {
                 combinedResult += "\n\n$lintBlock"
             }
-            val hadModifyingTools = toolCalls.any {
-                it.second in setOf("writeFile", "replaceInFile", "batchReplaceInFile", "deleteFile", "createDirectory")
-            }
+            val hadModifyingTools = toolCalls.any { it.second in MODIFYING_TOOLS }
 
             val display = StringBuilder()
             for (i in toolCalls.indices) {
@@ -2382,6 +2407,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
 
     fun newConversation() {
         sendJob?.cancel()
+        _streamingContent.value = null
         val s = _state.value
         val updatedConversations = if (s.messages.isNotEmpty()) {
             val title = s.messages.firstOrNull { it.role == ChatRole.User }?.content?.take(30) ?: "新对话"
@@ -2405,6 +2431,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
 
     fun switchConversation(entry: ConversationEntry) {
         sendJob?.cancel()
+        _streamingContent.value = null
         pendingInitialMessages = entry.messages.mapNotNull { msg ->
             when (msg.role) {
                 ChatRole.User -> Message.user(msg.content)
@@ -2438,26 +2465,25 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     fun closeHistory() { _state.update { it.copy(isHistoryOpen = false) } }
 
     private fun updateModelMessage(msgId: String, chunk: String, append: Boolean) {
-        _state.update { state ->
-            val updatedMessages = state.messages.map { msg ->
-                if (msg.id == msgId) {
-                    val newContent = if (append) msg.content + chunk else chunk
-                    msg.copy(content = newContent, isStreaming = true)
-                } else msg
-            }
-            state.copy(messages = updatedMessages)
-        }
+        _streamingContent.value = StreamingState(
+            msgId = msgId,
+            content = if (append) {
+                (_streamingContent.value?.content ?: "") + chunk
+            } else chunk,
+        )
     }
 
     private fun finalizeModelMessage(msgId: String) {
+        // 将流式内容写入 messages 列表
+        val finalContent = _streamingContent.value?.content ?: ""
         _state.update { state ->
             val updatedMessages = state.messages.map { msg ->
-                if (msg.id == msgId) {
-                    msg.copy(isStreaming = false)
-                } else msg
+                if (msg.id == msgId) msg.copy(content = finalContent, isStreaming = false)
+                else msg
             }
             state.copy(messages = updatedMessages, isLoading = false)
         }
+        _streamingContent.value = null
         // 自动保存到对话记忆
         viewModelScope.launch { autoSaveToMemory() }
         saveCurrentToHistory()
