@@ -683,10 +683,11 @@ private fun VoiceInputButton(
     enabled: Boolean = true,
 ) {
     val context = LocalContext.current
+    val appContext = context.applicationContext
     var isListening by remember { mutableStateOf(false) }
     var hasPermission by remember { mutableStateOf(false) }
     var partialText by remember { mutableStateOf("") }
-    val recognizerManager = remember { VoiceRecognizerManager(context) }
+    val recognizerManager = remember { VoiceRecognizerManager(appContext) }
 
     LaunchedEffect(Unit) {
         hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
