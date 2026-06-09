@@ -363,5 +363,54 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
                 "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm?download=true",
                 "Gemma4 多模态，支持图像理解，8GB+ RAM", "gemma-4-E4B-it.litertlm"),
         )
+
+        // 已知 NPU 驱动库文件（按优先级排列）
+        private val NPU_VENDOR_LIBS = listOf(
+            "libQnnHtp.so",       // 高通 QNN HTP（Hexagon）
+            "libQnnCpu.so",       // 高通 QNN CPU fallback
+            "libQnnGpu.so",       // 高通 QNN GPU
+            "libQnnDsp.so",       // 高通 QNN DSP
+            "libneuropilot.so",   // 联发科 NeuroPilot
+            "libmtk_drv.so",      // 联发科驱动
+            "libhiai.so",         // 华为 HiAI（Kirin NPU）
+            "libhiai_ir.so",      // 华为 HiAI IR
+            "libedgetpu.so",      // Google Edge TPU / 三星
+            "librknnrt.so",       // Rockchip RKNN
+            "libamlnpu.so",       // Amlogic NPU
+            "libnpu.so",          // 通用 / Allwinner NPU
+        )
+
+        // 常见 NPU 驱动库存放目录
+        private val NPU_SCAN_DIRS = listOf(
+            "/vendor/lib64/",
+            "/vendor/lib/",
+            "/vendor/lib64/egl/",
+            "/system/lib64/",
+            "/system/vendor/lib64/",
+            "/system/lib/",
+            "/vendor/firmware/",
+        )
+
+        /** 自动检测设备上 NPU 驱动库所在目录 */
+        fun detectNpuLibraryDir(context: Context): String {
+            // 1. 扫描常见系统目录
+            for (dirPath in NPU_SCAN_DIRS) {
+                val dir = File(dirPath)
+                if (!dir.isDirectory) continue
+                val files = dir.listFiles() ?: continue
+                val fileNames = files.map { it.name }.toSet()
+                if (NPU_VENDOR_LIBS.any { it in fileNames }) {
+                    return dir.absolutePath
+                }
+            }
+            // 2. 回退到应用 nativeLibraryDir（部分设备将 NPU 库与 app 捆绑）
+            return context.applicationInfo.nativeLibraryDir
+        }
+
+        /** 设备是否支持 NPU 加速 */
+        fun hasNpuSupport(context: Context): Boolean {
+            return detectNpuLibraryDir(context) != context.applicationInfo.nativeLibraryDir ||
+                context.applicationInfo.nativeLibraryDir.isNotBlank()
+        }
     }
 }

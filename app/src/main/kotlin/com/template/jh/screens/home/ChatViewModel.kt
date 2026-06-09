@@ -304,7 +304,14 @@ class ChatViewModel(
     fun setBackendType(type: BackendType) {
         viewModelScope.launch {
             preferencesRepo.setBackendType(type)
-            // 设置后立即生效，下次加载模型时使用新 backend
+            // 切换到 NPU 时自动检测驱动库目录
+            if (type == BackendType.NPU) {
+                val ctx = getApplication<Application>()
+                val detected = LiteRTManager.detectNpuLibraryDir(ctx)
+                preferencesRepo.setNpuLibraryDir(detected)
+                liteRTManager.npuLibraryDir = detected
+                _state.update { it.copy(npuLibraryDir = detected) }
+            }
         }
     }
 

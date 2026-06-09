@@ -245,23 +245,18 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
                         )
                     }
                 }
-                // NPU 模式下显示库目录输入
+                // NPU 模式下显示检测状态（由 ChatViewModel.setBackendType 自动检测并保存）
                 if (currentBackend == BackendType.NPU) {
-                    var npuDir by remember(chatState.npuLibraryDir) { mutableStateOf(chatState.npuLibraryDir) }
-                    OutlinedTextField(
-                        value = npuDir,
-                        onValueChange = { npuDir = it },
-                        label = { Text("NPU 库目录") },
-                        placeholder = { Text("如: /vendor/lib64") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        supportingText = { Text("指定 NPU 驱动库所在目录，应用重启后生效") },
-                    )
-                    OutlinedButton(
-                        onClick = { chatViewModel.setNpuLibraryDir(npuDir) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("保存 NPU 目录")
+                    val ctx = LocalContext.current
+                    val detectedDir = remember { LiteRTManager.detectNpuLibraryDir(ctx) }
+                    val hasNpu = remember { LiteRTManager.hasNpuSupport(ctx) }
+                    if (hasNpu) {
+                        Text("✓ NPU 驱动已检测: $detectedDir", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50))
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Default.Error, null, Modifier.size(14.dp), tint = Color(0xFFFFA000))
+                            Text("未检测到已知 NPU 驱动，使用默认 nativeLibraryDir: $detectedDir", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFA000))
+                        }
                     }
                 }
             }
