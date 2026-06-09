@@ -24,6 +24,7 @@ import com.template.jh.data.repository.ConversationRepository
 import com.template.jh.data.repository.UsageAnalyticsRepository
 import com.template.jh.data.repository.UserPreferencesRepository
 import com.template.jh.data.source.local.LiteRTManager
+import com.template.jh.data.source.local.GGUFManager
 import com.template.jh.data.source.local.toSamplerConfig
 import com.template.jh.data.source.remote.CloudLLMClient
 import com.template.jh.model.Rule
@@ -40,6 +41,7 @@ import com.template.jh.model.chat.EngineStatus
 import com.template.jh.model.chat.ModelActivity
 import com.template.jh.model.chat.ModelParams
 import com.template.jh.model.chat.BackendType
+import com.template.jh.model.chat.ModelFormat
 import com.template.jh.screens.home.components.chat.toDisplayItems
 import com.template.jh.screens.home.logic.utils.FileTypeUtil
 import kotlinx.coroutines.Dispatchers
@@ -75,6 +77,7 @@ class ChatViewModel(
 ) : AndroidViewModel(application) {
 
     private val liteRTManager = LiteRTManager(application)
+    private val ggufManager = GGUFManager(application)
     private val conversationMemory = ConversationMemory(application)
     private val aiToolSet = AIToolSet(application, fileManager, conversationMemory)
     private val cloudLLMClient = CloudLLMClient(application)
@@ -105,9 +108,7 @@ class ChatViewModel(
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val currentToolActivity: StateFlow<DisplayItem?> = _state.map { s ->
-        if (s.isLoading && s.modelActivity != ModelActivity.Idle
-            && s.modelActivity != ModelActivity.Thinking
-            && s.modelActivity != ModelActivity.ProcessingResult) {
+        if (s.isLoading && s.modelActivity != ModelActivity.Idle) {
             val label = s.modelActivity.displayLabel()
             val detail = if (s.activityDetail.isNotBlank()) ": ${s.activityDetail}" else ""
             DisplayItem(
@@ -171,11 +172,28 @@ class ChatViewModel(
                         engineStatus = engineState.status,
                         engineErrorMessage = engineState.errorMessage,
                         modelName = engineState.modelName,
+                        // 本地模型加载成功后使用引擎推断的实际窗口大小
+                        contextMaxTokens = if (!it.cloudModelEnabled && engineState.status == EngineStatus.Ready && engineState.contextWindow > 0)
+                            engineState.contextWindow else it.contextMaxTokens,
+                        isMultimodal = liteRTManager.isMultimodal,
                     )
                 }
                 // 模型加载成功时保存路径
                 if (engineState.status == EngineStatus.Ready && engineState.modelPath.isNotEmpty()) {
                     preferencesRepo.setLastModelPath(engineState.modelPath)
+                }
+            }
+        }
+        // 收集 GGUFManager 状态
+        viewModelScope.launch {
+            ggufManager.state.collect { ggufState ->
+                _state.update {
+                    it.copy(
+                        engineStatus = if (_state.value.modelFormat == ModelFormat.GGUF) ggufState.status else it.engineStatus,
+                        engineErrorMessage = if (_state.value.modelFormat == ModelFormat.GGUF) ggufState.errorMessage else it.engineErrorMessage,
+                        modelName = if (_state.value.modelFormat == ModelFormat.GGUF) ggufState.modelName else it.modelName,
+                        isMultimodal = if (_state.value.modelFormat == ModelFormat.GGUF) ggufManager.isMultimodal else it.isMultimodal,
+                    )
                 }
             }
         }
@@ -189,9 +207,27 @@ class ChatViewModel(
                 if (autoLoad && !lastPath.isNullOrEmpty()) {
                     val file = java.io.File(lastPath)
                     if (file.exists()) {
-                        liteRTManager.backendType = backend
-                        liteRTManager.npuLibraryDir = npuDir
-                        liteRTManager.loadModel(lastPath)
+                        val fmt = ModelFormat.fromPath(lastPath)
+                        _state.update { it.copy(modelFormat = fmt) }
+                        when (fmt) {
+                            ModelFormat.GGUF -> {
+                                val s = _state.value
+                                ggufManager.nCtx = s.ggufNCtx
+                                ggufManager.nThreads = s.ggufNThreads
+                                ggufManager.nBatch = s.ggufNBatch
+                                ggufManager.nGpuLayers = s.ggufNGpuLayers
+                                ggufManager.useMlock = s.ggufUseMlock
+                                ggufManager.ctxShift = s.ggufCtxShift
+                                ggufManager.projectorPath = s.ggufProjectorPath
+                                ggufManager.extraParams = s.ggufExtraParams
+                                ggufManager.loadModel(lastPath)
+                            }
+                            else -> {
+                                liteRTManager.backendType = backend
+                                liteRTManager.npuLibraryDir = npuDir
+                                liteRTManager.loadModel(lastPath)
+                            }
+                        }
                         preferencesRepo.setCloudModelEnabled(false)
                         _state.update { it.copy(cloudModelEnabled = false, backendType = backend, npuLibraryDir = npuDir) }
                     }
@@ -209,6 +245,13 @@ class ChatViewModel(
             preferencesRepo.npuLibraryDir.collect { dir ->
                 liteRTManager.npuLibraryDir = dir
                 _state.update { it.copy(npuLibraryDir = dir) }
+            }
+        }
+        // 同步 MTP (Speculative Decoding) 配置
+        viewModelScope.launch {
+            preferencesRepo.enableSpeculativeDecoding.collect { enabled ->
+                liteRTManager.enableSpeculativeDecoding = enabled
+                _state.update { it.copy(enableSpeculativeDecoding = enabled) }
             }
         }
         viewModelScope.launch {
@@ -246,7 +289,11 @@ class ChatViewModel(
     private fun updateContextMaxTokens() {
         val s = _state.value
         if (!s.cloudModelEnabled) {
-            _state.update { it.copy(contextMaxTokens = DEFAULT_CONTEXT_WINDOW) }
+            // 本地模型：保持引擎加载时动态设置的值不变（已在 engine state 监听中更新）
+            // 若引擎未加载或未知，使用默认窗口
+            if (s.contextMaxTokens <= 0 || s.contextMaxTokens == DEFAULT_CONTEXT_WINDOW) {
+                _state.update { it.copy(contextMaxTokens = DEFAULT_LOCAL_CONTEXT_WINDOW) }
+            }
             return
         }
         val window = s.cloudModelProfiles.find { it.id == s.activeCloudProfileId }?.contextWindow
@@ -276,11 +323,29 @@ class ChatViewModel(
 
     fun loadModel(modelPath: String) {
         viewModelScope.launch {
-            val backend = _state.value.backendType
-            val npuDir = _state.value.npuLibraryDir
-            liteRTManager.backendType = backend
-            liteRTManager.npuLibraryDir = npuDir
-            liteRTManager.loadModel(modelPath)
+            val format = ModelFormat.fromPath(modelPath)
+            _state.update { it.copy(modelFormat = format) }
+            when (format) {
+                ModelFormat.GGUF -> {
+                    val s = _state.value
+                    ggufManager.nCtx = s.ggufNCtx
+                    ggufManager.nThreads = s.ggufNThreads
+                    ggufManager.nBatch = s.ggufNBatch
+                    ggufManager.nGpuLayers = s.ggufNGpuLayers
+                    ggufManager.useMlock = s.ggufUseMlock
+                    ggufManager.ctxShift = s.ggufCtxShift
+                    ggufManager.projectorPath = s.ggufProjectorPath
+                    ggufManager.extraParams = s.ggufExtraParams
+                    ggufManager.loadModel(modelPath)
+                }
+                else -> { // LiteRTLM / Unknown
+                    val backend = _state.value.backendType
+                    val npuDir = _state.value.npuLibraryDir
+                    liteRTManager.backendType = backend
+                    liteRTManager.npuLibraryDir = npuDir
+                    liteRTManager.loadModel(modelPath)
+                }
+            }
             // 切换到本地模型时自动关闭云端
             preferencesRepo.setCloudModelEnabled(false)
             _state.update { it.copy(cloudModelEnabled = false) }
@@ -290,10 +355,43 @@ class ChatViewModel(
     fun loadModelFromUri(uri: Uri) {
         closeModelPicker()
         viewModelScope.launch {
-            liteRTManager.loadModelFromUri(uri)
+            // 通过 URI 获取文件名判断格式
+            val fileName = resolveUriFileName(uri) ?: ""
+            val format = ModelFormat.fromFileName(fileName)
+            _state.update { it.copy(modelFormat = format) }
+            when (format) {
+                ModelFormat.GGUF -> {
+                    // GGUF 需要先复制到本地可读路径
+                    val dest = copyUriToCache(uri, fileName)
+                    if (dest != null) ggufManager.loadModel(dest.absolutePath)
+                    else _state.update { it.copy(engineErrorMessage = "无法复制 GGUF 模型文件") }
+                }
+                else -> liteRTManager.loadModelFromUri(uri)
+            }
             preferencesRepo.setCloudModelEnabled(false)
             _state.update { it.copy(cloudModelEnabled = false) }
         }
+    }
+
+    private fun resolveUriFileName(uri: Uri): String? = try {
+        getApplication<Application>().contentResolver.query(uri, null, null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (i >= 0) c.getString(i) else null
+            } else null
+        }
+    } catch (_: Exception) { null }
+
+    private fun copyUriToCache(uri: Uri, fileName: String): java.io.File? = try {
+        val dest = java.io.File(getApplication<Application>().cacheDir, "gguf/$fileName")
+        dest.parentFile?.mkdirs()
+        getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+            java.io.FileOutputStream(dest).use { output -> input.copyTo(output) }
+        }
+        if (dest.exists()) dest else null
+    } catch (e: Exception) {
+        Log.e("ChatViewModel", "copyUriToCache failed", e)
+        null
     }
 
     fun scanModels() {
@@ -317,6 +415,16 @@ class ChatViewModel(
         _state.update { it.copy(modelParams = params) }
     }
 
+    // GGUF 推理参数
+    fun setGgufNCtx(value: Int) { _state.update { it.copy(ggufNCtx = value) }; ggufManager.nCtx = value }
+    fun setGgufNThreads(value: Int) { _state.update { it.copy(ggufNThreads = value) }; ggufManager.nThreads = value }
+    fun setGgufNBatch(value: Int) { _state.update { it.copy(ggufNBatch = value) }; ggufManager.nBatch = value }
+    fun setGgufNGpuLayers(value: Int) { _state.update { it.copy(ggufNGpuLayers = value) }; ggufManager.nGpuLayers = value }
+    fun setGgufUseMlock(value: Boolean) { _state.update { it.copy(ggufUseMlock = value) }; ggufManager.useMlock = value }
+    fun setGgufCtxShift(value: Boolean) { _state.update { it.copy(ggufCtxShift = value) }; ggufManager.ctxShift = value }
+    fun setGgufProjectorPath(value: String) { _state.update { it.copy(ggufProjectorPath = value) }; ggufManager.projectorPath = value }
+    fun setGgufExtraParams(value: Map<String, String>) { _state.update { it.copy(ggufExtraParams = value) }; ggufManager.extraParams = value }
+
     // 切换本地推理后端
     fun setBackendType(type: BackendType) {
         viewModelScope.launch {
@@ -338,6 +446,13 @@ class ChatViewModel(
         }
     }
 
+    // 切换 MTP (Speculative Decoding)
+    fun setEnableSpeculativeDecoding(enabled: Boolean) {
+        viewModelScope.launch {
+            preferencesRepo.setEnableSpeculativeDecoding(enabled)
+        }
+    }
+
     fun toggleModelPicker() { _state.update { it.copy(isModelPickerOpen = !it.isModelPickerOpen) } }
     fun closeModelPicker() { _state.update { it.copy(isModelPickerOpen = false) } }
 
@@ -347,9 +462,16 @@ class ChatViewModel(
         val files = _state.value.attachedFileRefs
         if (text.isEmpty() && images.isEmpty() && files.isEmpty()) return
         val isCloud = _state.value.cloudModelEnabled
-        if (!isCloud && !liteRTManager.isInitialized) {
-            _state.update { it.copy(engineErrorMessage = "请先加载模型或启用云端模型") }
-            return
+        if (!isCloud) {
+            val fmt = _state.value.modelFormat
+            val isReady = when (fmt) {
+                ModelFormat.GGUF -> ggufManager.isInitialized
+                else -> liteRTManager.isInitialized
+            }
+            if (!isReady) {
+                _state.update { it.copy(engineErrorMessage = "请先加载模型或启用云端模型") }
+                return
+            }
         }
         val fileBlock = buildFileAttachmentBlock()
         val userContent = buildString {
@@ -387,7 +509,7 @@ class ChatViewModel(
                         val fileName = activePath.substringAfterLast('/')
                         if (FileTypeUtil.isImageFile(fileName)) {
                             try {
-                                val uri = android.net.Uri.parse(activePath)
+                                val uri = android.net.Uri.fromFile(java.io.File(activePath))
                                 val tempFile = uriToTempFile(ctx, uri)
                                 if (tempFile != null) tempImagePaths.add(tempFile.absolutePath)
                             } catch (_: Exception) {}
@@ -399,10 +521,13 @@ class ChatViewModel(
                     processHybrid(text, modelMsgId, ctx, tempImagePaths)
                 } else if (isCloud) {
                     processWithCloudTools(text, modelMsgId, ctx, tempImagePaths)
+                } else if (_state.value.modelFormat == ModelFormat.GGUF) {
+                    processWithGGUF(text, modelMsgId)
                 } else {
                     // LiteRT: 优先组装上下文（替代硬截断）
                     val currentMsgs = _state.value.messages
-                    val available = LOCAL_MODEL_MAX_INPUT - estimateTokens(text) - 256
+                    val contextBudget = _state.value.contextMaxTokens.coerceAtLeast(DEFAULT_LOCAL_CONTEXT_WINDOW)
+                    val available = contextBudget - estimateTokens(text) - 256
                     val assembled = selectContextForLocal(currentMsgs, available)
                     pendingInitialMessages = chatMessagesToLiteRT(assembled)
                     resetConversation()
@@ -831,8 +956,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     }
 
     companion object {
-        private const val DEFAULT_CONTEXT_WINDOW = 128000      // 默认上下文窗口
-        private const val LOCAL_MODEL_MAX_INPUT = 4000         // 本地模型最大输入 token（Gemma4 2B = 4096，留余量）
+        private const val DEFAULT_CONTEXT_WINDOW = 128000      // 默认云端上下文窗口
+        private const val DEFAULT_LOCAL_CONTEXT_WINDOW = 4096  // 本地模型上下文窗口兜底值（引擎未提供时使用）
         private const val LOCAL_MODEL_MAX_OUTPUT_CHARS = 48000  // 本地模型单轮输出硬上限（≈8192 tokens），超出截断并告警
         private const val KEEP_EXCHANGES = 5                   // 保留最后 5 轮用户↔模型交换
         private const val KEEP_PRIORITY_LINES = 200            // 保护早期含代码块/工具结果的最多行数
@@ -853,7 +978,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
     // 根据配置获取上下文窗口大小
     private fun getContextWindow(): Int {
         val s = _state.value
-        if (!s.cloudModelEnabled) return DEFAULT_CONTEXT_WINDOW
+        if (!s.cloudModelEnabled) return s.contextMaxTokens.coerceAtLeast(DEFAULT_LOCAL_CONTEXT_WINDOW)
         val profile = s.cloudModelProfiles.find { it.id == s.activeCloudProfileId }
         return profile?.contextWindow ?: DEFAULT_CONTEXT_WINDOW
     }
@@ -1151,7 +1276,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         messages.map { msg ->
             when (msg.role) {
                 ChatRole.User -> Message.user(msg.content)
-                ChatRole.Model -> Message.model(msg.content)
+                ChatRole.Model -> Message.model(stripToolCallJson(msg.content))
                 ChatRole.System -> Message.system(msg.content)
                 ChatRole.Tool -> Message.tool(
                     com.google.ai.edge.litertlm.Contents.of(
@@ -1515,6 +1640,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             "grep", "searchInFiles", "glob" -> ModelActivity.SearchingCode
             "searchCodebase" -> ModelActivity.SearchingCode
             "searchWeb" -> ModelActivity.SearchingWeb
+            "searchConversationMemory", "getRecentConversationMemory" -> ModelActivity.SearchingCode
             "runCommand" -> ModelActivity.RunningCommand
             "readLints" -> ModelActivity.ReadingLints
             else -> ModelActivity.ExecutingTool
@@ -1526,7 +1652,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         ctx: Application,
         imagePaths: List<String> = emptyList(),
     ) {
-        val conv = activeConversation ?: return
+        var conv = activeConversation ?: return
         val editorCtx = buildEditorContext()
         val hasImages = imagePaths.isNotEmpty()
         val startTime = System.currentTimeMillis()
@@ -1734,6 +1860,11 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             }
 
             // 工具结果作为独立 Tool 消息存储
+            // 剥离工具调用 JSON，仅保留自然语言文本
+            val cleanResponse = stripToolCallJson(response)
+            if (cleanResponse.isNotBlank() && cleanResponse != response) {
+                _streamingContent.value = StreamingState(currentMsgId, cleanResponse)
+            }
             finalizeModelMessage(currentMsgId)
             var combinedResult = results.joinToString("\n\n")
 
@@ -1786,6 +1917,20 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
 
             // 将工具结果（含上下文更新）发给 LiteRT Conversation
             currentMessage = Message.tool(Contents.of(listOf(Content.ToolResponse("call_${currentMsgId.take(8)}", combinedResult))))
+
+            // 本地模型上下文预算检查：每轮结束后估算总输入，超限则重建 Conversation
+            val contextBudget = _state.value.contextMaxTokens.coerceAtLeast(DEFAULT_LOCAL_CONTEXT_WINDOW)
+            val localBudget = contextBudget - estimateTokens(text) - estimateTokens(combinedResult) - 512
+            if (estimateContextTokens(_state.value.messages) > localBudget) {
+                try { activeConversation?.close() } catch (_: Exception) {}
+                activeConversation = null
+                pendingInitialMessages = null
+                val reassembled = selectContextForLocal(_state.value.messages, contextBudget - 512)
+                pendingInitialMessages = chatMessagesToLiteRT(reassembled)
+                val newConv = ensureConversation()
+                conv = newConv
+                currentMessage = Message.user("[系统: 上下文已自动压缩以节省 token 预算，请继续分析已有信息。如有需要请使用 searchConversationMemory 查询之前的内容。]")
+            }
         }
     }
 
@@ -1833,6 +1978,27 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         )
         return jsonPatterns.any { it.containsMatchIn(trimmed) }
     }
+
+    /**
+     * 从模型回复中剥离工具调用 JSON / XML 标记，仅保留自然语言部分。
+     * 防止工具 JSON 泄漏到对话历史中被模型看到。
+     */
+    private fun stripToolCallJson(text: String): String {
+        var result = text.trim()
+        // 1. 移除 <tool_call>...</tool_call> XML 标签及其内容
+        result = Regex("""<tool_call[^>]*>.*?</tool_call>""", RegexOption.DOT_MATCHES_ALL).replace(result, "")
+        // 2. 移除 ```json / ```tool 围栏块（包含工具调用）
+        result = Regex("""```(?:json|tool)\s*\n[\s\S]*?\n```""").replace(result, "")
+        // 3. 移除 ``` 与 ``` 之间的裸露 JSON 工具调用
+        result = Regex("""```\s*\{.*?"(?:name|function|tool_name)"\s*:.*?arguments\s*:.*?\}\s*```""", RegexOption.DOT_MATCHES_ALL).replace(result, "")
+        // 4. 移除内联 JSON 工具调用 {"name":"known_tool","arguments":{...}}
+        val toolNames = KNOWN_TOOLS.joinToString("|") { Regex.escape(it) }
+        result = Regex("""\{"(?:name|function|tool_name)"\s*:\s*"(?:$toolNames)"\s*,\s*"arguments"\s*:\s*\{[^}]*\}\s*\}""", RegexOption.DOT_MATCHES_ALL).replace(result, "")
+        // 5. 移除 LFM 格式: funcName(param=...)
+        result = Regex("""(?:$toolNames)\s*\([^)]*\)""").replace(result, "")
+        return result.trim()
+    }
+
 
     private suspend fun fallbackToAutoToolCalling(
         ctx: Application,
@@ -2109,6 +2275,40 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         return sb.toString().trimEnd()
     }
 
+    private suspend fun processWithGGUF(text: String, msgId: String) {
+        _state.update { it.copy(modelActivity = ModelActivity.Thinking, activityDetail = "") }
+        try {
+            // 构建带编辑器上下文的提示词
+            val sysPrompt = buildSystemInstruction()
+            val contextBlock = buildEditorContext()
+            val fullPrompt = buildString {
+                appendLine(sysPrompt)
+                if (contextBlock.isNotBlank()) {
+                    appendLine()
+                    appendLine(contextBlock)
+                    appendLine()
+                }
+                appendLine("---")
+                appendLine(text)
+            }
+            ggufManager.generate(
+                prompt = fullPrompt,
+                onToken = { token ->
+                    _streamingContent.value = StreamingState(msgId, token)
+                    true
+                },
+            )
+            finalizeModelMessage(msgId)
+        } catch (e: Exception) {
+            Log.e("ChatViewModel", "processWithGGUF failed", e)
+            FileLogger.e("ChatViewModel", "processWithGGUF failed: ${e.message}", e)
+            updateModelMessage(msgId, "\n\n[错误: ${e.message}]", false)
+            finalizeModelMessage(msgId)
+        } finally {
+            _state.update { it.copy(modelActivity = ModelActivity.Idle) }
+        }
+    }
+
     private suspend fun processWithCloudTools(
         text: String, msgId: String,
         ctx: Application,
@@ -2168,6 +2368,20 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
 
         while (true) {
             cloudRounds++
+            // 每轮检查上下文预算，超限则自动压缩
+            val ctxThreshold = getCompressThreshold()
+            if (estimateContextTokens(historyMessages) > ctxThreshold) {
+                val comp = compressMessages(historyMessages)
+                historyMessages.clear()
+                historyMessages.addAll(comp)
+                val summary = _state.value.contextSummary
+                if (summary.isNotBlank() && historyMessages.none { it.content.startsWith("[上下文摘要]") }) {
+                    historyMessages.add(0, ChatMessage(
+                        role = ChatRole.Model,
+                        content = "[上下文摘要]\n$summary",
+                    ))
+                }
+            }
             val fullResponse = StringBuilder()
             val roundStartTime = System.currentTimeMillis()
             var apiUsage = com.template.jh.model.chat.ApiUsage()
@@ -2190,6 +2404,29 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             } catch (e: Exception) {
                 val duration = System.currentTimeMillis() - roundStartTime
                 val errMsg = e.message ?: "Unknown error"
+                val isContextError = errMsg.contains("context_length", ignoreCase = true) ||
+                    errMsg.contains("maximum context", ignoreCase = true) ||
+                    errMsg.contains("token limit", ignoreCase = true) ||
+                    errMsg.contains("too many tokens", ignoreCase = true) ||
+                    errMsg.contains("maximum prompt length", ignoreCase = true)
+                if (isContextError && historyMessages.size > 3) {
+                    Log.w("ChatViewModel", "context length exceeded, force compressing history")
+                    FileLogger.w("ChatViewModel", "context length exceeded, force compressing history")
+                    // 强制压缩：降低阈值到 50%
+                    val forcedThreshold = (getContextWindow() * 0.5).toInt()
+                    val comp = compressMessages(historyMessages, forcedThreshold)
+                    historyMessages.clear()
+                    historyMessages.addAll(comp)
+                    val summary = _state.value.contextSummary
+                    if (summary.isNotBlank() && historyMessages.none { it.content.startsWith("[上下文摘要]") }) {
+                        historyMessages.add(0, ChatMessage(
+                            role = ChatRole.Model,
+                            content = "[上下文摘要]\n$summary",
+                        ))
+                    }
+                    cloudRounds--  // 重试不计入正常轮次
+                    continue  // 重试
+                }
                 Log.e("ChatViewModel", "cloudSendMessage failed", e)
                 FileLogger.e("ChatViewModel", "cloudSendMessage failed: ${errMsg}", e)
                 recordUsage(LlmCallRecord(
@@ -2517,6 +2754,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         if (toSave.isNotEmpty()) {
             val convId = _state.value.activeConversationId ?: ""
             conversationMemory.addMessages(toSave, convId)
+            // 记忆变化后刷新系统提示缓存，下次构建时包含最新记忆上下文
+            _sysPromptCache = null
         }
     }
 
@@ -2526,5 +2765,6 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         closeConversation()
         saveCurrentToHistory()
         liteRTManager.close()
+        ggufManager.close()
     }
 }

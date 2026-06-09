@@ -11,6 +11,7 @@ import com.template.jh.model.chat.ModelActivity
 import com.template.jh.model.chat.ModelInfo
 import com.template.jh.model.chat.ModelParams
 import com.template.jh.model.chat.BackendType
+import com.template.jh.model.chat.ModelFormat
 
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
@@ -54,4 +55,19 @@ data class ChatUiState(
     // 本地推理后端配置
     val backendType: BackendType = BackendType.CPU,
     val npuLibraryDir: String = "",
+    // MTP (Multi-Turn Prediction / Speculative Decoding)
+    val enableSpeculativeDecoding: Boolean = false,
+    // 当前加载的模型是否支持多模态
+    val isMultimodal: Boolean = false,
+    // 模型格式（LiteRTLM / GGUF）
+    val modelFormat: ModelFormat = ModelFormat.Unknown,
+    // GGUF 推理参数
+    val ggufNCtx: Int = 2048,
+    val ggufNThreads: Int = 4,
+    val ggufNBatch: Int = 512,
+    val ggufNGpuLayers: Int = 0,
+    val ggufUseMlock: Boolean = true,
+    val ggufCtxShift: Boolean = true,
+    val ggufProjectorPath: String = "",
+    val ggufExtraParams: Map<String, String> = emptyMap(),
 )

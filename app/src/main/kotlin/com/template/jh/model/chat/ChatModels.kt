@@ -51,7 +51,7 @@ enum class ModelActivity {
         RunningCommand -> "正在执行命令"
         ReadingLints -> "正在检查编译错误"
         ExecutingTool -> "正在执行操作"
-        ProcessingResult -> "正在处理结果"
+        ProcessingResult -> "正在组织回复"
     }
 }
 
@@ -73,6 +73,7 @@ data class EngineState(
     val modelName: String = "",
     val errorMessage: String = "",
     val progress: Float = 0f,
+    val contextWindow: Int = 0,  // 当前加载模型的上下文窗口（按模型名称推断），0=未知
 )
 
 // 下载状态
@@ -114,6 +115,22 @@ enum class BackendType(val displayName: String) {
     }
 }
 
+// 本地模型格式
+enum class ModelFormat {
+    LiteRTLM,   // .litertlm 格式，使用 Google AI Edge LiteRT-LM 推理
+    GGUF,       // .gguf 格式，使用 llama.cpp 推理
+    Unknown;
+
+    companion object {
+        fun fromFileName(name: String): ModelFormat = when {
+            name.endsWith(".litertlm", ignoreCase = true) -> LiteRTLM
+            name.endsWith(".gguf", ignoreCase = true) -> GGUF
+            else -> Unknown
+        }
+        fun fromPath(path: String): ModelFormat = fromFileName(path.substringAfterLast('/'))
+    }
+}
+
 data class ModelInfo(val path: String, val name: String, val size: Long) {
     val sizeText: String get() = when {
         size < 1024 -> "$size B"
@@ -121,6 +138,8 @@ data class ModelInfo(val path: String, val name: String, val size: Long) {
         size < 1024 * 1024 * 1024 -> "${"%.1f".format(size / (1024.0 * 1024.0))} MB"
         else -> "${"%.2f".format(size / (1024.0 * 1024.0 * 1024.0))} GB"
     }
+    /** 模型格式，根据文件扩展名推断 */
+    val format: ModelFormat get() = ModelFormat.fromPath(path)
 }
 
 data class RecommendedModel(val name: String, val size: String, val url: String, val description: String, val fileName: String)

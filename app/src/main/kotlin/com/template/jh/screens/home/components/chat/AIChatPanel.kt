@@ -23,7 +23,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.Image as ComposeImage
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -114,7 +115,6 @@ import com.template.jh.model.chat.DisplayItem
 import com.template.jh.model.chat.DisplayRole
 import com.template.jh.model.chat.EngineStatus
 import com.template.jh.model.chat.ModelActivity
-import com.template.jh.core.analytics.UsageStats
 
 // AI 协作面板
 @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
@@ -149,7 +149,7 @@ fun AIChatPanel(
     // 流式输出时自动滚动到底部（监听 streamingContent 内容变化）
     LaunchedEffect(streamingContent) {
         if (streamingContent != null && isAtBottom) {
-            val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
+            val idx = displayItems.size - 1
             if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
         }
     }
@@ -158,15 +158,15 @@ fun AIChatPanel(
     LaunchedEffect(streamingContent) {
         if (streamingContent == null && state.isLoading) return@LaunchedEffect
         if (streamingContent == null && !state.isLoading && isAtBottom) {
-            val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
+            val idx = displayItems.size - 1
             if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
         }
     }
 
-    // 新消息/工具活动变化时滚动
-    LaunchedEffect(displayItems.size, currentToolActivity) {
+    // 新消息变化时滚动
+    LaunchedEffect(displayItems.size) {
         if (isAtBottom) {
-            val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
+            val idx = displayItems.size - 1
             if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
         }
     }
@@ -182,6 +182,7 @@ fun AIChatPanel(
             onSwitchConversation = { viewModel.switchConversation(it) },
             onDeleteConversation = { viewModel.deleteConversation(it) },
             onDismissHistory = { viewModel.closeHistory() },
+            currentToolActivity = currentToolActivity,
         )
 
         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -200,21 +201,13 @@ fun AIChatPanel(
                             isActiveStreaming = item.isStreaming && item.role == DisplayRole.Model,
                         )
                     }
-                    // 工具操作指示器（固定在列表底部）
-                    item(key = "tool_activity") {
-                        if (currentToolActivity != null) {
-                            ToolActivityView(item = currentToolActivity!!)
-                        } else {
-                            Spacer(Modifier.height(0.dp))
-                        }
-                    }
                     item { Spacer(Modifier.height(1.dp)) }
                 }
                 // Gallery 风格: 滚动到底部按钮
                 ScrollToBottomButton(
                     isAtBottom = isAtBottom,
                     onClick = {
-                        val idx = displayItems.size + (if (currentToolActivity != null) 1 else 0) - 1
+                        val idx = displayItems.size - 1
                         if (idx >= 0) {
                             kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
                                 listState.scrollToItem(idx)
@@ -232,8 +225,6 @@ fun AIChatPanel(
         val contextUsedTokens by viewModel.contextTokenCount.collectAsState()
         val contextMaxTokens = state.contextMaxTokens
         var showContextInfoDialog by remember { mutableStateOf(false) }
-        val usageStats by viewModel.usageStats.collectAsState()
-        var showUsageStatsDialog by remember { mutableStateOf(false) }
 
         // 图片选择启动器
         val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -262,8 +253,6 @@ fun AIChatPanel(
             contextCompressedCount = state.contextCompressedCount,
             onContextInfoClick = { showContextInfoDialog = true },
             onImagePick = { imagePickerLauncher.launch("image/*") },
-            usageStats = usageStats,
-            onUsageStatsClick = { showUsageStatsDialog = true },
         )
 
         if (showContextInfoDialog) {
@@ -277,13 +266,6 @@ fun AIChatPanel(
                 contextCompressedCount = state.contextCompressedCount,
                 contextSummary = state.contextSummary,
                 onDismiss = { showContextInfoDialog = false },
-            )
-        }
-        if (showUsageStatsDialog) {
-            UsageStatsDialog(
-                stats = usageStats,
-                onDismiss = { showUsageStatsDialog = false },
-                onReset = { viewModel.resetUsageStats() },
             )
         }
     }
@@ -324,45 +306,31 @@ private fun ScrollToBottomButton(
 }
 
 @Composable
-private fun ToolActivityView(item: DisplayItem) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(14.dp),
-            strokeWidth = 2.dp,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            text = item.content,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
 private fun ChatTopBar(
     engineStatus: EngineStatus,
     conversations: List<ConversationEntry>, isHistoryOpen: Boolean,
     onNewTaskClick: () -> Unit, onHistoryClick: () -> Unit, onSettingsClick: () -> Unit,
     onSwitchConversation: (ConversationEntry) -> Unit, onDeleteConversation: (String) -> Unit,
     onDismissHistory: () -> Unit,
+    currentToolActivity: DisplayItem? = null,
 ) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp).height(36.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        // 左侧标题区域（已移除模型状态圆点，MainTopBar 已包含完整状态）
+        // 左侧标题区域：实时显示模型状态
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-            Text(
-                text = "AI 协作",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            val title = currentToolActivity?.content
+                ?: if (engineStatus == EngineStatus.Ready) "等待指令"
+                   else if (engineStatus == EngineStatus.Loading) "加载模型中…"
+                   else if (engineStatus == EngineStatus.Error) "模型错误"
+                   else ""
+            if (title.isNotEmpty()) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             IconButton(onClick = onNewTaskClick, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Add, stringResource(R.string.ai_new_task), Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -423,7 +391,7 @@ private fun ConversationItemView(
     when (item.role) {
         DisplayRole.User -> UserItemView(item)
         DisplayRole.Model -> ModelItemView(item, isActiveStreaming)
-        DisplayRole.ToolActivity -> { /* 由 ToolActivityView 单独渲染 */ }
+        DisplayRole.ToolActivity -> { }
     }
 }
 
@@ -442,7 +410,7 @@ private fun UserItemView(item: DisplayItem) {
                 item.imageUris.forEach { uri ->
                     val thumbnail = remember(uri) { loadThumbnail(context, uri) }
                     thumbnail?.let { bmp ->
-                        Image(bitmap = bmp.asImageBitmap(), contentDescription = null,
+                        ComposeImage(bitmap = bmp.asImageBitmap(), contentDescription = null,
                             modifier = Modifier.size(80.dp).clip(RoundedCornerShape(6.dp)),
                             contentScale = ContentScale.Crop)
                     } ?: Box(Modifier.size(80.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp)))
@@ -631,8 +599,6 @@ private fun ChatInputBar(
     onDetachImage: (android.net.Uri) -> Unit = {},
     attachedFileRefs: List<AttachedFile> = emptyList(),
     onDetachFile: (Int) -> Unit = {},
-    usageStats: UsageStats = UsageStats(),
-    onUsageStatsClick: () -> Unit = {},
 ) {
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -682,7 +648,7 @@ private fun ChatInputBar(
                         // 加载缩略图
                         val thumbnail = remember(uri) { loadThumbnail(context, uri) }
                         thumbnail?.let { bmp ->
-                            Image(bitmap = bmp.asImageBitmap(), contentDescription = null, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(6.dp)),
+                            ComposeImage(bitmap = bmp.asImageBitmap(), contentDescription = null, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(6.dp)),
                                 contentScale = ContentScale.Crop)
                         } ?: Box(Modifier.size(56.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp)))
                         // 删除按钮
@@ -712,7 +678,7 @@ private fun ChatInputBar(
                 } else {
                     IconButton(
                         onClick = onOptimize,
-                        Modifier.size(28.dp),
+                        Modifier.size(32.dp),
                         enabled = inputText.isNotBlank() && !isLoading
                     ) {
                         Icon(
@@ -731,12 +697,10 @@ private fun ChatInputBar(
 
             // 添加图片按钮
             if (engineStatus == EngineStatus.Ready) {
-                IconButton(onClick = onImagePick, Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Add, "添加图片", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                IconButton(onClick = onImagePick, Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Image, "添加图片", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                 }
             }
-
-            Spacer(Modifier.width(4.dp))
 
             // 语音输入按钮
             VoiceInputButton(
@@ -757,38 +721,20 @@ private fun ChatInputBar(
                     progress = { ratio },
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 1.5.dp,
-                    color = if (isContextCompressed) Color(0xFF7B1FA2) // 紫色表示已压缩
+                    color = if (isContextCompressed) Color(0xFF7B1FA2)
                         else if (ratio < 0.5f) Color(0xFF4CAF50)
                         else if (ratio < 0.8f) Color(0xFFFFA000)
                         else Color(0xFFE53935),
                     trackColor = Color(0xFFE0E0E0),
                 )
-                // 已压缩标记
                 if (isContextCompressed) {
                     Text("C", style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(fontSize = 7.sp),
                         color = Color(0xFF7B1FA2))
                 }
             }
 
-            // 用量统计按钮
-            Box(
-                modifier = Modifier
-                    .size(22.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable { onUsageStatsClick() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "${usageStats.todayCalls}",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = 9.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
             if (isLoading) {
-                IconButton(onClick = onCancel, Modifier.size(36.dp)) {
+                IconButton(onClick = onCancel, Modifier.size(32.dp)) {
                     Box(contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.primary)
                         Icon(Icons.Default.Pause, stringResource(R.string.chat_cancel), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
@@ -868,7 +814,7 @@ private fun VoiceInputButton(
                 )
             }
         },
-        modifier = Modifier.size(28.dp),
+        modifier = Modifier.size(32.dp),
         enabled = enabled,
     ) {
         if (isListening) {
@@ -1079,66 +1025,6 @@ private class VoiceRecognizerManager {
     }
 }
 
-
-// 用量统计对话框
-@Composable
-private fun UsageStatsDialog(
-    stats: UsageStats,
-    onDismiss: () -> Unit,
-    onReset: () -> Unit,
-) {
-    val avgDuration = if (stats.totalCalls > 0) stats.totalDurationMs / stats.totalCalls else 0L
-    var showResetConfirm by remember { mutableStateOf(false) }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("用量统计") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // 汇总
-                Text("今日调用: ${stats.todayCalls}", style = MaterialTheme.typography.bodySmall)
-                Text("今日 Token: ${stats.todayTokens}", style = MaterialTheme.typography.bodySmall)
-                HorizontalDivider()
-                Text("累计调用: ${stats.totalCalls}", style = MaterialTheme.typography.bodySmall)
-                Text("累计输入 Token: ${stats.totalPromptTokens}", style = MaterialTheme.typography.bodySmall)
-                Text("累计输出 Token: ${stats.totalCompletionTokens}", style = MaterialTheme.typography.bodySmall)
-                Text("总计 Token: ${stats.totalPromptTokens + stats.totalCompletionTokens}", style = MaterialTheme.typography.bodySmall)
-                Text("平均耗时: ${avgDuration}ms", style = MaterialTheme.typography.bodySmall)
-                HorizontalDivider()
-                // 按模型统计
-                if (stats.byModel.isNotEmpty()) {
-                    Text("按模型:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    stats.byModel.forEach { (key, mStats) ->
-                        val (provider, modelName) = key.split("/", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
-                        Column(modifier = Modifier.padding(start = 8.dp)) {
-                            Text("$modelName", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-                            Text("  来源: $provider | 调用 ${mStats.calls} 次, Token ${mStats.promptTokens + mStats.completionTokens}, ${mStats.durationMs / 1000}s", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            androidx.compose.material3.TextButton(onClick = {
-                if (showResetConfirm) {
-                    onReset()
-                    showResetConfirm = false
-                } else {
-                    showResetConfirm = true
-                }
-            }) {
-                Text(if (showResetConfirm) "确认重置" else "重置统计")
-            }
-        },
-        dismissButton = {
-            androidx.compose.material3.TextButton(onClick = {
-                showResetConfirm = false
-                onDismiss()
-            }) {
-                Text(if (showResetConfirm) "取消" else "关闭")
-            }
-        },
-    )
-}
 
 // 上下文窗口详情对话框
 @Composable

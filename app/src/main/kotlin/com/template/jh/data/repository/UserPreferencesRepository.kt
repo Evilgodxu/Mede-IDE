@@ -52,6 +52,8 @@ class UserPreferencesRepository(private val context: Context) {
         // 本地推理后端
         val BACKEND_TYPE = stringPreferencesKey("backend_type")
         val NPU_LIBRARY_DIR = stringPreferencesKey("npu_library_dir")
+        // MTP (Multi-Turn Prediction / Speculative Decoding)
+        val ENABLE_SPECULATIVE_DECODING = booleanPreferencesKey("enable_speculative_decoding")
     }
 
     val themeMode: Flow<String> = context.dataStore.data
@@ -367,6 +369,14 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun setNpuLibraryDir(dir: String) {
         context.dataStore.edit { it[PreferencesKeys.NPU_LIBRARY_DIR] = dir }
+    }
+
+    // MTP (Multi-Turn Prediction / Speculative Decoding)
+    val enableSpeculativeDecoding: Flow<Boolean> = context.dataStore.data
+        .map { it[PreferencesKeys.ENABLE_SPECULATIVE_DECODING] ?: false }
+
+    suspend fun setEnableSpeculativeDecoding(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.ENABLE_SPECULATIVE_DECODING] = enabled }
     }
 
     private fun rulesToJson(rules: List<Rule>): String {

@@ -67,16 +67,22 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
     @Volatile var backendType: BackendType = BackendType.CPU
     @Volatile var npuLibraryDir: String = ""
 
-    // 图像/多模态相关配置
+    // 图像/多模态相关配置（仅多模态模型生效）
     @Volatile var maxNumImages: Int = 4
-    @Volatile var visualTokenBudget: Int = 140
+    @Volatile var visualTokenBudget: Int = 1120  // Gemma4 支持: 70, 140, 280, 560, 1120
+
+    // MTP (Multi-Turn Prediction / Speculative Decoding)
+    @Volatile var enableSpeculativeDecoding: Boolean = false
+
+    /** 当前加载的模型是否支持多模态 */
+    @Volatile var isMultimodal: Boolean = false
 
     init {
         Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
         // 禁用工具名的 snake_case 转换，保持原始函数名
         ExperimentalFlags.convertCamelToSnakeCaseInToolDescription = false
-        // 设置视觉 token 预算（Gemma4 支持: 70, 140, 280, 560, 1120）
-        ExperimentalFlags.visualTokenBudget = visualTokenBudget
+        // MTP 标志
+        ExperimentalFlags.enableSpeculativeDecoding = enableSpeculativeDecoding
     }
 
     @Volatile private var downloadCancelled = false
@@ -232,14 +238,31 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         try {
             withContext(Dispatchers.IO) {
                 closeEngine()
+                // 在创建 Engine 前同步 MTP 标志
+                ExperimentalFlags.enableSpeculativeDecoding = enableSpeculativeDecoding
                 val liteBackend = backendType.toLiteRtBackend(npuLibraryDir)
-                val config = EngineConfig(modelPath = modelPath, backend = liteBackend, visionBackend = liteBackend, maxNumImages = maxNumImages, cacheDir = context.cacheDir.absolutePath)
+                // 检测是否为多模态模型，条件设置视觉参数
+                val multimodal = isMultimodalModel(file.name)
+                isMultimodal = multimodal
+                if (multimodal) {
+                    ExperimentalFlags.visualTokenBudget = visualTokenBudget
+                } else {
+                    ExperimentalFlags.visualTokenBudget = 0
+                }
+                val config = EngineConfig(
+                    modelPath = modelPath,
+                    backend = liteBackend,
+                    visionBackend = if (multimodal) liteBackend else null,
+                    maxNumImages = if (multimodal) maxNumImages else 0,
+                    cacheDir = context.cacheDir.absolutePath,
+                )
                 val newEngine = Engine(config)
                 newEngine.initialize()
                 engine = newEngine
                 isInitialized = true
             }
-            _state.value = EngineState(status = EngineStatus.Ready, modelPath = modelPath, modelName = file.name, progress = 1f)
+            _state.value = EngineState(status = EngineStatus.Ready, modelPath = modelPath, modelName = file.name, progress = 1f,
+                contextWindow = resolveContextWindow(file.name))
         } catch (e: Exception) {
             Log.e("LiteRTManager", "loadModel failed", e)
             FileLogger.e("LiteRTManager", "loadModel failed: ${e.message}", e)
@@ -259,14 +282,16 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
 
     override fun close() { unloadModel() }
 
-    // 扫描 .litertlm 文件（递归+MediaStore双通道）
+    // 扫描模型文件（.litertlm + .gguf，递归+MediaStore双通道）
     fun scanModels(customPaths: List<String> = emptyList()): List<ModelInfo> {
         val seen = mutableSetOf<String>()
         val models = mutableListOf<ModelInfo>()
 
+        val supportedExtensions = setOf("litertlm", "gguf")
+
         fun addIfNew(file: File) {
             val abs = file.absolutePath
-            if (seen.add(abs) && file.isFile && file.extension == "litertlm") {
+            if (seen.add(abs) && file.isFile && file.extension.lowercase() in supportedExtensions) {
                 models.add(ModelInfo(path = abs, name = file.nameWithoutExtension, size = file.length()))
             }
         }
@@ -307,6 +332,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
             "/storage/emulated/0/Download",
             "/storage/emulated/0/Models",
             "/storage/emulated/0/litertlm",
+            "/storage/emulated/0/gguf",
         )
         scanPaths.addAll(fallbackPaths)
 
@@ -320,11 +346,12 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         // MediaStore 补充查询（Android 10+ Downloads 集合）
         try {
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            context.contentResolver.query(
+            for (ext in supportedExtensions) {
+                context.contentResolver.query(
                     MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                     arrayOf(MediaStore.Downloads.DISPLAY_NAME, MediaStore.Downloads.SIZE, MediaStore.Downloads.RELATIVE_PATH),
                     "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
-                    arrayOf("%.litertlm"),
+                    arrayOf("%.$ext"),
                     null
                 )?.use { cursor ->
                     val nameIdx = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
@@ -334,13 +361,13 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
                         val name = cursor.getString(nameIdx) ?: continue
                         val size = cursor.getLong(sizeIdx)
                         val rel = cursor.getString(pathIdx) ?: ""
-                        // 拼接完整路径: DownloadsDir + relativePath + name
                         val fullPath = File(downloadsDir, "$rel$name").absolutePath
                         if (seen.add(fullPath)) {
-                            models.add(ModelInfo(path = fullPath, name = name.removeSuffix(".litertlm"), size = size))
+                            models.add(ModelInfo(path = fullPath, name = name.removeSuffix(".$ext"), size = size))
                         }
                     }
                 }
+            }
         } catch (_: Exception) {}
 
         return models
@@ -353,6 +380,25 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
             if (stream.read(magic) != 8) false else String(magic) == "LITERTLM"
         }
     } catch (_: Exception) { false }
+
+    /** 根据模型文件名推断上下文窗口（token） */
+    private fun resolveContextWindow(modelName: String): Int {
+        val name = modelName.lowercase()
+        // Gemma4 系列均支持 32K 上下文
+        if (name.contains("gemma")) return 32768
+        // 未知模型：保守使用 32768
+        return 32768
+    }
+
+    /** 判断模型文件名是否指向多模态（支持图像理解）模型 */
+    fun isMultimodalModel(fileName: String): Boolean {
+        val name = fileName.lowercase()
+        // Gemma 4 系列均支持多模态
+        if (name.contains("gemma")) return true
+        // 文件名显式标注多模态
+        if (name.contains("multimodal") || name.contains("vision") || name.contains("e2b") || name.contains("e4b")) return true
+        return false
+    }
 
     companion object {
         val RECOMMENDED_MODELS = listOf(

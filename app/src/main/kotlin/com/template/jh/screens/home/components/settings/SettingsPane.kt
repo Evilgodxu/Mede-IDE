@@ -97,6 +97,8 @@ import com.template.jh.model.chat.DownloadStatus
 import com.template.jh.model.chat.EngineStatus
 import com.template.jh.model.chat.ModelParams
 import com.template.jh.model.chat.BackendType
+import com.template.jh.model.chat.ModelFormat
+import com.template.jh.model.chat.ModelInfo
 import com.template.jh.screens.home.ChatViewModel
 import com.template.jh.screens.home.HomeUiState
 import com.template.jh.screens.home.HomeViewModel
@@ -256,6 +258,111 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.Default.Error, null, Modifier.size(14.dp), tint = Color(0xFFFFA000))
                             Text("未检测到已知 NPU 驱动，使用默认 nativeLibraryDir: $detectedDir", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFA000))
+                        }
+                    }
+                }
+            }
+        }
+
+        // MTP (Multi-Turn Prediction / Speculative Decoding)
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("MTP 推测解码", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    Text("启用多步预测加速，需模型支持，切换后重新加载模型生效", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(
+                    checked = chatState.enableSpeculativeDecoding,
+                    onCheckedChange = { chatViewModel.setEnableSpeculativeDecoding(it) },
+                )
+            }
+        }
+
+        // GGUF 参数（仅 GGUF 模型加载后显示）
+        if (chatState.modelFormat == ModelFormat.GGUF) {
+            var isGgufExpanded by remember { mutableStateOf(false) }
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { isGgufExpanded = !isGgufExpanded },
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                        Text("GGUF 参数", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(24.dp))
+                    }
+
+                    if (isGgufExpanded) {
+                        // --- 引擎参数 ---
+                        var nCtx by remember { mutableIntStateOf(chatState.ggufNCtx) }
+                        var nThreads by remember { mutableIntStateOf(chatState.ggufNThreads) }
+                        var nBatch by remember { mutableIntStateOf(chatState.ggufNBatch) }
+                        var nGpuLayers by remember { mutableIntStateOf(chatState.ggufNGpuLayers) }
+
+                        Text("nCtx (上下文窗口): $nCtx", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Slider(value = nCtx.toFloat(), onValueChange = { nCtx = (it.toInt()).coerceIn(512, 131072) }, valueRange = 512f..131072f, modifier = Modifier.fillMaxWidth())
+
+                        Text("nThreads (线程数): $nThreads", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Slider(value = nThreads.toFloat(), onValueChange = { nThreads = it.roundToInt() }, valueRange = 1f..16f, steps = 14, modifier = Modifier.fillMaxWidth())
+
+                        Text("nBatch (批处理): $nBatch", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Slider(value = nBatch.toFloat(), onValueChange = { nBatch = (it.toInt()).coerceIn(64, 4096) }, valueRange = 64f..4096f, modifier = Modifier.fillMaxWidth())
+
+                        Text("nGpuLayers (GPU 卸载层): $nGpuLayers (0=CPU)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Slider(value = nGpuLayers.toFloat(), onValueChange = { nGpuLayers = it.roundToInt() }, valueRange = 0f..99f, steps = 98, modifier = Modifier.fillMaxWidth())
+
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                        // --- 开关参数 ---
+                        var useMlock by remember { mutableStateOf(chatState.ggufUseMlock) }
+                        var ctxShift by remember { mutableStateOf(chatState.ggufCtxShift) }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("useMlock", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                Text("锁定物理内存防止换页", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(checked = useMlock, onCheckedChange = { useMlock = it })
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("ctxShift", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                Text("上下文偏移滚动（长对话）", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(checked = ctxShift, onCheckedChange = { ctxShift = it })
+                        }
+
+                        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                        // --- 多模态投影器 ---
+                        Text("mmproj 投影器路径", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        var projectorPath by remember { mutableStateOf(chatState.ggufProjectorPath) }
+                        OutlinedTextField(
+                            value = projectorPath,
+                            onValueChange = { projectorPath = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("/path/to/mmproj.gguf", style = MaterialTheme.typography.bodySmall) },
+                            singleLine = true,
+                        )
+
+                        // --- 通用额外参数 ---
+                        GgufExtraParamsEditor(
+                            currentParams = chatState.ggufExtraParams,
+                            onParamsChanged = { chatViewModel.setGgufExtraParams(it) },
+                        )
+
+                        Button(onClick = {
+                            chatViewModel.setGgufNCtx(nCtx)
+                            chatViewModel.setGgufNThreads(nThreads)
+                            chatViewModel.setGgufNBatch(nBatch)
+                            chatViewModel.setGgufNGpuLayers(nGpuLayers)
+                            chatViewModel.setGgufUseMlock(useMlock)
+                            chatViewModel.setGgufCtxShift(ctxShift)
+                            chatViewModel.setGgufProjectorPath(projectorPath)
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            Text("应用 GGUF 参数")
                         }
                     }
                 }
@@ -1737,6 +1844,79 @@ private fun McpSettingsContent(
 @Composable
 private fun CategoryPlaceholder(text: String) {
     Text(text = text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** GGUF 额外参数键值编辑器，类似 Maid 的 ParameterView */
+@Composable
+private fun GgufExtraParamsEditor(
+    currentParams: Map<String, String>,
+    onParamsChanged: (Map<String, String>) -> Unit,
+) {
+    var keyValuePairs by remember(currentParams) { mutableStateOf(currentParams.entries.map { Pair(it.key, it.value) }.toMutableList()) }
+    var isExpanded by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable { isExpanded = !isExpanded },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("额外参数 (${keyValuePairs.size})", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
+            IconButton(onClick = {
+                keyValuePairs = keyValuePairs.toMutableList().apply { add("" to "") }
+                isExpanded = true
+            }) {
+                Icon(Icons.Default.Add, contentDescription = "添加参数", Modifier.size(18.dp))
+            }
+        }
+
+        if (isExpanded) {
+            if (keyValuePairs.isEmpty()) {
+                Text("暂无额外参数，点击 + 添加", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            keyValuePairs.forEachIndexed { index, (key, value) ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    OutlinedTextField(
+                        value = key,
+                        onValueChange = { newKey ->
+                            val updated = keyValuePairs.toMutableList()
+                            updated[index] = newKey to value
+                            keyValuePairs = updated
+                            onParamsChanged(updated.filter { it.first.isNotBlank() }.toMap())
+                        },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("key", style = MaterialTheme.typography.labelSmall) },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = { newValue ->
+                            val updated = keyValuePairs.toMutableList()
+                            updated[index] = key to newValue
+                            keyValuePairs = updated
+                            onParamsChanged(updated.filter { it.first.isNotBlank() }.toMap())
+                        },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("value", style = MaterialTheme.typography.labelSmall) },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                    )
+                    IconButton(onClick = {
+                        val updated = keyValuePairs.toMutableList().apply { removeAt(index) }
+                        keyValuePairs = updated
+                        onParamsChanged(updated.filter { it.first.isNotBlank() }.toMap())
+                    }) {
+                        Icon(Icons.Default.Delete, contentDescription = "删除", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+    }
 }
 
 

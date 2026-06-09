@@ -64,12 +64,14 @@ fun toDisplayItems(messages: List<ChatMessage>): List<DisplayItem> {
             }
             ChatRole.Model -> {
                 val modelMsgs = mutableListOf<ChatMessage>()
+                val toolMsgs = mutableListOf<ChatMessage>()
                 while (i < messages.size && messages[i].role == ChatRole.Model) {
                     modelMsgs.add(messages[i]); i++
                 }
-                // 跳过 tool 消息，不显示在对话中
-                while (i < messages.size && messages[i].role == ChatRole.Tool) { i++ }
-                result.add(mergeModelMessages(modelMsgs))
+                while (i < messages.size && messages[i].role == ChatRole.Tool) {
+                    toolMsgs.add(messages[i]); i++
+                }
+                result.add(mergeModelMessages(modelMsgs, toolMsgs))
             }
             ChatRole.Tool, ChatRole.System -> { i++ }
         }
@@ -77,8 +79,8 @@ fun toDisplayItems(messages: List<ChatMessage>): List<DisplayItem> {
     return result
 }
 
-/** 合并模型消息（过滤工具调用 JSON），生成一条显示条目，不含工具结果 */
-private fun mergeModelMessages(modelMsgs: List<ChatMessage>): DisplayItem {
+/** 合并模型消息及紧随的工具结果，生成一条显示条目 */
+private fun mergeModelMessages(modelMsgs: List<ChatMessage>, toolMsgs: List<ChatMessage> = emptyList()): DisplayItem {
     val allThinkBlocks = mutableListOf<String>()
     val contentParts = mutableListOf<String>()
 
@@ -87,6 +89,19 @@ private fun mergeModelMessages(modelMsgs: List<ChatMessage>): DisplayItem {
         allThinkBlocks.addAll(blocks)
         val stripped = stripToolCalls(cleaned)
         if (stripped.isNotBlank()) contentParts.add(stripped)
+    }
+
+    // 追加工具结果到显示内容
+    for (tMsg in toolMsgs) {
+        if (tMsg.content.isNotBlank()) contentParts.add(tMsg.content)
+    }
+
+    if (contentParts.isEmpty() && modelMsgs.isNotEmpty()) {
+        val last = modelMsgs.last()
+        val (_, cleaned) = thinkBlocks(last.content)
+        val stripped = stripToolCalls(cleaned)
+        if (stripped.isNotBlank()) contentParts.add(stripped)
+        else if (toolMsgs.isNotEmpty()) contentParts.addAll(toolMsgs.mapNotNull { it.content.takeIf { it.isNotBlank() } })
     }
 
     return DisplayItem(
