@@ -3,6 +3,8 @@ package com.template.jh.core.storage
 import android.content.Context
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Environment
+import android.provider.DocumentsContract
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
@@ -11,17 +13,43 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 
 /**
- * 统一的文件管理器，使用 DocumentFile 公共 API 实现 SAF 操作
- * 兼容所有 Android 设备，避免使用 DocumentsContract 私有 API
+ * 统一的文件管理器
+ *
+ * 双模式：
+ *  - 直接文件系统模式（MANAGE_EXTERNAL_STORAGE）：使用 java.io.File，无系统跳转
+ *  - SAF 模式：使用 DocumentFile，兼容无全权限设备
+ *
+ * 默认优先使用直接文件系统模式，靠 fallback 到 SAF。
  */
 class FileManager(private val context: Context) {
 
     val contentResolver = context.contentResolver
 
-    private var rootDocFile: DocumentFile? = null
+    // --- 模式状态 ---
+    private var isDirectMode = false
+    private var directRoot: File? = null          // 直接模式根目录（存储根）
+    private var rootDocFile: DocumentFile? = null  // SAF 模式根目录
 
     var projectUri: Uri? = null
         private set
+
+    /** 存储根路径（完整文件系统根） */
+    var storageRootPath: String = ""
+        private set
+
+    /** 当前项目目录路径（资源管理器显示此目录内容，默认=存储根） */
+    var projectDirPath: String = ""
+        private set
+
+    // --- 数据类 ---
+    data class FileNode(
+        val name: String,
+        val path: String,
+        val isDirectory: Boolean,
+        val size: Long,
+        val uri: Uri,
+        val filePath: String = "",
+    )
 
     private val searchableExtensions = setOf(
         "kt", "kts", "java", "xml", "json", "yml", "yaml", "properties",
@@ -29,15 +57,58 @@ class FileManager(private val context: Context) {
         "html", "css", "js", "ts", "sql", "sh", "bat", "py",
     )
 
-    // 搜索时跳过的目录名（小写）
     private val skippedDirNames = setOf(
         "build", ".gradle", ".git", "node_modules", ".idea", "target",
         "out", "captures", ".git", ".svn", ".hg", ".m2", "gradle",
     )
 
-    // 设置项目根目录
+    // ================================================================
+    //  权限与模式切换
+    // ================================================================
+
+    /** 检查是否持有 MANAGE_EXTERNAL_STORAGE 权限 */
+    fun hasFullStorageAccess(): Boolean {
+        return Environment.isExternalStorageManager()
+    }
+
+    /** 使用直接文件系统模式 - 设置根目录为外部存储根 */
+    fun setDirectStorageRoot(root: File = Environment.getExternalStorageDirectory()) {
+        isDirectMode = true
+        directRoot = root
+        storageRootPath = root.absolutePath
+        projectDirPath = root.absolutePath  // 默认项目目录=存储根
+        projectUri = null
+        rootDocFile = null
+    }
+
+    /** 设置项目子目录（资源管理器将显示此目录内容） */
+    fun setProjectDir(absolutePath: String): Boolean {
+        val dir = File(absolutePath)
+        if (!dir.isDirectory) return false
+        projectDirPath = dir.absolutePath
+        return true
+    }
+
+    /** 获取完整文件路径：将相对路径转为绝对路径 */
+    fun getAbsolutePath(relativePath: String): String {
+        val base = projectDirPath.ifEmpty { storageRootPath }
+        if (relativePath.isBlank()) return base
+        return File(base, relativePath.trim('/')).absolutePath
+    }
+
+    /** 将绝对路径转为项目相对路径 */
+    fun toRelativePath(absolutePath: String): String {
+        val base = projectDirPath.ifEmpty { storageRootPath }
+        return absolutePath.removePrefix(base).trimStart('/')
+    }
+
+    /** 使用 SAF 模式 - 通过 URI 设置项目目录（传统方式） */
     fun setProjectUri(uri: Uri) {
-        // 持久化权限
+        isDirectMode = false
+        directRoot = null
+        storageRootPath = uri.toString()
+        projectDirPath = uri.toString()
+
         val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
                 android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         context.contentResolver.takePersistableUriPermission(uri, takeFlags)
@@ -45,23 +116,37 @@ class FileManager(private val context: Context) {
         rootDocFile = DocumentFile.fromTreeUri(context, uri)
     }
 
-    // 清除项目根目录
+    /** 清除项目根目录 */
     fun clearProjectUri() {
+        isDirectMode = false
+        directRoot = null
         projectUri = null
         rootDocFile = null
+        storageRootPath = ""
+        projectDirPath = ""
     }
 
-    /**
-     * 根据相对路径获取 DocumentFile
-     * 优先使用 findFile（标准 API），失败时降级到遍历 listFiles 匹配名称
-     */
+    /** 是否处于直接文件系统模式 */
+    fun isDirectAccessMode(): Boolean = isDirectMode
+
+    // ================================================================
+    //  路径解析
+    // ================================================================
+
+    private fun resolveDirectFile(relativePath: String): File? {
+        val base = projectDirPath.ifEmpty {
+            directRoot?.absolutePath ?: return null
+        }
+        if (relativePath.isBlank()) return File(base)
+        return File(base, relativePath.trim('/'))
+    }
+
     private fun resolvePath(relativePath: String): DocumentFile? {
+        if (isDirectMode) return null
         val root = rootDocFile ?: return null
         val path = relativePath.trim()
         if (path.isBlank()) return root
-
-        val normalizedPath = path.trim('/')
-        return resolvePathUncached(root, normalizedPath)
+        return resolvePathUncached(root, path.trim('/'))
     }
 
     private fun resolvePathUncached(root: DocumentFile, normalizedPath: String): DocumentFile? {
@@ -83,16 +168,49 @@ class FileManager(private val context: Context) {
         }
     }
 
-    /**
-     * 列出指定路径下的文件和目录
-     * @param subPath 相对于项目根目录的路径，空字符串表示根目录
-     * @return 文件列表字符串，包含 [DIR]/[FILE] 标记
-     */
+    // ================================================================
+    //  文件列表
+    // ================================================================
+
     fun listFiles(subPath: String = ""): String {
+        return if (isDirectMode) listFilesDirect(subPath) else listFilesSaf(subPath)
+    }
+
+    fun listFilesAsNodes(subPath: String = ""): List<FileNode> {
+        return if (isDirectMode) listFilesAsNodesDirect(subPath) else listFilesAsNodesSaf(subPath)
+    }
+
+    private fun listFilesDirect(subPath: String): String {
+        val target = resolveDirectFile(subPath) ?: return "No storage root set."
+        if (!target.isDirectory) return "Not a directory: $subPath"
+
+        val children = target.listFiles()?.toList() ?: return "Empty directory."
+        if (children.isEmpty()) return "Empty directory."
+
+        val sorted = children.sortedWith(
+            compareByDescending<File> { it.isDirectory }
+                .thenBy { it.name.lowercase() }
+        )
+
+        val displayPath = if (subPath.isBlank()) "" else subPath.trim('/')
+        val header = if (displayPath.isEmpty()) "存储根目录/" else "$displayPath/"
+        return buildString {
+            appendLine(header)
+            sorted.forEach { file ->
+                if (file.isDirectory) {
+                    appendLine("  ${file.name}/")
+                } else {
+                    val sizeStr = if (file.length() > 0) " (${formatSize(file.length())})" else ""
+                    appendLine("  ${file.name}$sizeStr")
+                }
+            }
+        }.trimEnd()
+    }
+
+    private fun listFilesSaf(subPath: String): String {
         val cleanPath = subPath.trim('/').let { if (it == "null" || it == "undefined") "" else it }
         val targetDoc = resolvePath(cleanPath)
             ?: return if (cleanPath.isBlank()) "No project folder is open." else "Directory not found: $subPath"
-
         if (!targetDoc.isDirectory) return "Not a directory: $subPath"
 
         return try {
@@ -123,12 +241,28 @@ class FileManager(private val context: Context) {
         }
     }
 
-    /**
-     * 获取指定路径下的文件和目录列表（结构化数据）
-     * @param subPath 相对于项目根目录的路径
-     * @return FileNode 列表
-     */
-    fun listFilesAsNodes(subPath: String = ""): List<FileNode> {
+    private fun listFilesAsNodesDirect(subPath: String): List<FileNode> {
+        val target = resolveDirectFile(subPath) ?: return emptyList()
+        if (!target.isDirectory) return emptyList()
+
+        val children = target.listFiles()?.toList() ?: return emptyList()
+        return children.map { file ->
+            val relPath = if (subPath.isBlank()) file.name else "${subPath.trim('/')}/${file.name}"
+            FileNode(
+                name = file.name,
+                path = relPath,
+                isDirectory = file.isDirectory,
+                size = if (file.isFile) file.length() else 0L,
+                uri = Uri.fromFile(file),
+                filePath = file.absolutePath,
+            )
+        }.sortedWith(
+            compareByDescending<FileNode> { it.isDirectory }
+                .thenBy { it.name.lowercase() }
+        )
+    }
+
+    private fun listFilesAsNodesSaf(subPath: String): List<FileNode> {
         val cleanPath = subPath.trim('/').let { if (it == "null" || it == "undefined") "" else it }
         val targetDoc = resolvePath(cleanPath) ?: return emptyList()
         if (!targetDoc.isDirectory) return emptyList()
@@ -143,7 +277,8 @@ class FileManager(private val context: Context) {
                     path = relPath,
                     isDirectory = doc.isDirectory,
                     size = doc.length(),
-                    uri = doc.uri
+                    uri = doc.uri,
+                    filePath = safUriToFilePath(doc.uri),
                 )
             }.sortedWith(
                 compareByDescending<FileNode> { it.isDirectory }
@@ -154,21 +289,83 @@ class FileManager(private val context: Context) {
         }
     }
 
-    /**
-     * 生成多层目录树文本，供 AI 上下文自动注入
-     * @param maxDepth 最大递归深度
-     * @param maxItems 最大显示条目数（总节点数）
-     * @return 树形目录结构字符串，无项目返回空字符串
-     */
+    private fun safUriToFilePath(uri: Uri): String {
+        return try {
+            val docId = DocumentsContract.getDocumentId(uri)
+            if (docId.startsWith("primary:")) {
+                File(Environment.getExternalStorageDirectory(), docId.removePrefix("primary:")).absolutePath
+            } else {
+                val split = docId.split(":")
+                if (split.size >= 2) "/storage/${split[0]}/${split[1]}" else ""
+            }
+        } catch (_: Exception) { "" }
+    }
+
+    // ================================================================
+    //  构建目录树
+    // ================================================================
+
     fun buildFileTreeString(maxDepth: Int = 3, maxItems: Int = 40): String {
+        return if (isDirectMode) buildFileTreeDirect(maxDepth, maxItems) else buildFileTreeSaf(maxDepth, maxItems)
+    }
+
+    /** 获取项目目录的 File 对象（用于搜索/遍历） */
+    private fun getProjectRootFile(): File? {
+        val path = projectDirPath.ifEmpty { directRoot?.absolutePath ?: return null }
+        return File(path)
+    }
+
+    private fun buildFileTreeDirect(maxDepth: Int, maxItems: Int): String {
+        val root = getProjectRootFile() ?: return ""
+        val result = mutableListOf<String>()
+        var count = 0
+        buildTreeRecursiveDirect(root, "", 0, maxDepth, maxItems) { line ->
+            if (count < maxItems) { result.add(line); count++; true } else false
+        }
+        if (result.isEmpty()) return "(empty project)"
+        return buildString {
+            appendLine("${root.name}/")
+            result.forEach { appendLine(it) }
+        }.trimEnd()
+    }
+
+    private fun buildTreeRecursiveDirect(
+        dir: File,
+        prefix: String,
+        depth: Int,
+        maxDepth: Int,
+        maxItems: Int,
+        addLine: (String) -> Boolean,
+    ): Boolean {
+        if (depth >= maxDepth) return true
+
+        val children = dir.listFiles()
+            ?.filter { file ->
+                !file.name.startsWith(".") && file.name.lowercase() != "build"
+            }
+            ?.sortedWith(compareByDescending<File> { it.isDirectory }.thenBy { it.name.lowercase() })
+            ?: return true
+
+        val lastIdx = children.size - 1
+        children.forEachIndexed { idx, file ->
+            val connector = if (idx == lastIdx) "└── " else "├── "
+            val sizeSuf = if (file.isFile && file.length() > 0) " (${formatSize(file.length())})" else ""
+            if (!addLine("$prefix$connector${file.name}${if (file.isDirectory) "/" else sizeSuf}")) return false
+            if (file.isDirectory) {
+                val ext = if (idx == lastIdx) "    " else "│   "
+                if (!buildTreeRecursiveDirect(file, "$prefix$ext", depth + 1, maxDepth, maxItems, addLine)) return false
+            }
+        }
+        return true
+    }
+
+    private fun buildFileTreeSaf(maxDepth: Int, maxItems: Int): String {
         val root = rootDocFile ?: return ""
         return try {
             val result = mutableListOf<String>()
             var count = 0
-            buildTreeRecursive(root, "", 0, maxDepth, maxItems) { line ->
-                if (count < maxItems) {
-                    result.add(line); count++; true
-                } else false
+            buildTreeRecursiveSaf(root, "", 0, maxDepth, maxItems) { line ->
+                if (count < maxItems) { result.add(line); count++; true } else false
             }
             if (result.isEmpty()) return "(empty project)"
             val rootName = root.name?.takeIf { it.isNotBlank() } ?: "project"
@@ -179,8 +376,7 @@ class FileManager(private val context: Context) {
         } catch (_: Exception) { "(error listing project structure)" }
     }
 
-    // 递归构建目录树行，返回 true=继续 false=已满
-    private fun buildTreeRecursive(
+    private fun buildTreeRecursiveSaf(
         dirDoc: DocumentFile,
         prefix: String,
         depth: Int,
@@ -189,7 +385,6 @@ class FileManager(private val context: Context) {
         addLine: (String) -> Boolean,
     ): Boolean {
         if (depth >= maxDepth) return true
-
         val children = dirDoc.listFiles()
             .filter { doc ->
                 val name = doc.name ?: return@filter false
@@ -197,68 +392,65 @@ class FileManager(private val context: Context) {
             }
             .sortedWith(compareByDescending<DocumentFile> { it.isDirectory }.thenBy { it.name?.lowercase() ?: "" })
 
-        // 预先收集子目录子文件列表，用于判断每个节点是否是最后一个可显示节点
         val lastIdx = children.size - 1
-        var idx = -1
-
-        for (doc in children) {
-            idx++
-            val name = doc.name ?: continue
+        children.forEachIndexed { idx, doc ->
+            val name = doc.name ?: return@forEachIndexed
             val connector = if (idx == lastIdx) "└── " else "├── "
-            if (!addLine("$prefix$connector$name${if (doc.isDirectory) "/" else sizeSuffix(doc)}")) return false
+            val suf = if (doc.isDirectory) "" else sizeSuffixSaf(doc)
+            if (!addLine("$prefix$connector$name${if (doc.isDirectory) "/" else suf}")) return false
             if (doc.isDirectory) {
                 val ext = if (idx == lastIdx) "    " else "│   "
-                if (!buildTreeRecursive(doc, "$prefix$ext", depth + 1, maxDepth, maxItems, addLine)) return false
+                if (!buildTreeRecursiveSaf(doc, "$prefix$ext", depth + 1, maxDepth, maxItems, addLine)) return false
             }
         }
         return true
     }
 
-    private fun sizeSuffix(doc: DocumentFile): String {
-        // 返回格式化文件大小后缀，如 " (1.5 MB)"
+    private fun sizeSuffixSaf(doc: DocumentFile): String {
         val len = doc.length()
         return if (len > 0) " (${formatSize(len)})" else ""
     }
 
-    /**
-     * 读取文件内容（原始内容）
-     * @param path 相对于项目根目录的文件路径
-     * @return 文件内容，失败返回 null
-     */
+    // ================================================================
+    //  文件读写
+    // ================================================================
+
     fun readFileRaw(path: String): String? {
+        return if (isDirectMode) readFileRawDirect(path) else readFileRawSaf(path)
+    }
+
+    private fun readFileRawDirect(path: String): String? {
+        val file = resolveDirectFile(path.trim('/')) ?: return null
+        if (!file.isFile) return null
+        return try {
+            file.readText(Charsets.UTF_8)
+        } catch (_: Exception) { null }
+    }
+
+    private fun readFileRawSaf(path: String): String? {
         val doc = resolvePath(path.trim('/')) ?: return null
         if (doc.isDirectory) return null
-
         return try {
             context.contentResolver.openInputStream(doc.uri)
                 ?.bufferedReader()
                 ?.use { it.readText() }
-        } catch (_: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 
-    /**
-     * 查看文件指定范围内容（优化版，适合大文件）
-     * @param path 相对于项目根目录的文件路径
-     * @param offset 起始行号（1-based）
-     * @param limit 最大读取行数
-     * @return 带行号的文件内容
-     */
     fun viewFile(path: String, offset: Int = 1, limit: Int = 100): String {
         val text = readFileRaw(path) ?: return "File not found: $path"
         val allLines = text.lines()
         val totalLines = allLines.size
         val startIdx = (offset - 1).coerceIn(0, totalLines)
         val endIdx = (startIdx + limit).coerceAtMost(totalLines)
-        
+
         if (startIdx >= totalLines) {
             return "File has $totalLines lines. Cannot start at line $offset."
         }
-        
+
         val lines = allLines.subList(startIdx, endIdx)
         val lineNumWidth = totalLines.toString().length
-        
+
         return buildString {
             appendLine("// File: $path")
             appendLine("// Lines ${startIdx + 1}-$endIdx of $totalLines")
@@ -274,19 +466,31 @@ class FileManager(private val context: Context) {
         }.trimEnd()
     }
 
-    /**
-     * 写入文件内容
-     * @param path 相对于项目根目录的文件路径
-     * @param content 要写入的内容
-     * @return 操作结果描述
-     */
     fun writeFile(path: String, content: String): String {
+        return if (isDirectMode) writeFileDirect(path, content) else writeFileSaf(path, content)
+    }
+
+    private fun writeFileDirect(path: String, content: String): String {
+        val err = validatePath(path)
+        if (err != null) return err
+
+        val file = resolveDirectFile(path.trim().trim('/')) ?: return "No storage root set."
+        return try {
+            file.parentFile?.mkdirs()
+            file.writeText(content, Charsets.UTF_8)
+            notifyFileSystemChange(file.absolutePath)
+            "File written: $path (${content.lines().size} lines)"
+        } catch (e: Exception) {
+            "Failed to write file: ${e.message}"
+        }
+    }
+
+    private fun writeFileSaf(path: String, content: String): String {
         val root = rootDocFile ?: return "No project folder is open."
+        val err = validatePath(path)
+        if (err != null) return err
 
         return try {
-            val pathErr = validatePath(path)
-            if (pathErr != null) return pathErr
-
             val trimmedPath = path.trim().trim('/')
             val fileName = trimmedPath.substringAfterLast('/')
             val parentPath = trimmedPath.substringBeforeLast('/', "")
@@ -295,7 +499,6 @@ class FileManager(private val context: Context) {
                 ensureDirectory(parentPath) ?: return "Failed to create parent directory: $parentPath"
             }
 
-            // 查找或创建文件
             var existingFile = parentDoc.findFile(fileName)
             if (existingFile == null) {
                 existingFile = parentDoc.listFiles().firstOrNull {
@@ -305,450 +508,42 @@ class FileManager(private val context: Context) {
             val targetDoc = existingFile ?: parentDoc.createFile("application/octet-stream", fileName)
                 ?: return "Failed to create file: $path"
 
-            val opName = if (existingFile != null) "overwrite" else "create"
-
-            // 直接写入，SAF 自身保证原子性
             context.contentResolver.openOutputStream(targetDoc.uri, "wt")?.use { out ->
                 out.write(content.toByteArray(Charsets.UTF_8))
             } ?: return "Failed to open output stream for: $path"
 
             notifyFileSystemChange(path)
-            "File written: $path (${content.lines().size} lines, $opName)"
+            "File written: $path (${content.lines().size} lines, ${if (existingFile != null) "overwrite" else "create"})"
         } catch (e: Exception) {
             "Failed to write file: ${e.message}"
         }
     }
 
-    /**
-     * 校验相对路径是否安全（防路径遍历攻击）
-     * @return 错误消息，null 表示安全
-     */
-    fun validatePath(relativePath: String): String? {
-        val trimmed = relativePath.trim()
-        if (trimmed.isEmpty() || trimmed == "/") return null
-        // 拆分后逐段检查，拒绝 .. 路径遍历
-        val segments = trimmed.trim('/').split('/')
-        for (seg in segments) {
-            if (seg == "..") return "Path traversal detected: '$relativePath' (contains '..')"
-        }
-        return null
-    }
+    // ================================================================
+    //  删除 & 创建目录
+    // ================================================================
 
-    /**
-     * 在项目中搜索文件内容
-     * 使用纯 DocumentFile API 递归遍历
-     * @param query 搜索关键词
-     * @param extension 可选的文件扩展名过滤
-     * @return 搜索结果字符串
-     */
-    fun searchInFiles(query: String, extension: String = ""): String {
-        val root = rootDocFile ?: return "No project folder is open."
-        if (query.isBlank()) return "Search query is empty."
-
-        return try {
-            val results = mutableListOf<String>()
-            val searchedFiles = mutableListOf<String>()
-            val queryLower = query.lowercase()
-            val extLower = extension.lowercase().trimStart('.')
-
-            searchRecursive(root, "", queryLower, extLower, results, searchedFiles)
-
-            if (results.isEmpty()) {
-                buildString {
-                    appendLine("No matches found for \"$query\"${if (extension.isNotBlank()) " in *.$extension files" else ""}.")
-                    appendLine("Searched ${searchedFiles.size} files.")
-                    if (searchedFiles.isNotEmpty()) {
-                        appendLine("Sample files searched:")
-                        searchedFiles.take(10).forEach { appendLine("  - $it") }
-                    }
-                }
-            } else {
-                buildString {
-                    appendLine("Found ${results.size} match${if (results.size != 1) "es" else ""} for \"$query\":")
-                    appendLine("---")
-                    results.take(50).forEach { appendLine(it) }
-                    if (results.size > 50) appendLine("... and ${results.size - 50} more matches")
-                }.trimEnd()
-            }
-        } catch (e: Exception) {
-            Log.e("FileManager", "searchInFiles failed", e)
-            "Search failed: ${e.message}"
-        }
-    }
-
-    // 检查文件是否存在
-    fun exists(path: String): Boolean {
-        return resolvePath(path.trim('/')) != null
-    }
-
-    // 判断路径是否为目录
-    fun isDirectory(path: String): Boolean {
-        return resolvePath(path.trim('/'))?.isDirectory ?: false
-    }
-
-    // 确保目录存在，不存在则逐级创建
-    private fun ensureDirectory(relativePath: String): DocumentFile? {
-        val root = rootDocFile ?: return null
-        if (relativePath.isBlank()) return root
-
-        return try {
-            var current = root
-            for (part in relativePath.trim().trim('/').split('/')) {
-                if (part.isEmpty()) continue
-                var child = current.findFile(part)
-                if (child == null) {
-                    child = current.listFiles().firstOrNull {
-                        it.name.equals(part, ignoreCase = true)
-                    }
-                }
-                current = child ?: (current.createDirectory(part) ?: return null)
-            }
-            current
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    // 纯 DocumentFile API 实现
-    private fun searchRecursive(
-        dirDoc: DocumentFile,
-        relativePath: String,
-        queryLower: String,
-        extLower: String,
-        results: MutableList<String>,
-        searchedFiles: MutableList<String>,
-    ) {
-        if (results.size >= 100) return
-
-        val children = dirDoc.listFiles()
-
-        for (doc in children) {
-            val name = doc.name ?: continue
-            if (name.startsWith(".")) continue
-
-            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
-
-            if (doc.isDirectory) {
-                // 递归搜索子目录，限制深度
-                if (currentPath.count { it == '/' } < 10) {
-                    searchRecursive(doc, currentPath, queryLower, extLower, results, searchedFiles)
-                }
-            } else {
-                val fileExt = name.substringAfterLast('.', "").lowercase()
-                if (extLower.isNotBlank()) {
-                    if (fileExt != extLower) continue
-                } else {
-                    if (fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
-                }
-
-                if (doc.length() > 512 * 1024) continue
-
-                searchedFiles.add(currentPath)
-
-                try {
-                    val text = context.contentResolver.openInputStream(doc.uri)
-                        ?.bufferedReader()
-                        ?.use { it.readText() }
-                        ?: continue
-
-                    text.lines().forEachIndexed { idx, line ->
-                        if (line.contains(queryLower, ignoreCase = true)) {
-                            val trimmed = line.trim().take(120)
-                            results.add("$currentPath:${idx + 1}:  $trimmed")
-                        }
-                    }
-                } catch (_: Exception) {
-                    // 跳过无法读取的文件
-                }
-
-                if (results.size >= 100) return
-            }
-        }
-    }
-
-    /**
-     * Grep 搜索 - 正则表达式搜索文件内容
-     * @param pattern 正则表达式模式
-     * @param extension 文件扩展名过滤
-     * @param glob Glob 模式过滤
-     * @param ignoreCase 是否忽略大小写
-     * @param contextLines 上下文行数
-     * @return 搜索结果字符串
-     */
-    fun grep(
-        pattern: String,
-        extension: String = "",
-        glob: String = "",
-        ignoreCase: Boolean = true,
-        contextLines: Int = 2,
-    ): String {
-        val root = rootDocFile ?: return "No project folder is open."
-        if (pattern.isBlank()) return "Search pattern is empty."
-
-        return try {
-            val results = Collections.synchronizedList<GrepResult>(mutableListOf())
-            val searchedFiles = Collections.synchronizedList<String>(mutableListOf())
-            val regex = if (ignoreCase) Regex(pattern, RegexOption.IGNORE_CASE) else Regex(pattern)
-            val extLower = extension.lowercase().trimStart('.')
-
-            grepRecursive(root, "", regex, extLower, glob, results, searchedFiles, contextLines)
-
-            if (results.isEmpty()) {
-                buildString {
-                    appendLine("No matches found for pattern \"$pattern\"${if (extension.isNotBlank()) " in *.$extension files" else ""}.")
-                    appendLine("Searched ${searchedFiles.size} files.")
-                }
-            } else {
-                buildString {
-                    appendLine("Found ${results.size} match${if (results.size != 1) "es" else ""} for pattern \"$pattern\":")
-                    appendLine("---")
-                    results.take(30).forEach { result ->
-                        appendLine("${result.filePath}:${result.lineNumber}:")
-                        result.contextLines.forEach { (lineNum, line, isMatch) ->
-                            val marker = if (isMatch) ">>>" else "   "
-                            appendLine("$marker $lineNum: $line")
-                        }
-                        appendLine()
-                    }
-                    if (results.size > 30) appendLine("... and ${results.size - 30} more matches")
-                }.trimEnd()
-            }
-        } catch (e: Exception) {
-            Log.e("FileManager", "grep failed", e)
-            "Search failed: ${e.message}"
-        }
-    }
-
-    companion object {
-        private val grepPool = Executors.newWorkStealingPool(
-            Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
-        )
-    }
-
-    // grep 内部结果类型
-    private data class GrepResult(
-        val filePath: String,
-        val lineNumber: Int,
-        val contextLines: List<Triple<Int, String, Boolean>>
-    )
-
-    private fun grepRecursive(
-        dirDoc: DocumentFile,
-        relativePath: String,
-        regex: Regex,
-        extLower: String,
-        glob: String,
-        results: MutableList<GrepResult>,
-        searchedFiles: MutableList<String>,
-        contextLines: Int,
-    ) {
-        if (results.size >= 50) return
-
-        val children = dirDoc.listFiles()
-
-        // 收集子目录和文件，跳过噪声目录
-        val subDirs = mutableListOf<DocumentFile>()
-        val fileTasks = mutableListOf<DocumentFile>()
-
-        for (doc in children) {
-            val name = doc.name ?: continue
-            if (name.startsWith(".") && name.lowercase() !in skippedDirNames) continue
-
-            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
-
-            if (glob.isNotBlank() && !matchesGlob(name, glob)) continue
-
-            if (doc.isDirectory) {
-                if (name.lowercase() in skippedDirNames) continue
-                if (currentPath.count { it == '/' } >= 10) continue
-                subDirs.add(doc)
-            } else {
-                val fileExt = name.substringAfterLast('.', "").lowercase()
-                if (extLower.isNotBlank()) {
-                    if (fileExt != extLower) continue
-                } else {
-                    if (fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
-                }
-                if (doc.length() > 512 * 1024 || doc.length() == 0L) continue
-                fileTasks.add(doc)
-            }
-        }
-
-        // 并行搜索文件
-        if (fileTasks.isNotEmpty()) {
-            val futures = fileTasks.map { doc ->
-                CompletableFuture.runAsync({
-                    if (results.size >= 50) return@runAsync
-                    val name = doc.name ?: return@runAsync
-                    val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
-                    searchedFiles.add(currentPath)
-                    try {
-                        val text = context.contentResolver.openInputStream(doc.uri)
-                            ?.bufferedReader()?.use { it.readText() } ?: return@runAsync
-                        val lines = text.lines()
-                        for ((idx, line) in lines.withIndex()) {
-                            if (results.size >= 50) break
-                            if (regex.containsMatchIn(line)) {
-                                val lineNum = idx + 1
-                                val startIdx = maxOf(0, idx - contextLines)
-                                val endIdx = minOf(lines.size - 1, idx + contextLines)
-                                val ctx = (startIdx..endIdx).map { i ->
-                                    Triple(i + 1, lines[i].take(120), i == idx)
-                                }
-                                results.add(GrepResult(currentPath, lineNum, ctx))
-                            }
-                        }
-                    } catch (_: Exception) { }
-                }, grepPool)
-            }
-            CompletableFuture.allOf(*futures.toTypedArray()).join()
-        }
-
-        // 顺序递归子目录
-        for (subDir in subDirs) {
-            if (results.size >= 50) return
-            val name = subDir.name ?: continue
-            val nextPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
-            grepRecursive(subDir, nextPath, regex, extLower, glob, results, searchedFiles, contextLines)
-        }
-    }
-
-    private fun matchesGlob(filename: String, glob: String): Boolean {
-        val pattern = glob
-            .replace(".", "\\.")
-            .replace("**", "<<DOUBLESTAR>>")
-            .replace("*", "[^/]*")
-            .replace("?", "[^/]")
-            .replace("<<DOUBLESTAR>>", ".*")
-        return Regex(pattern).matches(filename)
-    }
-
-    // 语义向量检索 — 基于 TF-IDF + 余弦相似度
-    fun searchCodebase(query: String, targetDirectories: String = ""): String {
-        val root = rootDocFile ?: return "No project folder is open."
-        if (query.isBlank()) return "Search query is empty."
-
-        return try {
-            val targetDirs = if (targetDirectories.isBlank()) {
-                emptyList()
-            } else {
-                targetDirectories.split(",").map { it.trim().trim('/') }
-            }
-
-            val files = mutableListOf<FileContent>()
-            val dirsToSearch = if (targetDirs.isEmpty()) {
-                listOf(root to "")
-            } else {
-                targetDirs.mapNotNull { dir ->
-                    resolvePath(dir)?.let { it to dir }
-                }
-            }
-
-            dirsToSearch.forEach { (dirDoc, basePath) ->
-                collectFilesForSearch(dirDoc, basePath, files)
-            }
-
-            if (files.isEmpty()) return "No searchable files found."
-
-            val index = com.template.jh.core.search.VectorIndex()
-            files.forEach { file -> index.addDocument(file.path, file.content) }
-
-            val results = index.search(query)
-
-            if (results.isEmpty()) {
-                "未找到相关代码: $query\n搜索范围: ${files.size} 个文件, ${index.size} 个代码块\n" +
-                "提示: grep 工具可进行精确正则匹配, searchCodebase 更适合按功能描述探索代码"
-            } else {
-                buildString {
-                    appendLine("语义搜索结果: \"$query\"")
-                    appendLine("找到 ${results.size} 个相关文件:")
-                    appendLine("---")
-                    results.forEachIndexed { i, r ->
-                        val pct = (r.score * 100).toInt().coerceIn(0, 99)
-                        appendLine("[$pct%] ${r.filePath} (行 ${r.startLine}-${r.endLine})")
-                        if (r.snippet.isNotBlank()) {
-                            appendLine("片段:")
-                            r.snippet.lines().take(5).forEach { appendLine("  $it") }
-                        }
-                        if (i < results.size - 1) appendLine()
-                    }
-                }.trimEnd()
-            }
-        } catch (e: Exception) {
-            Log.e("FileManager", "searchCodebase failed", e)
-            "Search failed: ${e.message}"
-        }
-    }
-
-    private data class FileContent(val path: String, val content: String)
-
-    private fun collectFilesForSearch(dirDoc: DocumentFile, relativePath: String, files: MutableList<FileContent>) {
-        if (files.size >= 200) return
-
-        dirDoc.listFiles().forEach { doc ->
-            val name = doc.name ?: return@forEach
-            if (name.startsWith(".")) return@forEach
-
-            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
-
-            if (doc.isDirectory) {
-                if (currentPath.count { it == '/' } < 8) {
-                    collectFilesForSearch(doc, currentPath, files)
-                }
-            } else {
-                val fileExt = name.substringAfterLast('.', "").lowercase()
-                if (fileExt !in searchableExtensions) return@forEach
-                if (doc.length() > 256 * 1024) return@forEach
-
-                try {
-                    val text = context.contentResolver.openInputStream(doc.uri)
-                        ?.bufferedReader()
-                        ?.use { it.readText() }
-                        ?: return@forEach
-                    files.add(FileContent(currentPath, text))
-                } catch (_: Exception) { }
-            }
-        }
-    }
-
-    // 通知系统刷新文件，使文件管理器等外部应用可见
-    private fun notifyFileSystemChange(path: String) {
-        try {
-            val filePath = try {
-                // 尝试将 SAF 路径转为真实文件路径
-                resolvePath(path.trim('/'))?.uri?.let { uri ->
-                    val docId = android.provider.DocumentsContract.getDocumentId(uri)
-                    if (docId.startsWith("primary:")) {
-                        File(
-                            android.os.Environment.getExternalStorageDirectory(),
-                            docId.removePrefix("primary:")
-                        ).absolutePath
-                    } else null
-                }
-            } catch (_: Exception) { null }
-
-            if (filePath != null) {
-                MediaScannerConnection.scanFile(context, arrayOf(filePath), null, null)
-            }
-        } catch (_: Exception) { }
-    }
-
-    private fun formatSize(bytes: Long): String = when {
-        bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-        else -> "${"%.1f".format(bytes.toDouble() / (1024 * 1024))} MB"
-    }
-
-    // 删除文件或目录
     fun deleteFile(path: String): String {
-        val root = rootDocFile ?: return "No project folder is open."
+        return if (isDirectMode) deleteFileDirect(path) else deleteFileSaf(path)
+    }
 
+    private fun deleteFileDirect(path: String): String {
+        val file = resolveDirectFile(path.trim().trim('/')) ?: return "No storage root set."
+        if (!file.exists()) return "File or directory not found: $path"
         return try {
-            val target = resolvePath(path.trim('/'))
-                ?: return "File or directory not found: $path"
+            file.deleteRecursively()
+            notifyFileSystemChange(file.absolutePath)
+            "Deleted: $path"
+        } catch (e: Exception) {
+            "Failed to delete: ${e.message}"
+        }
+    }
 
-            val deleted = target.delete()
-            if (deleted) {
+    private fun deleteFileSaf(path: String): String {
+        val root = rootDocFile ?: return "No project folder is open."
+        return try {
+            val target = resolvePath(path.trim('/')) ?: return "File or directory not found: $path"
+            if (target.delete()) {
                 notifyFileSystemChange(path)
                 "Deleted: $path"
             } else {
@@ -759,26 +554,34 @@ class FileManager(private val context: Context) {
         }
     }
 
-    // 创建目录
     fun createDirectory(path: String): String {
-        val root = rootDocFile ?: return "No project folder is open."
+        return if (isDirectMode) createDirectoryDirect(path) else createDirectorySaf(path)
+    }
 
+    private fun createDirectoryDirect(path: String): String {
+        val file = resolveDirectFile(path.trim().trim('/')) ?: return "No storage root set."
+        if (file.exists()) return "Directory already exists: $path"
+        return try {
+            file.mkdirs()
+            notifyFileSystemChange(file.absolutePath)
+            "Directory created: $path"
+        } catch (e: Exception) {
+            "Failed to create directory: ${e.message}"
+        }
+    }
+
+    private fun createDirectorySaf(path: String): String {
+        val root = rootDocFile ?: return "No project folder is open."
         return try {
             val trimmedPath = path.trim().trim('/')
             if (trimmedPath.isEmpty()) return "Cannot create root directory"
-
-            if (resolvePath(trimmedPath) != null) {
-                return "Directory already exists: $path"
-            }
+            if (resolvePath(trimmedPath) != null) return "Directory already exists: $path"
 
             val parentPath = trimmedPath.substringBeforeLast('/', "")
             val dirName = trimmedPath.substringAfterLast('/')
 
-            val parentDoc = if (parentPath.isEmpty()) {
-                root
-            } else {
-                ensureDirectory(parentPath) ?: return "Failed to create parent directory: $parentPath"
-            }
+            val parentDoc = if (parentPath.isEmpty()) root
+            else ensureDirectory(parentPath) ?: return "Failed to create parent directory: $parentPath"
 
             val created = parentDoc.createDirectory(dirName)
             if (created != null) {
@@ -792,13 +595,520 @@ class FileManager(private val context: Context) {
         }
     }
 
-}
+    // ================================================================
+    //  查询
+    // ================================================================
 
-// 文件节点数据类
-data class FileNode(
-    val name: String,
-    val path: String,
-    val isDirectory: Boolean,
-    val size: Long,
-    val uri: Uri
-)
+    fun exists(path: String): Boolean {
+        return if (isDirectMode) {
+            resolveDirectFile(path.trim('/'))?.exists() ?: false
+        } else {
+            resolvePath(path.trim('/')) != null
+        }
+    }
+
+    fun isDirectory(path: String): Boolean {
+        return if (isDirectMode) {
+            resolveDirectFile(path.trim('/'))?.isDirectory ?: false
+        } else {
+            resolvePath(path.trim('/'))?.isDirectory ?: false
+        }
+    }
+
+    fun validatePath(relativePath: String): String? {
+        val trimmed = relativePath.trim()
+        if (trimmed.isEmpty() || trimmed == "/") return null
+        val segments = trimmed.trim('/').split('/')
+        for (seg in segments) {
+            if (seg == "..") return "Path traversal detected: '$relativePath' (contains '..')"
+        }
+        return null
+    }
+
+    // ================================================================
+    //  搜索
+    // ================================================================
+
+    fun searchInFiles(query: String, extension: String = ""): String {
+        return if (isDirectMode) searchInFilesDirect(query, extension) else searchInFilesSaf(query, extension)
+    }
+
+    private fun searchInFilesDirect(query: String, extension: String = ""): String {
+        val root = getProjectRootFile() ?: return "No storage root set."
+        if (query.isBlank()) return "Search query is empty."
+
+        val results = mutableListOf<String>()
+        val searchedFiles = mutableListOf<String>()
+        val queryLower = query.lowercase()
+        val extLower = extension.lowercase().trimStart('.')
+
+        searchRecursiveDirect(root, "", queryLower, extLower, results, searchedFiles)
+
+        return formatSearchResults(query, extension, results, searchedFiles)
+    }
+
+    private fun searchInFilesSaf(query: String, extension: String = ""): String {
+        val root = rootDocFile ?: return "No project folder is open."
+        if (query.isBlank()) return "Search query is empty."
+
+        val results = mutableListOf<String>()
+        val searchedFiles = mutableListOf<String>()
+        val queryLower = query.lowercase()
+        val extLower = extension.lowercase().trimStart('.')
+
+        searchRecursiveSaf(root, "", queryLower, extLower, results, searchedFiles)
+
+        return formatSearchResults(query, extension, results, searchedFiles)
+    }
+
+    private fun searchRecursiveDirect(
+        dir: File,
+        relativePath: String,
+        queryLower: String,
+        extLower: String,
+        results: MutableList<String>,
+        searchedFiles: MutableList<String>,
+    ) {
+        if (results.size >= 100) return
+        val children = dir.listFiles() ?: return
+        for (file in children) {
+            if (file.name.startsWith(".")) continue
+            val currentPath = if (relativePath.isEmpty()) file.name else "$relativePath/${file.name}"
+
+            if (file.isDirectory) {
+                if (currentPath.count { it == '/' } < 10) {
+                    searchRecursiveDirect(file, currentPath, queryLower, extLower, results, searchedFiles)
+                }
+            } else {
+                val fileExt = file.extension.lowercase()
+                if (extLower.isNotBlank() && fileExt != extLower) continue
+                if (extLower.isBlank() && fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
+                if (file.length() > 512 * 1024) continue
+
+                searchedFiles.add(currentPath)
+                try {
+                    file.readLines(Charsets.UTF_8).forEachIndexed { idx, line ->
+                        if (line.contains(queryLower, ignoreCase = true)) {
+                            results.add("$currentPath:${idx + 1}:  ${line.trim().take(120)}")
+                        }
+                    }
+                } catch (_: Exception) {}
+                if (results.size >= 100) return
+            }
+        }
+    }
+
+    private fun searchRecursiveSaf(
+        dirDoc: DocumentFile,
+        relativePath: String,
+        queryLower: String,
+        extLower: String,
+        results: MutableList<String>,
+        searchedFiles: MutableList<String>,
+    ) {
+        if (results.size >= 100) return
+        val children = dirDoc.listFiles()
+
+        for (doc in children) {
+            val name = doc.name ?: continue
+            if (name.startsWith(".")) continue
+
+            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+
+            if (doc.isDirectory) {
+                if (currentPath.count { it == '/' } < 10) {
+                    searchRecursiveSaf(doc, currentPath, queryLower, extLower, results, searchedFiles)
+                }
+            } else {
+                val fileExt = name.substringAfterLast('.', "").lowercase()
+                if (extLower.isNotBlank() && fileExt != extLower) continue
+                if (extLower.isBlank() && fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
+                if (doc.length() > 512 * 1024) continue
+
+                searchedFiles.add(currentPath)
+                try {
+                    val text = context.contentResolver.openInputStream(doc.uri)
+                        ?.bufferedReader()?.use { it.readText() } ?: continue
+                    text.lines().forEachIndexed { idx, line ->
+                        if (line.contains(queryLower, ignoreCase = true)) {
+                            results.add("$currentPath:${idx + 1}:  ${line.trim().take(120)}")
+                        }
+                    }
+                } catch (_: Exception) {}
+                if (results.size >= 100) return
+            }
+        }
+    }
+
+    private fun formatSearchResults(
+        query: String, extension: String,
+        results: List<String>, searchedFiles: List<String>,
+    ): String {
+        if (results.isEmpty()) {
+            return buildString {
+                appendLine("No matches found for \"$query\"${if (extension.isNotBlank()) " in *.$extension files" else ""}.")
+                appendLine("Searched ${searchedFiles.size} files.")
+                if (searchedFiles.isNotEmpty()) {
+                    appendLine("Sample files searched:")
+                    searchedFiles.take(10).forEach { appendLine("  - $it") }
+                }
+            }
+        }
+        return buildString {
+            appendLine("Found ${results.size} match${if (results.size != 1) "es" else ""} for \"$query\":")
+            appendLine("---")
+            results.take(50).forEach { appendLine(it) }
+            if (results.size > 50) appendLine("... and ${results.size - 50} more matches")
+        }.trimEnd()
+    }
+
+    // ================================================================
+    //  Grep 搜索
+    // ================================================================
+
+    companion object {
+        private val grepPool = Executors.newWorkStealingPool(
+            Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
+        )
+    }
+
+    private data class GrepResult(
+        val filePath: String,
+        val lineNumber: Int,
+        val contextLines: List<Triple<Int, String, Boolean>>
+    )
+
+    fun grep(
+        pattern: String,
+        extension: String = "",
+        glob: String = "",
+        ignoreCase: Boolean = true,
+        contextLines: Int = 2,
+    ): String {
+        return if (isDirectMode) grepDirect(pattern, extension, glob, ignoreCase, contextLines)
+        else grepSaf(pattern, extension, glob, ignoreCase, contextLines)
+    }
+
+    private fun grepDirect(
+        pattern: String, extension: String, glob: String,
+        ignoreCase: Boolean, contextLines: Int,
+    ): String {
+        val root = getProjectRootFile() ?: return "No storage root set."
+        if (pattern.isBlank()) return "Search pattern is empty."
+        val results = Collections.synchronizedList<GrepResult>(mutableListOf())
+        val searchedFiles = Collections.synchronizedList<String>(mutableListOf())
+        val regex = if (ignoreCase) Regex(pattern, RegexOption.IGNORE_CASE) else Regex(pattern)
+        val extLower = extension.lowercase().trimStart('.')
+
+        grepRecursiveDirect(root, "", regex, extLower, glob, results, searchedFiles, contextLines)
+
+        return formatGrepResults(pattern, extension, results, searchedFiles)
+    }
+
+    private fun grepSaf(
+        pattern: String, extension: String, glob: String,
+        ignoreCase: Boolean, contextLines: Int,
+    ): String {
+        val root = rootDocFile ?: return "No project folder is open."
+        if (pattern.isBlank()) return "Search pattern is empty."
+        val results = Collections.synchronizedList<GrepResult>(mutableListOf())
+        val searchedFiles = Collections.synchronizedList<String>(mutableListOf())
+        val regex = if (ignoreCase) Regex(pattern, RegexOption.IGNORE_CASE) else Regex(pattern)
+        val extLower = extension.lowercase().trimStart('.')
+
+        grepRecursiveSaf(root, "", regex, extLower, glob, results, searchedFiles, contextLines)
+
+        return formatGrepResults(pattern, extension, results, searchedFiles)
+    }
+
+    private fun grepRecursiveDirect(
+        dir: File, relativePath: String, regex: Regex,
+        extLower: String, glob: String,
+        results: MutableList<GrepResult>, searchedFiles: MutableList<String>,
+        contextLines: Int,
+    ) {
+        if (results.size >= 50) return
+        val children = dir.listFiles() ?: return
+
+        val subDirs = mutableListOf<File>()
+        val fileTasks = mutableListOf<File>()
+
+        for (file in children) {
+            val name = file.name
+            if (name.startsWith(".") && name.lowercase() !in skippedDirNames) continue
+            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+            if (glob.isNotBlank() && !matchesGlob(name, glob)) continue
+
+            if (file.isDirectory) {
+                if (name.lowercase() in skippedDirNames) continue
+                if (currentPath.count { it == '/' } >= 10) continue
+                subDirs.add(file)
+            } else {
+                val fileExt = file.extension.lowercase()
+                if (extLower.isNotBlank() && fileExt != extLower) continue
+                if (extLower.isBlank() && fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
+                if (file.length() > 512 * 1024 || file.length() == 0L) continue
+                fileTasks.add(file)
+            }
+        }
+
+        for (file in fileTasks) {
+            if (results.size >= 50) break
+            val name = file.name
+            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+            searchedFiles.add(currentPath)
+            try {
+                val lines = file.readLines(Charsets.UTF_8)
+                for ((idx, line) in lines.withIndex()) {
+                    if (results.size >= 50) break
+                    if (regex.containsMatchIn(line)) {
+                        val lineNum = idx + 1
+                        val startIdx = maxOf(0, idx - contextLines)
+                        val endIdx = minOf(lines.size - 1, idx + contextLines)
+                        val ctx = (startIdx..endIdx).map { i ->
+                            Triple(i + 1, lines[i].take(120), i == idx)
+                        }
+                        results.add(GrepResult(currentPath, lineNum, ctx))
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        for (sdir in subDirs) {
+            val currentPath = if (relativePath.isEmpty()) sdir.name else "$relativePath/${sdir.name}"
+            grepRecursiveDirect(sdir, currentPath, regex, extLower, glob, results, searchedFiles, contextLines)
+        }
+    }
+
+    private fun grepRecursiveSaf(
+        dirDoc: DocumentFile, relativePath: String, regex: Regex,
+        extLower: String, glob: String,
+        results: MutableList<GrepResult>, searchedFiles: MutableList<String>,
+        contextLines: Int,
+    ) {
+        if (results.size >= 50) return
+        val children = dirDoc.listFiles()
+
+        val subDirs = mutableListOf<DocumentFile>()
+        val fileTasks = mutableListOf<DocumentFile>()
+
+        for (doc in children) {
+            val name = doc.name ?: continue
+            if (name.startsWith(".") && name.lowercase() !in skippedDirNames) continue
+            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+            if (glob.isNotBlank() && !matchesGlob(name, glob)) continue
+
+            if (doc.isDirectory) {
+                if (name.lowercase() in skippedDirNames) continue
+                if (currentPath.count { it == '/' } >= 10) continue
+                subDirs.add(doc)
+            } else {
+                val fileExt = name.substringAfterLast('.', "").lowercase()
+                if (extLower.isNotBlank() && fileExt != extLower) continue
+                if (extLower.isBlank() && fileExt.isNotEmpty() && fileExt !in searchableExtensions) continue
+                if (doc.length() > 512 * 1024 || doc.length() == 0L) continue
+                fileTasks.add(doc)
+            }
+        }
+
+        for (doc in fileTasks) {
+            if (results.size >= 50) break
+            val name = doc.name ?: continue
+            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+            searchedFiles.add(currentPath)
+            try {
+                val lines = context.contentResolver.openInputStream(doc.uri)
+                    ?.bufferedReader()?.use { it.readText() }?.lines() ?: continue
+                for ((idx, line) in lines.withIndex()) {
+                    if (results.size >= 50) break
+                    if (regex.containsMatchIn(line)) {
+                        val lineNum = idx + 1
+                        val startIdx = maxOf(0, idx - contextLines)
+                        val endIdx = minOf(lines.size - 1, idx + contextLines)
+                        val ctx = (startIdx..endIdx).map { i ->
+                            Triple(i + 1, lines[i].take(120), i == idx)
+                        }
+                        results.add(GrepResult(currentPath, lineNum, ctx))
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        for (sdir in subDirs) {
+            if (results.size >= 50) continue
+            val currentPath = if (relativePath.isEmpty()) sdir.name ?: "" else "$relativePath/${sdir.name ?: ""}"
+            grepRecursiveSaf(sdir, currentPath, regex, extLower, glob, results, searchedFiles, contextLines)
+        }
+    }
+
+    private fun formatGrepResults(
+        pattern: String, extension: String,
+        results: List<GrepResult>, searchedFiles: List<String>,
+    ): String {
+        if (results.isEmpty()) {
+            return buildString {
+                appendLine("No matches found for pattern \"$pattern\"${if (extension.isNotBlank()) " in *.$extension files" else ""}.")
+                appendLine("Searched ${searchedFiles.size} files.")
+            }
+        }
+        return buildString {
+            appendLine("Found ${results.size} match${if (results.size != 1) "es" else ""} for pattern \"$pattern\":")
+            appendLine("---")
+            results.take(30).forEach { result ->
+                appendLine("${result.filePath}:${result.lineNumber}:")
+                result.contextLines.forEach { (lineNum, line, isMatch) ->
+                    val marker = if (isMatch) ">>>" else "   "
+                    appendLine("$marker $lineNum: $line")
+                }
+                appendLine()
+            }
+            if (results.size > 30) appendLine("... and ${results.size - 30} more matches")
+        }.trimEnd()
+    }
+
+    // ================================================================
+    //  语义搜索 (VectorIndex)
+    // ================================================================
+
+    fun searchCodebase(query: String, targetDirectories: String = ""): String {
+        val rootContent = if (isDirectMode) {
+            getProjectRootFile() ?: return "No storage root set."
+        } else {
+            rootDocFile ?: return "No project folder is open."
+        }
+
+        return try {
+            val files = mutableListOf<FileContent>()
+            if (isDirectMode && rootContent is File) {
+                collectFilesForSearchDirect(rootContent, "", files)
+            } else if (!isDirectMode && rootContent is DocumentFile) {
+                collectFilesForSearchSaf(rootContent, "", files)
+            }
+
+            if (files.isEmpty()) return "No searchable files found."
+
+            val index = com.template.jh.core.search.VectorIndex()
+            files.forEach { file -> index.addDocument(file.path, file.content) }
+            val results = index.search(query)
+
+            if (results.isEmpty()) {
+                "未找到相关代码: $query\n搜索范围: ${files.size} 个文件, ${index.size} 个代码块\n" +
+                        "建议：\n" +
+                        "  1. 使用更精确的关键词\n" +
+                        "  2. 使用 grep 搜索（正则表达式）\n" +
+                        "  3. 检查文件是否包含可搜索的代码"
+            } else {
+                val maxResults = 10
+                buildString {
+                    appendLine("相关代码（语义搜索）: $query")
+                    appendLine("搜索范围: ${files.size} 个文件, ${index.size} 个代码块")
+                    appendLine("---")
+                    results.take(maxResults).forEachIndexed { i, r ->
+                        appendLine("${i + 1}. ${r.filePath} (相似度: ${"%.2f".format(r.score)})")
+                        r.snippet.lines().take(10).forEach { line ->
+                            appendLine("   $line")
+                        }
+                        appendLine()
+                    }
+                    if (results.size > maxResults) {
+                        appendLine("... 还有 ${results.size - maxResults} 个结果")
+                    }
+                }.trimEnd()
+            }
+        } catch (e: Exception) {
+            "Search failed: ${e.message}"
+        }
+    }
+
+    private data class FileContent(val path: String, val content: String)
+
+    private fun collectFilesForSearchDirect(
+        dir: File, relativePath: String, files: MutableList<FileContent>,
+    ) {
+        if (files.size >= 200) return
+        val children = dir.listFiles() ?: return
+        for (file in children) {
+            if (file.name.startsWith(".")) continue
+            val currentPath = if (relativePath.isEmpty()) file.name else "$relativePath/${file.name}"
+            if (file.isDirectory) {
+                if (currentPath.count { it == '/' } < 8) {
+                    collectFilesForSearchDirect(file, currentPath, files)
+                }
+            } else {
+                val fileExt = file.extension.lowercase()
+                if (fileExt !in searchableExtensions) continue
+                if (file.length() > 256 * 1024) continue
+                try {
+                    files.add(FileContent(currentPath, file.readText(Charsets.UTF_8)))
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun collectFilesForSearchSaf(
+        dirDoc: DocumentFile, relativePath: String, files: MutableList<FileContent>,
+    ) {
+        if (files.size >= 200) return
+        dirDoc.listFiles().forEach { doc ->
+            val name = doc.name ?: return@forEach
+            if (name.startsWith(".")) return@forEach
+            val currentPath = if (relativePath.isEmpty()) name else "$relativePath/$name"
+            if (doc.isDirectory) {
+                if (currentPath.count { it == '/' } < 8) {
+                    collectFilesForSearchSaf(doc, currentPath, files)
+                }
+            } else {
+                val fileExt = name.substringAfterLast('.', "").lowercase()
+                if (fileExt !in searchableExtensions) return@forEach
+                if (doc.length() > 256 * 1024) return@forEach
+                try {
+                    val text = context.contentResolver.openInputStream(doc.uri)
+                        ?.bufferedReader()?.use { it.readText() } ?: return@forEach
+                    files.add(FileContent(currentPath, text))
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    // ================================================================
+    //  工具方法
+    // ================================================================
+
+    private fun ensureDirectory(relativePath: String): DocumentFile? {
+        val root = rootDocFile ?: return null
+        if (relativePath.isBlank()) return root
+        return try {
+            var current = root
+            for (part in relativePath.trim().trim('/').split('/')) {
+                if (part.isEmpty()) continue
+                var child = current.findFile(part)
+                if (child == null) {
+                    child = current.listFiles().firstOrNull {
+                        it.name.equals(part, ignoreCase = true)
+                    }
+                }
+                current = child ?: (current.createDirectory(part) ?: return null)
+            }
+            current
+        } catch (_: Exception) { null }
+    }
+
+    private fun notifyFileSystemChange(path: String) {
+        try {
+            MediaScannerConnection.scanFile(context, arrayOf(path), null, null)
+        } catch (_: Exception) {}
+    }
+
+    private fun formatSize(bytes: Long): String = when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+        else -> "${"%.1f".format(bytes.toDouble() / (1024 * 1024))} MB"
+    }
+
+    private fun matchesGlob(name: String, glob: String): Boolean {
+        return try {
+            val regex = glob.replace(".", "\\.").replace("*", ".*")
+            name.matches(Regex(regex))
+        } catch (_: Exception) { false }
+    }
+}

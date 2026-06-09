@@ -1,6 +1,9 @@
 package com.template.jh.screens.home
 
+import android.Manifest
 import android.net.Uri
+import android.content.pm.PackageManager
+import android.os.Environment
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Row
@@ -20,13 +23,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import androidx.documentfile.provider.DocumentFile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.template.jh.R
 import com.template.jh.core.ai.ChatViewModel
 import com.template.jh.core.ai.FileOperationEvents
@@ -56,9 +62,6 @@ fun HomeScreen(
 
     var selectedTab by remember { mutableStateOf<SidebarTab?>(null) }
     var isSettingsOpen by remember { mutableStateOf(false) }
-    var autoOpened by remember { mutableStateOf(false) }
-    // TODO: 终端功能已移除，后续恢复时取消下方注释
-    // var isTerminalVisible by remember { mutableStateOf(false) }
     var cursorLine by remember { mutableIntStateOf(0) }
 
     val fileManager = org.koin.java.KoinJavaComponent.get<FileManager>(FileManager::class.java)
@@ -66,7 +69,36 @@ fun HomeScreen(
     val audioPlaybackState = remember { com.template.jh.screens.home.components.AudioPlaybackState() }
     val videoPlaybackState = remember { com.template.jh.screens.home.components.VideoPlaybackState() }
 
-    // Tab 持久化 - 使用相对路径
+    // 权限请求状态（EdgeGesture 模式：启动 Intent 后轮询检测授权结果）
+    var permissionPolling by remember { mutableStateOf(false) }
+
+    // MANAGE_EXTERNAL_STORAGE → 系统设置 Intent
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        // 从系统设置返回后，启动轮询等待授权
+        permissionPolling = true
+    }
+
+    // EdgeGesture 模式：轮询等待授权，一旦通过立即打开存储根目录
+    LaunchedEffect(permissionPolling) {
+        if (!permissionPolling) return@LaunchedEffect
+        // 持续轮询（EdgeGesture 的 monitorPermission 模式，500ms 间隔）
+        while (true) {
+            if (Environment.isExternalStorageManager()) {
+                viewModel.openDirectStorage()
+                chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
+                selectedTab = SidebarTab.Explorer
+                permissionPolling = false
+                break
+            }
+            kotlinx.coroutines.delay(500)
+        }
+    }
+
+    // 首次启动不做任何权限操作，等用户点"授权文件管理"按钮
+
+    // Tab 持久化
     editorState.onSaveTabs = {
         val fileTabs = editorState.tabs.filter { it.type == TabType.File || it.type == TabType.Image
             || it.type == TabType.Audio || it.type == TabType.Video || it.type == TabType.Archive }
@@ -161,27 +193,24 @@ fun HomeScreen(
         }
     }
 
-    val folderPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri: Uri? ->
-        uri?.let {
-            viewModel.openFolder(it)
-            chatViewModel.setProjectRoot(it)
-            viewModel.saveLastOpenedFolder(it.toString())
+    /** 授权文件管理按钮：有权限直接打开，无权限跳系统设置（EdgeGesture 模式：Intent + 轮询检测） */
+    val onOpenFolder: () -> Unit = {
+        if (Environment.isExternalStorageManager()) {
+            viewModel.openDirectStorage()
+            chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
             selectedTab = SidebarTab.Explorer
+        } else {
+            val intent = android.content.Intent(
+                android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
+            ).apply {
+                data = android.net.Uri.parse("package:${context.packageName}")
+            }
+            storagePermissionLauncher.launch(intent)
         }
     }
 
-    val lastFolderUri by viewModel.lastOpenedFolderUri.collectAsState()
-    LaunchedEffect(lastFolderUri) {
-        val uri = lastFolderUri
-        if (!autoOpened && !uri.isNullOrBlank()) {
-            autoOpened = true
-            viewModel.openFolder(Uri.parse(uri))
-            chatViewModel.setProjectRoot(Uri.parse(uri))
-            selectedTab = SidebarTab.Explorer
-        }
-    }
+    // 检查是否已经在直接访问模式下打开了存储
+    val isStorageActive = homeState.openedFolderName != null
 
     val closeFolder: () -> Unit = {
         viewModel.closeFolder()
@@ -190,7 +219,6 @@ fun HomeScreen(
         editorState.editorContent.clear()
         isSettingsOpen = false
         selectedTab = null
-        autoOpened = false
     }
 
     var closeConfirmPath by remember { mutableStateOf<String?>(null) }
@@ -199,12 +227,73 @@ fun HomeScreen(
     var showRecentFilesDialog by remember { mutableStateOf(false) }
     var newFileName by remember { mutableStateOf("") }
     var newFolderName by remember { mutableStateOf("") }
-
-    val recentFolderName = remember(lastFolderUri, homeState.openedFolderName) {
-        if (homeState.openedFolderName != null) null
-        else if (!lastFolderUri.isNullOrBlank()) {
-            runCatching { DocumentFile.fromTreeUri(context, Uri.parse(lastFolderUri))?.name ?: "最近文件夹" }.getOrDefault("最近文件夹")
-        } else null
+    // 工具栏音乐播放
+    var scannedAudioTracks by remember { mutableStateOf<List<com.template.jh.screens.home.components.AudioTrack>>(emptyList()) }
+    var audioScanRequested by remember { mutableStateOf(false) }
+    var hasAudioPermission by remember {
+        mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(
+            context, Manifest.permission.READ_MEDIA_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED)
+    }
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasAudioPermission = granted
+        if (granted) audioScanRequested = true
+    }
+    val audioScanScope = rememberCoroutineScope()
+    LaunchedEffect(audioScanRequested) {
+        if (audioScanRequested && hasAudioPermission && scannedAudioTracks.isEmpty()) {
+            withContext(Dispatchers.IO) {
+                scannedAudioTracks = com.template.jh.screens.home.components.AudioPlaybackState.scanDeviceAudio(context)
+            }
+        }
+    }
+    val onPlayAudioTrack: (com.template.jh.screens.home.components.AudioTrack) -> Unit = { track ->
+        try {
+            if (audioPlaybackState.exoPlayer == null) {
+                val player = androidx.media3.exoplayer.ExoPlayer.Builder(context).build()
+                player.addListener(object : androidx.media3.common.Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
+                            val pl = audioPlaybackState.playlist
+                            val ci = audioPlaybackState.currentIndex
+                            if (pl.size > 1) {
+                                val next = (ci + 1) % pl.size
+                                val nextTrack = pl[next]
+                                onPlayAudioTrack(nextTrack)
+                            } else {
+                                audioPlaybackState.isPlaying = false
+                                audioPlaybackState.currentPosition = 0f
+                                player.seekTo(0)
+                            }
+                        }
+                    }
+                })
+                audioPlaybackState.exoPlayer = player
+            }
+            val uri = if (track.path.startsWith("content://")) android.net.Uri.parse(track.path) else android.net.Uri.fromFile(java.io.File(track.path))
+            audioPlaybackState.exoPlayer?.apply {
+                stop()
+                clearMediaItems()
+                setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
+                prepare()
+                play()
+            }
+            audioPlaybackState.currentAudioPath = track.path
+            audioPlaybackState.currentSongName = track.name
+            audioPlaybackState.isPlaying = true
+            audioPlaybackState.playlist = scannedAudioTracks
+            audioPlaybackState.currentIndex = scannedAudioTracks.indexOfFirst { it.path == track.path }.coerceAtLeast(0)
+            audioScanScope.launch(Dispatchers.IO) {
+                audioPlaybackState.lyrics = com.template.jh.screens.home.components.LyricsParser.loadFromFile(context, track.path)
+            }
+        } catch (e: Exception) {
+            audioPlaybackState.errorMsg = e.message
+        }
+    }
+    val onStopAudio: () -> Unit = {
+        audioPlaybackState.release()
     }
 
     Scaffold(
@@ -221,13 +310,19 @@ fun HomeScreen(
                 onLoadModel = { chatViewModel.loadModel(it) },
                 onBrowseModelFile = { filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
                 onSwitchCloudProfile = { chatViewModel.switchCloudProfile(it) },
-                // TODO: 终端功能已移除，取消下行注释恢复
-                // onTerminalClick = { isTerminalVisible = !isTerminalVisible },
                 onCloseFolder = closeFolder,
                 onOpenFile = { fileOpenLauncher.launch(arrayOf("*/*")) },
-                onOpenFolder = { folderPickerLauncher.launch(null) },
+                onOpenFolder = onOpenFolder,
                 onRecentFiles = { showRecentFilesDialog = true },
                 onSaveAll = { editorState.tabs.filter { it.type == TabType.File }.forEach { editorState.saveFile(it.id) } },
+                audioPlaybackState = audioPlaybackState,
+                scannedAudioTracks = scannedAudioTracks,
+                onScanMusic = {
+                    if (hasAudioPermission) audioScanRequested = true
+                    else audioPermissionLauncher.launch(Manifest.permission.READ_MEDIA_AUDIO)
+                },
+                onPlayAudioTrack = onPlayAudioTrack,
+                onStopAudio = onStopAudio,
             )
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -248,23 +343,28 @@ fun HomeScreen(
                     chatViewModel = chatViewModel,
                     editorState = editorState,
                     onFileClick = { fileItem ->
+                        // 路径优先级: filePath(绝对) > relativePath > content:// URI
+                        val filePath = when {
+                            fileItem.filePath.isNotEmpty() -> fileItem.filePath
+                            fileItem.relativePath.isNotEmpty() -> fileItem.relativePath
+                            else -> fileItem.uri.toString()
+                        }
                         when (FileTypeUtil.openMode(fileItem.name, fileItem.size)) {
                             FileOpenMode.IMAGE -> {
-                                editorState.openTab(TabItem(fileItem.uri.toString(), fileItem.name, TabType.Image))
+                                editorState.openTab(TabItem(filePath, fileItem.name, TabType.Image))
                             }
                             FileOpenMode.AUDIO -> {
-                                editorState.openTab(TabItem(fileItem.uri.toString(), fileItem.name, TabType.Audio))
+                                editorState.openTab(TabItem(filePath, fileItem.name, TabType.Audio))
                             }
                             FileOpenMode.VIDEO -> {
-                                editorState.openTab(TabItem(fileItem.uri.toString(), fileItem.name, TabType.Video))
+                                editorState.openTab(TabItem(filePath, fileItem.name, TabType.Video))
                             }
                             FileOpenMode.ARCHIVE -> {
-                                editorState.openTab(TabItem(fileItem.uri.toString(), fileItem.name, TabType.Archive))
+                                editorState.openTab(TabItem(filePath, fileItem.name, TabType.Archive))
                             }
                             FileOpenMode.TEXT -> {
-                                val path = if (fileItem.relativePath.isNotEmpty()) fileItem.relativePath else fileItem.uri.toString()
-                                editorState.editorContent.remove(path)
-                                editorState.openFileTab(path, fileItem.name)
+                                editorState.editorContent.remove(filePath)
+                                editorState.openFileTab(filePath, fileItem.name)
                             }
                             FileOpenMode.UNSUPPORTED -> {
                                 val msg = if (fileItem.size > FileTypeUtil.MAX_TEXT_SIZE) {
@@ -278,8 +378,12 @@ fun HomeScreen(
                     },
                     onAddToConversation = { fileItem ->
                         if (!fileItem.isDirectory) {
-                            val path = if (fileItem.relativePath.isNotEmpty()) fileItem.relativePath else fileItem.uri.toString()
-                            chatViewModel.attachFile(path, fileItem.name)
+                            val attachPath = when {
+                                fileItem.filePath.isNotEmpty() -> fileItem.filePath
+                                fileItem.relativePath.isNotEmpty() -> fileItem.relativePath
+                                else -> fileItem.uri.toString()
+                            }
+                            chatViewModel.attachFile(attachPath, fileItem.name)
                         }
                     },
                     onOpenFileTab = { editorState.openFileTab(it) },
@@ -288,13 +392,13 @@ fun HomeScreen(
             isLeftPanelVisible = selectedTab != null,
             centerContent = {
                 MainContentArea(
-                    onOpenFolder = { folderPickerLauncher.launch(null) },
+                    onOpenFolder = onOpenFolder,
                     chatViewModel = chatViewModel,
                     audioPlaybackState = audioPlaybackState,
                     videoPlaybackState = videoPlaybackState,
                     openedFolderName = homeState.openedFolderName,
-                    recentFolderName = recentFolderName,
-                    onOpenRecentFolder = { folderPickerLauncher.launch(null) },
+                    recentFolderName = null,
+                    onOpenRecentFolder = onOpenFolder,
                     tabs = editorState.tabs,
                     activeTabIndex = editorState.activeTabIndex,
                     onSelectTab = { idx ->
@@ -303,8 +407,7 @@ fun HomeScreen(
                     },
                     onCloseTab = { idx ->
                         val tab = editorState.tabs.getOrNull(idx) ?: return@MainContentArea
-                        if (tab.type == TabType.Audio) audioPlaybackState.release()
-                        else if (tab.type == TabType.Video) videoPlaybackState.release()
+                        if (tab.type == TabType.Video) videoPlaybackState.release()
                         if (tab.id == editorState.settingsTabId) {
                             editorState.closeSettingsTab()
                             isSettingsOpen = false
@@ -314,11 +417,7 @@ fun HomeScreen(
                             editorState.closeTab(idx)
                         }
                     },
-                    // TODO: 终端功能已移除，取消下行注释恢复
-                    // isTerminalVisible = isTerminalVisible,
-                    // onTerminalClose = { isTerminalVisible = false },
                     onCloseAllTabs = {
-                        audioPlaybackState.release()
                         videoPlaybackState.release()
                         editorState.closeAllTabs(); isSettingsOpen = false; viewModel.saveOpenedTabs(emptyList())
                     },
@@ -368,7 +467,7 @@ fun HomeScreen(
             onDismissRequest = { showNewFileDialog = false },
             title = { Text(stringResource(R.string.dialog_new_file_title)) },
             text = { OutlinedTextField(value = newFileName, onValueChange = { newFileName = it }, placeholder = { Text(stringResource(R.string.dialog_new_file_name_hint)) }, singleLine = true) },
-            confirmButton = { TextButton(onClick = { val name = newFileName.trim(); if (name.isNotEmpty()) { homeState.openedFolderUri?.let { viewModel.createFile(Uri.parse(it), name, false) }; selectedTab = SidebarTab.Explorer; showNewFileDialog = false } }) { Text(stringResource(R.string.dialog_confirm)) } },
+            confirmButton = { TextButton(onClick = { val name = newFileName.trim(); if (name.isNotEmpty()) { viewModel.createFile("", name, false); selectedTab = SidebarTab.Explorer; showNewFileDialog = false } }) { Text(stringResource(R.string.dialog_confirm)) } },
             dismissButton = { TextButton(onClick = { showNewFileDialog = false }) { Text(stringResource(R.string.chat_cancel)) } },
         )
     }
@@ -377,7 +476,7 @@ fun HomeScreen(
             onDismissRequest = { showNewFolderDialog = false },
             title = { Text(stringResource(R.string.dialog_new_folder_title)) },
             text = { OutlinedTextField(value = newFolderName, onValueChange = { newFolderName = it }, placeholder = { Text(stringResource(R.string.dialog_new_folder_name_hint)) }, singleLine = true) },
-            confirmButton = { TextButton(onClick = { val name = newFolderName.trim(); if (name.isNotEmpty()) { homeState.openedFolderUri?.let { viewModel.createFile(Uri.parse(it), name, true) }; selectedTab = SidebarTab.Explorer; showNewFolderDialog = false } }) { Text(stringResource(R.string.dialog_save)) } },
+            confirmButton = { TextButton(onClick = { val name = newFolderName.trim(); if (name.isNotEmpty()) { viewModel.createFile("", name, true); selectedTab = SidebarTab.Explorer; showNewFolderDialog = false } }) { Text(stringResource(R.string.dialog_save)) } },
             dismissButton = { TextButton(onClick = { showNewFolderDialog = false }) { Text(stringResource(R.string.chat_cancel)) } },
         )
     }
@@ -446,17 +545,16 @@ private fun LeftPanelContent(
                 onFileClick = onFileClick,
                 onAddToConversation = onAddToConversation,
                 onRename = { relativePath, newName ->
-                    val file = files.find { it.relativePath == relativePath }
-                    if (file != null) viewModel.renameFile(file.uri, newName)
+                    viewModel.renameFile(relativePath, newName)
                 },
                 onDelete = { relativePath ->
-                    val file = files.find { it.relativePath == relativePath }
-                    if (file != null) viewModel.deleteFile(file.uri)
+                    viewModel.deleteFile(relativePath)
                 },
                 onCreate = { relativePath, name, isDir ->
-                    val parentFile = files.find { it.relativePath == relativePath }
-                    if (parentFile != null) viewModel.createFile(parentFile.uri, name, isDir)
-                    else homeState.openedFolderUri?.let { viewModel.createFile(Uri.parse(it), name, isDir) }
+                    viewModel.createFile(relativePath, name, isDir)
+                },
+                onOpenAsProject = { filePath ->
+                    viewModel.openAsProjectDirectory(filePath)
                 },
             )
         }

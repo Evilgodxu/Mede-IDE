@@ -137,6 +137,10 @@ dependencies {
     // SAF DocumentFile 文件树遍历
     implementation("androidx.documentfile:documentfile:1.0.1")
 
+    // Media3 ExoPlayer — 多格式音频播放引擎
+    implementation("androidx.media3:media3-exoplayer:1.6.1")
+    implementation("androidx.media3:media3-ui:1.6.1")
+
     // 网络请求（云端 LLM API）
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)

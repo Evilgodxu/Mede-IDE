@@ -26,7 +26,14 @@ class FlatTreeStateHolder {
     // 设置根节点
     fun setRoot(fileItems: List<FileItem>) {
         rootNodes = fileItems.map {
-            ResourceNode(uri = it.uri, name = it.name, relativePath = it.relativePath, isDirectory = it.isDirectory, depth = 0)
+            ResourceNode(
+                uri = it.uri,
+                name = it.name,
+                relativePath = it.relativePath,
+                isDirectory = it.isDirectory,
+                depth = 0,
+                filePath = it.filePath,
+            )
         }
         rebuildVisibleNodes()
     }
@@ -40,7 +47,9 @@ class FlatTreeStateHolder {
         loadingKeys = loadingKeys + relativePath
 
         onLoad(relativePath) { children ->
-            childrenCache[relativePath] = children.map { FileItemNode(it.name, it.uri, it.relativePath, it.isDirectory) }
+            childrenCache[relativePath] = children.map {
+                FileItemNode(it.name, it.uri, it.relativePath, it.isDirectory, it.filePath)
+            }
             loadingKeys = loadingKeys - relativePath
             expandedKeys.add(relativePath)
             rebuildVisibleNodes()
@@ -67,7 +76,6 @@ class FlatTreeStateHolder {
 
     fun collapse(node: ResourceNode) {
         expandedKeys.remove(node.relativePath)
-        // 同时折叠所有子节点
         val childKeys = expandedKeys.filter { it.startsWith("${node.relativePath}/") }
         expandedKeys.removeAll(childKeys.toSet())
         rebuildVisibleNodes()
@@ -88,6 +96,7 @@ class FlatTreeStateHolder {
                     relativePath = child.relativePath,
                     isDirectory = child.isDirectory,
                     depth = depth,
+                    filePath = child.filePath,
                 )
                 result.add(childNode)
                 if (child.isDirectory && child.relativePath in expandedKeys) {

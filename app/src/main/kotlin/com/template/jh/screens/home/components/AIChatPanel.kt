@@ -566,8 +566,8 @@ private fun ChatInputBar(
             }
         }
 
-        // 工具栏：居中显示所有按钮
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        // 工具栏：按面板宽度平均间距排列按钮
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
             // 优化按钮
             if (engineStatus == EngineStatus.Ready) {
                 if (isOptimizing) {

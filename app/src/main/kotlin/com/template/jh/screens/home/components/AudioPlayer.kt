@@ -1,20 +1,23 @@
 package com.template.jh.screens.home.components
 
-import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -29,14 +32,27 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.delay
 import java.io.File
+
+/** 参考 Echo-Music 的支持格式扩展列表 */
+private val SUPPORTED_AUDIO_EXTENSIONS = setOf(
+    "aac", "amr", "flac", "m4a", "m4b", "m4p", "mid", "mka",
+    "mp3", "mp4", "oga", "ogg", "opus", "wav", "weba", "webm",
+    "3ga", "3gp",
+)
 
 @Composable
 fun AudioPlayer(
@@ -45,25 +61,76 @@ fun AudioPlayer(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    var showLyrics by remember { mutableStateOf(false) }
 
-    // 路径变化时重新初始化
+    // 路径变化时初始化 ExoPlayer
     LaunchedEffect(audioPath) {
-        if (audioPath == state.currentAudioPath && state.mediaPlayer != null) return@LaunchedEffect
+        if (audioPath == state.currentAudioPath && state.exoPlayer != null) return@LaunchedEffect
         state.release()
         state.currentAudioPath = audioPath
+
+        // 创建 ExoPlayer
+        val player = ExoPlayer.Builder(context).build()
+        state.exoPlayer = player
+
+        // 扫描同级音频
         state.playlist = scanSiblingAudio(context, audioPath)
         val idx = state.playlist.indexOfFirst { it.path == audioPath }
         state.currentIndex = if (idx >= 0) idx else 0
-        loadTrackInto(state, context, state.playlist.getOrNull(state.currentIndex)?.path ?: audioPath)
+
+        // 加载并播放
+        loadTrack(state, context, state.playlist.getOrNull(state.currentIndex)?.path ?: audioPath)
+
+        // 监听播放状态
+        player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                state.isPlaying = isPlaying
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                when (playbackState) {
+                    Player.STATE_READY -> {
+                        state.isPrepared = true
+                        state.duration = player.duration.coerceAtLeast(0L).toFloat()
+                    }
+                    Player.STATE_ENDED -> {
+                        // 自动下一首
+                        val pl = state.playlist
+                        val ci = state.currentIndex
+                        if (pl.size > 1) {
+                            val next = (ci + 1) % pl.size
+                            state.currentIndex = next
+                            loadTrack(state, context, pl[next].path)
+                        } else {
+                            state.isPlaying = false
+                            state.currentPosition = 0f
+                            player.seekTo(0)
+                        }
+                    }
+                }
+            }
+        })
     }
 
-    // 进度轮询
+    // 进度轮询 + 歌词同步
     LaunchedEffect(state.isPlaying) {
-        while (state.isPlaying) {
-            state.mediaPlayer?.let {
-                if (it.isPlaying) state.currentPosition = it.currentPosition.toFloat()
-            }
+        while (true) {
             delay(200)
+            state.exoPlayer?.let { p ->
+                if (p.isPlaying) {
+                    val pos = p.currentPosition.coerceAtLeast(0L).toFloat()
+                    state.currentPosition = pos
+                    // 同步歌词索引
+                    updateLyricIndex(state, pos.toLong())
+                }
+            }
+        }
+    }
+
+    // 清理 — 组件卸载时释放播放器
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            state.release()
         }
     }
 
@@ -84,29 +151,49 @@ fun AudioPlayer(
             return@Column
         }
 
-        Icon(
-            Icons.Default.MusicNote, null,
-            Modifier.size(48.dp),
-            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-        )
-        Spacer(Modifier.height(12.dp))
+        // 歌词 / 封面切换
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (showLyrics && state.lyrics.isNotEmpty()) {
+                LyricsDisplay(
+                    lyrics = state.lyrics,
+                    currentLineIndex = state.currentLyricIndex,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        Icons.Default.MusicNote, null,
+                        Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    val fileName = Uri.decode(
+                        state.playlist.getOrNull(state.currentIndex)?.name
+                            ?: audioPath.substringAfterLast('/')
+                    )
+                    Text(
+                        text = fileName,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
 
-        val fileName = Uri.decode(state.playlist.getOrNull(state.currentIndex)?.name ?: audioPath.substringAfterLast('/'))
-        Text(
-            text = fileName,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-        )
-
-        Spacer(Modifier.weight(1f))
-
+        // 进度条
         if (state.isPrepared && state.duration > 0) {
+            Spacer(Modifier.height(8.dp))
             Slider(
                 value = (state.currentPosition / state.duration).coerceIn(0f, 1f),
                 onValueChange = { f ->
-                    val pos = (f * state.duration).toInt()
-                    state.mediaPlayer?.seekTo(pos)
+                    val pos = (f * state.duration).toLong()
+                    state.exoPlayer?.seekTo(pos)
                     state.currentPosition = pos.toFloat()
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -115,41 +202,62 @@ fun AudioPlayer(
                     activeTrackColor = MaterialTheme.colorScheme.primary,
                 ),
             )
-            Spacer(Modifier.height(2.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(formatDuration(state.currentPosition.toInt()),
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(formatDuration(state.duration.toInt()),
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
         }
 
+        // 控制栏
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth(),
         ) {
+            // 歌词切换按钮
+            IconButton(
+                onClick = {
+                    showLyrics = !showLyrics
+                    if (showLyrics && state.lyrics.isEmpty()) {
+                        state.lyrics = LyricsParser.loadFromFile(context, audioPath)
+                    }
+                },
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    Icons.Default.Lyrics, null, Modifier.size(20.dp),
+                    tint = if (showLyrics) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+
             IconButton(onClick = {
                 val pl = state.playlist; val ci = state.currentIndex
                 if (pl.size > 1) {
                     val prev = (ci - 1 + pl.size) % pl.size
                     state.currentIndex = prev
-                    loadTrackInto(state, context, pl[prev].path)
+                    loadTrack(state, context, pl[prev].path)
                 }
             }, modifier = Modifier.size(44.dp), enabled = state.playlist.size > 1) {
                 Icon(Icons.Default.SkipPrevious, null, Modifier.size(24.dp),
                     tint = if (state.playlist.size > 1) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
             }
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(8.dp))
 
             IconButton(onClick = {
-                state.mediaPlayer?.let {
-                    if (it.isPlaying) { it.pause(); state.isPlaying = false }
-                    else { it.start(); state.isPlaying = true }
+                state.exoPlayer?.let { p ->
+                    if (p.isPlaying) { p.pause(); state.isPlaying = false }
+                    else { p.play(); state.isPlaying = true }
                 }
             }, modifier = Modifier.size(56.dp)) {
                 Icon(
@@ -157,70 +265,81 @@ fun AudioPlayer(
                     null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary,
                 )
             }
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(8.dp))
 
             IconButton(onClick = {
                 val pl = state.playlist; val ci = state.currentIndex
                 if (pl.size > 1) {
                     val next = (ci + 1) % pl.size
                     state.currentIndex = next
-                    loadTrackInto(state, context, pl[next].path)
+                    loadTrack(state, context, pl[next].path)
                 }
             }, modifier = Modifier.size(44.dp), enabled = state.playlist.size > 1) {
                 Icon(Icons.Default.SkipNext, null, Modifier.size(24.dp),
                     tint = if (state.playlist.size > 1) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
             }
+            Spacer(Modifier.width(4.dp))
+
+            // 占位保持对称
+            Spacer(Modifier.size(40.dp))
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
     }
 }
 
-private fun loadTrackInto(state: AudioPlaybackState, context: android.content.Context, path: String) {
+/** 使用 ExoPlayer 加载并播放音频 */
+private fun loadTrack(state: AudioPlaybackState, context: android.content.Context, path: String) {
     try {
-        state.mediaPlayer?.apply {
-            if (state.isPlaying) stop()
-            release()
-        }
-        state.mediaPlayer = null
-        state.isPlaying = false
-        state.isPrepared = false
+        state.errorMsg = null
         state.currentPosition = 0f
         state.duration = 0f
-        state.errorMsg = null
+        state.isPrepared = false
+        state.lyrics = emptyList()
+        state.currentLyricIndex = -1
 
-        val mp = MediaPlayer()
         val uri = if (path.startsWith("content://")) Uri.parse(path) else Uri.fromFile(File(path))
-        mp.setDataSource(context, uri)
-        mp.setOnPreparedListener {
-            state.duration = it.duration.toFloat()
-            state.isPrepared = true
-            it.start()
-            state.isPlaying = true
+        val mediaItem = MediaItem.fromUri(uri)
+        state.exoPlayer?.apply {
+            stop()
+            clearMediaItems()
+            setMediaItem(mediaItem)
+            prepare()
+            play()
         }
-        mp.setOnErrorListener { _, what, extra ->
-            state.errorMsg = "播放错误: what=$what extra=$extra"; true
-        }
-        mp.setOnCompletionListener {
-            val pl = state.playlist; val ci = state.currentIndex
-            if (pl.size > 1) {
-                val next = (ci + 1) % pl.size
-                state.currentIndex = next
-                loadTrackInto(state, context, pl[next].path)
-            } else {
-                state.isPlaying = false; state.currentPosition = 0f; mp.seekTo(0)
-            }
-        }
-        mp.prepareAsync()
-        state.mediaPlayer = mp
+
+        // 异步加载歌词
+        state.lyrics = LyricsParser.loadFromFile(context, path)
     } catch (e: Exception) {
         state.errorMsg = "加载失败: ${e.message}"
     }
 }
 
-/** 扫描同级目录中的音频文件 */
+/** 根据当前播放位置更新歌词索引 — 二分查找 */
+private fun updateLyricIndex(state: AudioPlaybackState, positionMs: Long) {
+    val lines = state.lyrics
+    if (lines.isEmpty()) {
+        state.currentLyricIndex = -1
+        return
+    }
+    // 二分查找
+    var lo = 0
+    var hi = lines.size - 1
+    var result = -1
+    while (lo <= hi) {
+        val mid = (lo + hi) / 2
+        if (lines[mid].timeMs <= positionMs) {
+            result = mid
+            lo = mid + 1
+        } else {
+            hi = mid - 1
+        }
+    }
+    state.currentLyricIndex = result
+}
+
+/** 扫描同级目录音频文件（扩展格式参考 Echo-Music） */
 private fun scanSiblingAudio(context: android.content.Context, audioPath: String): List<AudioTrack> {
-    val audioExtensions = setOf("mp3", "wav", "ogg", "aac", "flac", "wma", "m4a", "opus")
     return if (audioPath.startsWith("content://")) {
         val name = runCatching {
             val uri = Uri.parse(audioPath)
@@ -233,7 +352,7 @@ private fun scanSiblingAudio(context: android.content.Context, audioPath: String
         val file = File(audioPath)
         val parent = file.parentFile ?: return listOf(AudioTrack(audioPath, file.name))
         parent.listFiles()
-            ?.filter { it.isFile && it.name.substringAfterLast('.').lowercase() in audioExtensions }
+            ?.filter { it.isFile && it.name.substringAfterLast('.').lowercase() in SUPPORTED_AUDIO_EXTENSIONS }
             ?.sortedBy { it.name.lowercase() }
             ?.map { AudioTrack(it.absolutePath, it.name) }
             ?: listOf(AudioTrack(audioPath, file.name))

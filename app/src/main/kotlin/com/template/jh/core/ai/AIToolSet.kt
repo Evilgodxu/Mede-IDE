@@ -20,20 +20,37 @@ class AIToolSet(
 ) : ToolSet {
 
     // SAF 项目根 URI（用户通过文件夹选择器打开的目录）
-    // 优先使用外部传入的 fileManager，否则使用内部 projectUri
+    // 优先使用外部传入的 fileManager，否则使用 internal projectUri
     @Volatile var projectUri: Uri? = null
         set(value) {
             field = value
             value?.let { fileManager?.setProjectUri(it) }
         }
 
-    @Tool(description = "List files and directories in the project folder. Returns directory contents with file sizes.")
+    /** 将路径转为相对路径：接收绝对路径或相对路径，统一转为相对路径 */
+    private fun resolvePath(path: String): String {
+        if (path.startsWith("/storage/") || path.startsWith("/data/")) {
+            val base = fileManager?.let {
+                it.projectDirPath.ifEmpty { it.storageRootPath }
+            } ?: return path
+            return path.removePrefix(base).trimStart('/')
+        }
+        return path.trim('/')
+    }
+
+    private fun resolvePathOrAbsolute(path: String): String {
+        // 返回相对路径（如果是绝对路径则转换），供现有 FileManager 方法使用
+        return resolvePath(path)
+    }
+
+    @Tool(description = "List files and directories in the project folder. Returns directory contents with file sizes. Use absolute path (like /storage/emulated/0/...) or relative path.")
     fun listFiles(
-        @ToolParam(description = "Subdirectory path relative to project root. Leave empty to list root.") subPath: String = "",
+        @ToolParam(description = "Subdirectory path. Use absolute path (e.g. /storage/emulated/0/MyProject) or relative path from project root. Leave empty to list project root.") subPath: String = "",
     ): String {
         Log.d("AIToolSet", "listFiles: subPath=$subPath")
         FileLogger.d("AIToolSet", "listFiles: subPath=$subPath")
-        val result = fileManager?.listFiles(subPath) ?: "No project folder is open."
+        val relPath = resolvePathOrAbsolute(subPath)
+        val result = fileManager?.listFiles(relPath) ?: "No project folder is open."
         if (result.startsWith("Failed") || result.startsWith("No project")) {
             FileLogger.w("AIToolSet", "listFiles failed: $result")
         }
@@ -41,7 +58,14 @@ class AIToolSet(
     }
 
     private fun readFileRaw(path: String): String? {
-        return fileManager?.readFileRaw(path)
+        return fileManager?.readFileRaw(resolvePathOrAbsolute(path))
+    }
+
+    /** 获取项目根目录的绝对路径（用于上下文注入） */
+    fun getProjectRootPath(): String {
+        return fileManager?.let {
+            it.projectDirPath.ifEmpty { it.storageRootPath }
+        } ?: ""
     }
 
     companion object {
@@ -82,31 +106,31 @@ class AIToolSet(
             })
         }
         private fun buildReadFileTool() = toolDef("readFile", "Read file content with pagination", listOf("path"),
-            "path" to p("string", "File path relative to project root"),
+            "path" to p("string", "File path — absolute (e.g. /storage/emulated/0/...) or relative to project root"),
             "offset" to p("integer", "Starting line (1-based, default 1)"),
             "limit" to p("integer", "Max lines (default 1000)"),
         )
         private fun buildWriteFileTool() = toolDef("writeFile", "Create new file only (refuses overwrite)", listOf("path", "content"),
-            "path" to p("string", "File path relative to project root"),
+            "path" to p("string", "File path — absolute or relative to project root"),
             "content" to p("string", "Complete file content"),
         )
         private fun buildReplaceInFileTool() = toolDef("replaceInFile", "Edit file by replacing exact code block", listOf("path", "old_string", "new_string"),
-            "path" to p("string", "File path relative to project root"),
+            "path" to p("string", "File path — absolute or relative to project root"),
             "old_string" to p("string", "Exact code block to find (unique in file)"),
             "new_string" to p("string", "Replacement code block"),
         )
         private fun buildBatchReplaceInFileTool() = toolDef("batchReplaceInFile", "Edit file at multiple non-overlapping locations", listOf("path", "edits"),
-            "path" to p("string", "File path relative to project root"),
+            "path" to p("string", "File path — absolute or relative to project root"),
             "edits" to p("string", "JSON array: [{\"old_string\":\"...\",\"new_string\":\"...\"}]"),
         )
         private fun buildDeleteFileTool() = toolDef("deleteFile", "Delete file or directory (permanent)", listOf("path"),
-            "path" to p("string", "File/directory path relative to project root"),
+            "path" to p("string", "File/directory path — absolute or relative to project root"),
         )
         private fun buildCreateDirectoryTool() = toolDef("createDirectory", "Create directory (auto-creates parents)", listOf("path"),
-            "path" to p("string", "Directory path relative to project root"),
+            "path" to p("string", "Directory path — absolute or relative to project root"),
         )
         private fun buildListFilesTool() = toolDef("listFiles", "List directory contents with file sizes",
-            props = arrayOf("subPath" to p("string", "Subdirectory path (empty=root)")),
+            props = arrayOf("subPath" to p("string", "Subdirectory path — absolute (e.g. /storage/emulated/0/...) or empty for root")),
         )
         private fun buildGrepTool() = toolDef("grep", "Search file contents by regex", listOf("pattern"),
             "pattern" to p("string", "Regex pattern"),

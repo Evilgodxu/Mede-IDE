@@ -109,9 +109,8 @@ fun MainContentArea(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (activeTab.type == TabType.Image || activeTab.type == TabType.Audio
-                                || activeTab.type == TabType.Video || activeTab.type == TabType.Archive
-                            ) activeTab.title else activeTab.id,
+                            // tab.id 现在是完整路径（filePath 优先），直接显示
+                            text = activeTab.id,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                             maxLines = 1,

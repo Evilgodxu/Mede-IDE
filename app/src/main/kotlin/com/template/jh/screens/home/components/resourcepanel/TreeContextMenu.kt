@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -24,7 +25,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.template.jh.R
 
-// 目录树右键菜单 - 单一职责：上下文菜单
+// 目录树右键菜单
 @Composable
 fun TreeContextMenu(
     expanded: Boolean,
@@ -36,6 +37,7 @@ fun TreeContextMenu(
     onCreateDirectory: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    onOpenAsProject: (() -> Unit)? = null,  // "以项目目录打开"（仅目录可用）
 ) {
     val context = LocalContext.current
     DropdownMenu(
@@ -55,6 +57,15 @@ fun TreeContextMenu(
             leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(16.dp)) },
         )
         if (node.isDirectory) {
+            HorizontalDivider()
+            // "以项目目录打开"
+            onOpenAsProject?.let { callback ->
+                DropdownMenuItem(
+                    text = { Text("以项目目录打开") },
+                    onClick = { onDismiss(); callback() },
+                    leadingIcon = { Icon(Icons.Default.FolderOpen, null, Modifier.size(16.dp)) },
+                )
+            }
             HorizontalDivider()
             DropdownMenuItem(
                 text = { Text("新建文件") },
@@ -86,7 +97,8 @@ fun TreeContextMenu(
             text = { Text("复制路径") },
             onClick = {
                 onDismiss()
-                val clip = ClipData.newPlainText("path", node.relativePath)
+                val fullPath = if (node.filePath.isNotEmpty()) node.filePath else node.relativePath
+                val clip = ClipData.newPlainText("path", fullPath)
                 (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
             },
             leadingIcon = { Icon(Icons.Default.ContentCopy, null, Modifier.size(16.dp)) },

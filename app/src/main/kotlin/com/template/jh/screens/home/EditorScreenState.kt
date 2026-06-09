@@ -1,5 +1,6 @@
 package com.template.jh.screens.home
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -23,6 +24,14 @@ class EditorScreenState(
 
     val editorContent = mutableStateMapOf<String, TextFieldValue>()
     val originalContents = mutableStateMapOf<String, String>()
+
+    /** 将路径转为相对路径（若为绝对路径则转换） */
+    private fun toStoragePath(path: String): String {
+        if (path.startsWith("/storage/") || path.startsWith("/data/")) {
+            return fileManager.toRelativePath(path)
+        }
+        return path
+    }
 
     fun openTab(tab: TabItem) {
         val idx = tabs.indexOfFirst { it.id == tab.id }
@@ -62,7 +71,6 @@ class EditorScreenState(
         return true
     }
 
-    // 强制关闭标签页，不检查修改状态
     fun forceCloseTab(idx: Int) {
         val tab = tabs.getOrNull(idx) ?: return
         doRemoveTab(idx)
@@ -90,10 +98,10 @@ class EditorScreenState(
     fun readFileFromSource(path: String): String {
         if (path.startsWith("content://")) {
             return runCatching {
-                fileManager.contentResolver.openInputStream(android.net.Uri.parse(path))?.bufferedReader()?.readText()
+                fileManager.contentResolver.openInputStream(Uri.parse(path))?.bufferedReader()?.readText()
             }.getOrDefault("") ?: ""
         }
-        return fileManager.readFileRaw(path) ?: ""
+        return fileManager.readFileRaw(toStoragePath(path)) ?: ""
     }
 
     fun isFileModified(path: String): Boolean {
@@ -103,14 +111,14 @@ class EditorScreenState(
 
     fun saveFile(path: String) {
         val content = editorContent[path]?.text ?: return
-        if (!path.startsWith("content://")) {
-            fileManager.writeFile(path, content)
-        } else {
+        if (path.startsWith("content://")) {
             runCatching {
-                fileManager.contentResolver.openOutputStream(android.net.Uri.parse(path), "wt")?.use {
+                fileManager.contentResolver.openOutputStream(Uri.parse(path), "wt")?.use {
                     it.write(content.toByteArray(Charsets.UTF_8))
                 }
             }
+        } else {
+            fileManager.writeFile(toStoragePath(path), content)
         }
         originalContents[path] = content
     }

@@ -3,6 +3,7 @@ package com.template.jh.screens.home.components
 import android.content.Context
 import android.util.Log
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,9 +24,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -76,6 +83,12 @@ fun MainTopBar(
     onOpenFolder: () -> Unit = {},
     onRecentFiles: () -> Unit = {},
     onSaveAll: () -> Unit = {},
+    // 音频播放
+    audioPlaybackState: AudioPlaybackState? = null,
+    scannedAudioTracks: List<AudioTrack> = emptyList(),
+    onScanMusic: () -> Unit = {},
+    onPlayAudioTrack: (AudioTrack) -> Unit = {},
+    onStopAudio: () -> Unit = {},
 ) {
     val topBarInsets = if (!windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)) {
         WindowInsets.statusBars
@@ -86,6 +99,7 @@ fun MainTopBar(
     var fileMenuExpanded by remember { mutableStateOf(false) }
     var editMenuExpanded by remember { mutableStateOf(false) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
+    var musicMenuExpanded by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val dropdownMaxHeight = (screenHeightDp * 0.75f).dp
@@ -257,6 +271,183 @@ fun MainTopBar(
                 }
             },
             actions = {
+                // 音乐选择器 + 播放控件
+                if (audioPlaybackState != null) {
+                    val aps = audioPlaybackState
+                    // 音乐按钮 + 下拉列表
+                    Box {
+                        val hasAudio = aps.currentAudioPath.isNotBlank()
+                        val displayText = when {
+                            hasAudio && aps.lyrics.isNotEmpty() && aps.currentLyricIndex in aps.lyrics.indices ->
+                                aps.lyrics[aps.currentLyricIndex].text
+                            hasAudio && aps.currentSongName.isNotBlank() -> aps.currentSongName
+                            else -> null
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clickable { musicMenuExpanded = true; onScanMusic() }
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        ) {
+                            if (hasAudio) {
+                                if (displayText != null && displayText.length > 10) {
+                                    Text(
+                                        text = displayText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Visible,
+                                        modifier = Modifier.widthIn(max = 180.dp).basicMarquee(iterations = Int.MAX_VALUE),
+                                    )
+                                } else {
+                                    Text(
+                                        text = (displayText ?: aps.currentSongName).take(12),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.MusicNote,
+                                    contentDescription = "音乐",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = if (hasAudio) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = musicMenuExpanded,
+                            onDismissRequest = { musicMenuExpanded = false },
+                            modifier = Modifier.widthIn(min = 200.dp, max = 300.dp).heightIn(max = 320.dp)
+                        ) {
+                            if (scannedAudioTracks.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("正在扫描音乐…", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    },
+                                    onClick = { },
+                                    enabled = false,
+                                )
+                            } else {
+                                Text("本地音乐 (${scannedAudioTracks.size})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                                HorizontalDivider()
+                                scannedAudioTracks.take(100).forEach { track ->
+                                    val isActive = track.path == aps.currentAudioPath
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column(Modifier.widthIn(max = 260.dp)) {
+                                                Text(
+                                                    text = track.name,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            musicMenuExpanded = false
+                                            onPlayAudioTrack(track)
+                                        },
+                                        trailingIcon = {
+                                            if (isActive) {
+                                                Icon(Icons.Default.Check, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                            }
+                                        },
+                                    )
+                                }
+                                if (scannedAudioTracks.size > 100) {
+                                    HorizontalDivider()
+                                    Text("… 还有 ${scannedAudioTracks.size - 100} 首",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    // 播放控制按钮
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(0.dp),
+                    ) {
+                        val hasAudio = aps.currentAudioPath.isNotBlank()
+                        // 上一曲
+                        IconButton(
+                            onClick = {
+                                val pl = aps.playlist; val ci = aps.currentIndex
+                                if (pl.size > 1) {
+                                    val prev = (ci - 1 + pl.size) % pl.size
+                                    onPlayAudioTrack(pl[prev])
+                                }
+                            },
+                            modifier = Modifier.size(26.dp),
+                            enabled = hasAudio && aps.playlist.size > 1,
+                        ) { Icon(Icons.Default.SkipPrevious, null, Modifier.size(14.dp),
+                            tint = if (hasAudio) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)) }
+                        // 播放/暂停
+                        IconButton(
+                            onClick = {
+                                aps.exoPlayer?.let { p ->
+                                    if (p.isPlaying) { p.pause(); aps.isPlaying = false }
+                                    else { p.play(); aps.isPlaying = true }
+                                }
+                            },
+                            modifier = Modifier.size(26.dp),
+                            enabled = hasAudio,
+                        ) {
+                            Icon(
+                                if (aps.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                null, Modifier.size(14.dp),
+                                tint = if (hasAudio) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
+                            )
+                        }
+                        // 下一曲
+                        IconButton(
+                            onClick = {
+                                val pl = aps.playlist; val ci = aps.currentIndex
+                                if (pl.size > 1) {
+                                    val next = (ci + 1) % pl.size
+                                    onPlayAudioTrack(pl[next])
+                                }
+                            },
+                            modifier = Modifier.size(26.dp),
+                            enabled = hasAudio && aps.playlist.size > 1,
+                        ) { Icon(Icons.Default.SkipNext, null, Modifier.size(14.dp),
+                            tint = if (hasAudio) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)) }
+                        // 关闭
+                        IconButton(
+                            onClick = { onStopAudio() },
+                            modifier = Modifier.size(26.dp),
+                            enabled = hasAudio,
+                        ) { Icon(Icons.Default.Close, null, Modifier.size(14.dp),
+                            tint = if (hasAudio) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)) }
+                    }
+
+                    Text(
+                        text = "丨",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                    )
+                }
+
                 // 模型状态指示器 + 下拉
                 Box {
                     // 计算当前活跃模型信息

@@ -39,6 +39,7 @@ fun ResourcePanel(
     onRename: (String, String) -> Unit = { _, _ -> },
     onDelete: (String) -> Unit = {},
     onCreate: (String, String, Boolean) -> Unit = { _, _, _ -> },
+    onOpenAsProject: ((String) -> Unit)? = null,  // 接收目录的 filePath（绝对路径）
 ) {
     val treeState = rememberFlatTreeState()
 
@@ -127,6 +128,11 @@ fun ResourcePanel(
                                     onCreateDirectory = { createTarget = node; createIsDir = true },
                                     onRename = { renameTarget = node },
                                     onDelete = { onDelete(node.relativePath) },
+                                    onOpenAsProject = if (node.filePath.isNotEmpty()) {
+                                        { onOpenAsProject?.invoke(node.filePath) }
+                                    } else {
+                                        { onOpenAsProject?.invoke(node.relativePath) }
+                                    },
                                 )
                             },
                         )

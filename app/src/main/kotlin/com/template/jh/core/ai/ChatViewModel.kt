@@ -331,9 +331,13 @@ class ChatViewModel(
     fun setProjectRoot(uri: Uri?) {
         aiToolSet.projectUri = uri
         uri?.let { fileManager.setProjectUri(it) } ?: fileManager.clearProjectUri()
-        // 从 URI 提取文件夹显示名并存入状态
         val name = uri?.let { extractFolderName(it) } ?: ""
         _state.update { it.copy(projectRootName = name) }
+    }
+
+    /** 直接模式：通过绝对路径设置项目根 */
+    fun setProjectRootPath(absolutePath: String, displayName: String) {
+        _state.update { it.copy(projectRootName = displayName) }
     }
 
     private fun extractFolderName(uri: Uri): String {
@@ -384,7 +388,11 @@ class ChatViewModel(
         val ctx = StringBuilder()
         ctx.appendLine("[当前编辑器上下文]")
         if (s.projectRootName.isNotBlank()) {
+            val absoluteRoot = aiToolSet.getProjectRootPath()
             ctx.appendLine("项目: ${s.projectRootName}")
+            if (absoluteRoot.isNotBlank()) {
+                ctx.appendLine("项目绝对路径: $absoluteRoot")
+            }
             // 注入工作区目录树
             val tree = fileManager.buildFileTreeString(maxDepth = 3, maxItems = 40)
             if (tree.isNotBlank()) {
@@ -409,7 +417,7 @@ class ChatViewModel(
         } else {
             ctx.appendLine("（未打开任何文件 — 可使用 listFiles 查看项目文件结构再定位目标）")
         }
-        ctx.appendLine("文件路径相对于项目根目录。")
+        ctx.appendLine("文件路径使用绝对路径（如 /storage/emulated/0/...）或相对于项目根目录的路径。")
         ctx.appendLine("标注 [已修改] 的文件存在未保存的更改，活动文件光标所在行号已标注。")
         if (ctx.length < 30) return ""
         return ctx.toString()
@@ -420,7 +428,7 @@ class ChatViewModel(
         val refs = _state.value.attachedFileRefs
         if (refs.isEmpty()) return ""
         val block = StringBuilder()
-        block.appendLine("[用户指定的文件（路径相对于项目根目录），使用 readFile 查看内容]")
+        block.appendLine("[用户指定的文件（支持绝对路径和相对路径），使用 readFile 查看内容]")
         refs.forEach { f ->
             block.appendLine("  - ${f.name} (${f.path})")
         }
