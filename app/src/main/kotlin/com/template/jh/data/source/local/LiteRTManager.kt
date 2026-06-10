@@ -3,6 +3,7 @@ package com.template.jh.data.source.local
 import android.content.Context
 import android.util.Log
 import android.net.Uri
+import com.template.jh.core.utils.CpuFeatureDetector
 import com.template.jh.core.utils.FileLogger
 import com.template.jh.model.chat.DownloadState
 import com.template.jh.model.chat.DownloadStatus
@@ -384,10 +385,9 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
     /** 根据模型文件名推断上下文窗口（token） */
     private fun resolveContextWindow(modelName: String): Int {
         val name = modelName.lowercase()
-        // Gemma4 系列均支持 32K 上下文
-        if (name.contains("gemma")) return 32768
-        // 未知模型：保守使用 32768
-        return 32768
+        // 移动端保守设置 2K 上下文窗口
+        if (name.contains("gemma")) return 2048
+        return 2048
     }
 
     /** 判断模型文件名是否指向多模态（支持图像理解）模型 */
@@ -439,6 +439,8 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
 
         /** 自动检测设备上 NPU 驱动库所在目录 */
         fun detectNpuLibraryDir(context: Context): String {
+            val cpu = CpuFeatureDetector.detect()
+            Log.d("LiteRTManager", "CPU features: ${cpu.featureLevel}, cores=${cpu.cpuCount}, model=${cpu.cpuModel}")
             // 1. 扫描常见系统目录
             for (dirPath in NPU_SCAN_DIRS) {
                 val dir = File(dirPath)

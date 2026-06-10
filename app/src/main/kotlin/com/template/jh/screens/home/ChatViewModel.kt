@@ -126,15 +126,16 @@ class ChatViewModel(
         viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), UsageStats()
     )
 
-    /** 上下文 token 计数（仅在值变化时发射，避免流式输出时频繁重算） */
+    /** 上下文 token 计数（含 system prompt 估算，仅在值变化时发射，避免流式输出时频繁重算） */
     val contextTokenCount: StateFlow<Int> = _state.map { s ->
+        val sysTokens = estimateSystemPromptTokens()
         var ascii = 0; var other = 0
         for (msg in s.messages) {
             for (c in msg.content) {
                 if (c.code <= 127) ascii++ else other++
             }
         }
-        ascii / 4 + other / 2
+        ascii / 4 + other / 2 + sysTokens
     }.flowOn(Dispatchers.Default)
     .distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
@@ -527,7 +528,7 @@ class ChatViewModel(
                     // LiteRT: 优先组装上下文（替代硬截断）
                     val currentMsgs = _state.value.messages
                     val contextBudget = _state.value.contextMaxTokens.coerceAtLeast(DEFAULT_LOCAL_CONTEXT_WINDOW)
-                    val available = contextBudget - estimateTokens(text) - 256
+                    val available = contextBudget - estimateTokens(text) - 256 - estimateSystemPromptTokens()
                     val assembled = selectContextForLocal(currentMsgs, available)
                     pendingInitialMessages = chatMessagesToLiteRT(assembled)
                     resetConversation()
@@ -957,7 +958,7 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
 
     companion object {
         private const val DEFAULT_CONTEXT_WINDOW = 128000      // 默认云端上下文窗口
-        private const val DEFAULT_LOCAL_CONTEXT_WINDOW = 4096  // 本地模型上下文窗口兜底值（引擎未提供时使用）
+        private const val DEFAULT_LOCAL_CONTEXT_WINDOW = 2048  // 本地模型上下文窗口兜底值（引擎未提供时使用）
         private const val LOCAL_MODEL_MAX_OUTPUT_CHARS = 48000  // 本地模型单轮输出硬上限（≈8192 tokens），超出截断并告警
         private const val KEEP_EXCHANGES = 5                   // 保留最后 5 轮用户↔模型交换
         private const val KEEP_PRIORITY_LINES = 200            // 保护早期含代码块/工具结果的最多行数
@@ -982,7 +983,14 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         val profile = s.cloudModelProfiles.find { it.id == s.activeCloudProfileId }
         return profile?.contextWindow ?: DEFAULT_CONTEXT_WINDOW
     }
-    private fun getCompressThreshold(): Int = (getContextWindow() * 0.75).toInt()
+    /** 估算当前 system prompt token 数，用于 contextTokenCount 和压缩阈值计算 */
+    private fun estimateSystemPromptTokens(): Int {
+        val cached = _sysPromptCache
+        if (cached != null) return (cached.length / 3.5f).toInt().coerceAtLeast(200)
+        return 800  // 无缓存时保守估算
+    }
+    private fun getCompressThreshold(): Int =
+        (getContextWindow() * 0.75).toInt() - estimateSystemPromptTokens()
 
     // 精确 token 估算（基于 UTF-8 字节长度）
     private fun estimateTokens(text: String): Int {
@@ -1255,7 +1263,8 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
         val summaryMsg = ChatMessage(
             role = ChatRole.Model,
             content = buildString {
-                append("[上下文压缩累计] 累计移除 ${removedTokens / 1000}k tokens，")
+                val removedK = if (removedTokens < 1000) "<1k" else "${removedTokens / 1000}k"
+                append("[上下文压缩累计] 累计移除 $removedK tokens，")
                 append("保留最近 $KEEP_EXCHANGES 轮对话")
                 if (summaryJson.isNotBlank()) append("，早期对话已摘要压缩")
                 append("。")
@@ -1919,13 +1928,14 @@ sb.append("You are a helpful AI coding assistant. When responding to the user, u
             currentMessage = Message.tool(Contents.of(listOf(Content.ToolResponse("call_${currentMsgId.take(8)}", combinedResult))))
 
             // 本地模型上下文预算检查：每轮结束后估算总输入，超限则重建 Conversation
+            val sysOverhead = estimateSystemPromptTokens()
             val contextBudget = _state.value.contextMaxTokens.coerceAtLeast(DEFAULT_LOCAL_CONTEXT_WINDOW)
-            val localBudget = contextBudget - estimateTokens(text) - estimateTokens(combinedResult) - 512
+            val localBudget = contextBudget - estimateTokens(text) - estimateTokens(combinedResult) - 512 - sysOverhead
             if (estimateContextTokens(_state.value.messages) > localBudget) {
                 try { activeConversation?.close() } catch (_: Exception) {}
                 activeConversation = null
                 pendingInitialMessages = null
-                val reassembled = selectContextForLocal(_state.value.messages, contextBudget - 512)
+                val reassembled = selectContextForLocal(_state.value.messages, contextBudget - 512 - sysOverhead)
                 pendingInitialMessages = chatMessagesToLiteRT(reassembled)
                 val newConv = ensureConversation()
                 conv = newConv

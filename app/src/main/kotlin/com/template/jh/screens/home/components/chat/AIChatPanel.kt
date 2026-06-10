@@ -1095,8 +1095,9 @@ private fun ContextInfoDialog(
                     Spacer(Modifier.height(4.dp))
                     Text("上下文压缩", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium,
                         color = Color(0xFF7B1FA2))
+                    val removedK = if (contextCompressedTokens < 1000) "<1k" else "${contextCompressedTokens / 1000}k+"
                     Text(
-                        text = "已压缩 $contextCompressedCount 次，累计移除 ${contextCompressedTokens / 1000}k+ token",
+                        text = "已压缩 $contextCompressedCount 次，累计移除 $removedK token",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
