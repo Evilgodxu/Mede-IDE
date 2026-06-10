@@ -109,7 +109,6 @@
 | `TextEditTool.kt` | `TextEditTool` | AI 文本编辑工具（行级插入替换） |
 | `SyntaxHighlighter.kt` | `highlightSyntax()` | Kotlin/XML/JSON 语法解析 + AnnotatedString 生成 |
 | `DiffUtils.kt` | `LineChangeType`, `computeLineDiff()`, `replaceInFile()` | 行 diff 计算 + 代码块替换 |
-| `VectorIndex.kt` | `VectorIndex` | 全文搜索向量索引（倒排 + cosine 相似度） |
 | `LogCollector.kt` | `LogCollector` | 日志收集器（终端输出缓存） |
 | `FileLogger.kt` | `FileLogger` | 文件日志记录 |
 | `LanguageManager.kt` | `LanguageManager`, `ProvideLocalizedContext()` | 多语言管理 |
@@ -124,7 +123,7 @@
 |----------|-----|
 | 文件浏览器外观 | `resourcepanel/` 目录下所有文件 |
 | 编辑器行号/高亮 | `editor/CodeEditor.kt` |
-| 搜索逻辑（全文搜索） | `SearchPanel.kt` / `VectorIndex.kt` |
+| 搜索逻辑（全文搜索） | `SearchPanel.kt` / `FileManager.kt` |
 | 搜索逻辑（最近文件） | `SearchBar.kt` |
 | AI 对话消息 | `AIChatPanel.kt` / `ChatViewModel.kt` |
 | Web 预览功能 | `PreviewPanel.kt` + `WebPreview.kt` |

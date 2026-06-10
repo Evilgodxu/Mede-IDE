@@ -82,24 +82,7 @@
 - `工作区结构` — 前 2 层目录树（最多 20 项）
 - `已打开文件` — 最多 10 个，含 `[已修改]` 和 `← 活动` 标记
 
-### 2. `buildContextDelta()` — 增量 diff
-
-**触发时机**：工具修改文件后，或每约 9 轮对话校准一次
-
-```kotlin
-[上下文更新]
-活动文件切换: app/src/main/kotlin/.../ChatViewModel.kt
-新打开文件 (2):
-  - app/build.gradle.kts
-  - settings.gradle.kts
-已关闭文件: app/src/main/res/values/strings.xml
-新增未保存修改:
-  - app/src/main/kotlin/.../ChatViewModel.kt
-```
-
-**校准机制**：每第 9 次调用时发送一次**全量** `buildEditorContext()`，防止增量漂移。其余时候只发变化部分。
-
-### 3. Lint 诊断注入
+### 2. Lint 诊断注入
 
 **触发时机**：工具执行写/编辑/删除等修改操作后
 
@@ -129,7 +112,6 @@ collect 完成 → 若工具有修改：
   ↓
   sendMessageAsync(Message.system(
     [Lint 诊断]\n...
-    [TOOL_CONTEXT_UPDATE]\n...[增量上下文]
   ))
 ```
 
@@ -140,8 +122,7 @@ collect 完成 → 若工具有修改：
   → 插入 ChatMessage(role=System, content=editorCtx)
   → 插入 ChatMessage(role=User, content=text)
   ...（每轮 Cloud API 调用）
-  → 若工具有修改：
-      historyMessages.add(ChatMessage(role=System, content=ctxUpdate))
+  → 每3轮或修改操作后插入全量 editorCtx
 ```
 
 ### 渠道 C：Fallback（自动工具调用兜底）
@@ -179,7 +160,7 @@ system msg (editorCtx)     ← 工具执行前注入
 user msg (用户请求)
     ┌─ auto: tool_call → ToolManager → tool_response ─┐
     └──────── 循环直至纯文本响应 ──────────────────────┘
-system msg (Lint + ctxUpdate)  ← 工具执行后注入（影响下一轮）
+system msg (Lint 诊断)  ← 修改后的 Lint 注入（影响下一轮）
 ```
 
 - 开始前的 `system msg`：模型能感知当前编辑器状态
@@ -193,12 +174,11 @@ system msg (Lint + ctxUpdate)  ← 工具执行后注入（影响下一轮）
 | 文件 | 内容 |
 |------|------|
 | `ChatViewModel.buildEditorContext()` | 全量上下文构造 |
-| `ChatViewModel.buildContextDelta()` | 增量 diff 构造 |
 | `ChatViewModel.buildSystemInstruction()` | 系统指令（角色定义 + 规则 + 记忆） |
 | `ChatViewModel.buildFileAttachmentBlock()` | 用户附件引用块 |
-| `ChatViewModel.autoInjectLint()` | Lint 诊断（已内联移除，保留函数用于 Cloud 路径） |
+| `ChatViewModel.autoInjectLint()` | 修改后 Lint 诊断注入 |
 | `ChatViewModel.processWithJsonTools()` — 行 1569-1571 | 本地模型初始注入 |
 | `ChatViewModel.processWithJsonTools()` — 行 1634-1646 | 本地模型修改后注入 |
 | `ChatViewModel.processWithCloudTools()` — 行 2086-2090 | Cloud 初始注入 |
-| `ChatViewModel.processWithCloudTools()` — 行 2284-2290 | Cloud 修改后注入 |
+| `ChatViewModel.processWithCloudTools()` — 行 2300-2306 | Cloud 修改后注入 |
 | `ChatViewModel.fallbackToAutoToolCalling()` — 行 1809 | Fallback 注入 |

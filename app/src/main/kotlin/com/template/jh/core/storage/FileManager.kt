@@ -1088,7 +1088,7 @@ class FileManager(private val context: Context) {
     }
 
     // ================================================================
-    //  语义搜索 (VectorIndex)
+    //  代码搜索 (grep-based，替代已移除的 VectorIndex)
     // ================================================================
 
     fun searchCodebase(query: String, targetDirectories: String = ""): String {
@@ -1108,31 +1108,32 @@ class FileManager(private val context: Context) {
 
             if (files.isEmpty()) return "No searchable files found."
 
-            val index = com.template.jh.core.search.VectorIndex()
-            files.forEach { file -> index.addDocument(file.path, file.content) }
-            val results = index.search(query)
+            val queryLower = query.lowercase()
+            val maxResults = 10
+            val results = mutableListOf<Pair<String, String>>()
+
+            for (file in files) {
+                if (results.size >= maxResults) break
+                val lines = file.content.lines()
+                for (line in lines) {
+                    if (results.size >= maxResults) break
+                    if (line.lowercase().contains(queryLower)) {
+                        results.add(file.path to line.trim())
+                    }
+                }
+            }
 
             if (results.isEmpty()) {
-                "未找到相关代码: $query\n搜索范围: ${files.size} 个文件, ${index.size} 个代码块\n" +
-                        "建议：\n" +
-                        "  1. 使用更精确的关键词\n" +
-                        "  2. 使用 grep 搜索（正则表达式）\n" +
-                        "  3. 检查文件是否包含可搜索的代码"
+                "未找到相关代码: $query\n搜索范围: ${files.size} 个文件\n建议：\n  1. 使用更精确的关键词\n  2. 使用 grep 搜索（正则表达式）"
             } else {
-                val maxResults = 10
                 buildString {
-                    appendLine("相关代码（语义搜索）: $query")
-                    appendLine("搜索范围: ${files.size} 个文件, ${index.size} 个代码块")
+                    appendLine("相关代码（代码搜索）: $query")
+                    appendLine("搜索范围: ${files.size} 个文件, ${results.size} 个匹配")
                     appendLine("---")
-                    results.take(maxResults).forEachIndexed { i, r ->
-                        appendLine("${i + 1}. ${r.filePath} (相似度: ${"%.2f".format(r.score)})")
-                        r.snippet.lines().take(10).forEach { line ->
-                            appendLine("   $line")
-                        }
+                    results.forEachIndexed { i, (path, line) ->
+                        appendLine("${i + 1}. $path")
+                        appendLine("   $line")
                         appendLine()
-                    }
-                    if (results.size > maxResults) {
-                        appendLine("... 还有 ${results.size - maxResults} 个结果")
                     }
                 }.trimEnd()
             }
