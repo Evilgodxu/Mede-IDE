@@ -19,6 +19,7 @@ import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -713,39 +714,57 @@ private fun ChatInputBar(
                 enabled = engineStatus == EngineStatus.Ready && !isLoading
             )
 
-            // 上下文窗口进度按钮
+            // 上下文窗口进度按钮（分段环：用量+压缩+记忆）
             val ratio = if (contextMaxTokens > 0) (contextUsedTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
             val hasMemory = memoryKeyFactCount > 0 || memorySummaryCount > 0
-            val buttonColor = when {
-                isContextCompressed && hasMemory -> Color(0xFF7B1FA2)  // 紫色 = 压缩+记忆
-                isContextCompressed -> Color(0xFF9C27B0)              // 浅紫 = 仅压缩
-                hasMemory -> Color(0xFF1565C0)                        // 蓝色 = 有记忆
-                ratio < 0.5f -> Color(0xFF4CAF50)                     // 绿色
-                ratio < 0.8f -> Color(0xFFFFA000)                     // 橙色
-                else -> Color(0xFFE53935)                             // 红色
-            }
+            val compressedRatio = if (contextMaxTokens > 0 && contextCompressedTokens > 0)
+                (contextCompressedTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
+            val isMultiState = isContextCompressed || hasMemory
             Box(
                 modifier = Modifier
                     .size(22.dp)
                     .clickable { onContextInfoClick() },
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator(
-                    progress = { ratio },
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 1.5.dp,
-                    color = buttonColor,
-                    trackColor = Color(0xFFE0E0E0),
-                )
-                val label = when {
-                    isContextCompressed && hasMemory -> "CM"
-                    isContextCompressed -> "C"
-                    hasMemory -> "M"
-                    else -> ""
-                }
-                if (label.isNotEmpty()) {
-                    Text(label, style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(fontSize = 6.sp),
-                        color = buttonColor, fontWeight = FontWeight.Bold)
+                if (isMultiState) {
+                    Canvas(Modifier.size(20.dp)) {
+                        val strokeWidth = 3f
+                        val outerRadius = size.minDimension / 2f - strokeWidth / 2f
+                        val topLeft = androidx.compose.ui.geometry.Offset(strokeWidth / 2f, strokeWidth / 2f)
+                        val arcSize = androidx.compose.ui.geometry.Size(outerRadius * 2, outerRadius * 2)
+                        // Track
+                        drawArc(Color(0xFFE0E0E0), -90f, 360f, false,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                            topLeft = topLeft, size = arcSize)
+                        // Used segment (red/orange)
+                        if (ratio > 0f) {
+                            drawArc(Color(0xFFE53935), -90f, ratio * 360f, false,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                                topLeft = topLeft, size = arcSize)
+                        }
+                    }
+                    // Multi-indicator dots
+                    val dotColor = if (isContextCompressed && hasMemory) Color(0xFF7B1FA2)
+                        else if (isContextCompressed) Color(0xFF9C27B0)
+                        else Color(0xFF1565C0)
+                    Text(
+                        if (isContextCompressed && hasMemory) "•" else "•",
+                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                        color = dotColor, fontWeight = FontWeight.Bold,
+                    )
+                } else {
+                    val buttonColor = when {
+                        ratio < 0.5f -> Color(0xFF4CAF50)
+                        ratio < 0.8f -> Color(0xFFFFA000)
+                        else -> Color(0xFFE53935)
+                    }
+                    CircularProgressIndicator(
+                        progress = { ratio },
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 1.5.dp,
+                        color = buttonColor,
+                        trackColor = Color(0xFFE0E0E0),
+                    )
                 }
             }
 
@@ -1060,11 +1079,13 @@ private fun ContextInfoDialog(
     onDismiss: () -> Unit,
 ) {
     val ratio = if (maxTokens > 0) (usedTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
+    val compressedRatio = if (maxTokens > 0) (contextCompressedTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
+    val memoryRatio = if (maxTokens > 0) (memoryTotalTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
-                .widthIn(min = 280.dp, max = 360.dp)
-                .heightIn(max = 400.dp),
+                .widthIn(min = 300.dp, max = 380.dp)
+                .heightIn(max = 480.dp),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
@@ -1076,73 +1097,121 @@ private fun ContextInfoDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text("上下文窗口", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                // 分段甜甜圈图表
                 Box(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
-                            progress = { ratio / 100f },
-                            modifier = Modifier.size(60.dp),
-                            strokeWidth = 4.dp,
-                            color = when {
-                                ratio < 50f -> Color(0xFF4CAF50)
-                                ratio < 80f -> Color(0xFFFFA000)
-                                else -> Color(0xFFE53935)
-                            },
-                            trackColor = Color(0xFFE0E0E0),
-                        )
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(72.dp)) {
+                        Canvas(Modifier.fillMaxSize()) {
+                            val strokeWidth = 10f
+                            val outerRadius = size.minDimension / 2f - strokeWidth / 2f
+                            val topLeft = androidx.compose.ui.geometry.Offset(strokeWidth / 2f, strokeWidth / 2f)
+                            val arcSize = androidx.compose.ui.geometry.Size(outerRadius * 2, outerRadius * 2)
+                            val cs = androidx.compose.ui.graphics.StrokeCap.Round
+
+                            // Track
+                            drawArc(Color(0xFFE8E8E8), -90f, 360f, false,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = cs),
+                                topLeft = topLeft, size = arcSize)
+                            // Used segment
+                            if (ratio > 0f) {
+                                drawArc(
+                                    if (ratio < 50f) Color(0xFF4CAF50) else if (ratio < 80f) Color(0xFFFFA000) else Color(0xFFE53935),
+                                    -90f, ratio / 100f * 360f, false,
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = cs),
+                                    topLeft = topLeft, size = arcSize)
+                            }
+                            // Compressed segment (outer ghost arc)
+                            if (isContextCompressed && compressedRatio > 0f) {
+                                val startAngle = -90f + 360f * (ratio / 100f).coerceAtMost(0.95f)
+                                drawArc(Color(0xFF9C27B0).copy(alpha = 0.5f), startAngle,
+                                    (compressedRatio / 100f * 360f).coerceAtMost(180f), false,
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth * 0.6f, cap = cs),
+                                    topLeft = topLeft, size = arcSize)
+                            }
+                            // Memory segment (outer dashed indicator)
+                            if (memoryRatio > 0f) {
+                                val startAngle = -90f + 360f * 0.97f
+                                drawArc(Color(0xFF1565C0).copy(alpha = 0.6f), startAngle,
+                                    (memoryRatio / 100f * 360f).coerceAtMost(45f), false,
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth * 0.5f, cap = cs),
+                                    topLeft = topLeft, size = arcSize)
+                            }
+                        }
                         Text(
                             text = "${ratio.toInt()}%",
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold,
                         )
                     }
                 }
+                // 颜色图例
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(8.dp).background(
+                            if (ratio < 50f) Color(0xFF4CAF50) else if (ratio < 80f) Color(0xFFFFA000) else Color(0xFFE53935), CircleShape))
+                        Spacer(Modifier.width(4.dp))
+                        Text("当前", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (isContextCompressed) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(8.dp).background(Color(0xFF9C27B0), CircleShape))
+                            Spacer(Modifier.width(4.dp))
+                            Text("已压缩", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    if (memoryTotalTokens > 0) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(8.dp).background(Color(0xFF1565C0), CircleShape))
+                            Spacer(Modifier.width(4.dp))
+                            Text("记忆", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
                 HorizontalDivider()
                 Text("Token 用量", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
+                val usedK = if (usedTokens >= 1000) "${"%.1f".format(usedTokens / 1000f)}k" else "$usedTokens"
+                val maxK = if (maxTokens >= 1000) "${maxTokens / 1000}k" else "$maxTokens"
                 Text(
-                    text = "$usedTokens / $maxTokens",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = "对话框消息: $messagesCount 条",
+                    text = "$usedK / $maxK  ·  $messagesCount 条消息",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (isContextCompressed) {
-                    Spacer(Modifier.height(4.dp))
-                    Text("上下文压缩", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFF7B1FA2))
-                    val removedK = if (contextCompressedTokens < 1000) "<1k" else "${contextCompressedTokens / 1000}k+"
-                    Text(
-                        text = "已压缩 $contextCompressedCount 次，累计移除 $removedK token",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Spacer(Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(6.dp).background(Color(0xFF9C27B0), CircleShape))
+                        Spacer(Modifier.width(6.dp))
+                        val removedK = if (contextCompressedTokens < 1000) "<1k" else "${contextCompressedTokens / 1000}k+"
+                        Text(
+                            text = "已压缩 $contextCompressedCount 次 · 累计释放 $removedK token",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF7B1FA2),
+                        )
+                    }
                 }
-                // 记忆系统状态
                 val hasMemory = memoryKeyFactCount > 0 || memorySummaryCount > 0 || memoryEntryCount > 0
                 if (hasMemory) {
-                    Spacer(Modifier.height(4.dp))
-                    Text("记忆系统", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFF1565C0))
-                    val parts = mutableListOf<String>()
-                    if (memoryKeyFactCount > 0) parts.add("关键事实 $memoryKeyFactCount 条")
-                    if (memorySummaryCount > 0) parts.add("摘要段 $memorySummaryCount 个")
-                    if (memoryEntryCount > 0) parts.add("短期记忆 $memoryEntryCount 条")
-                    Text(
-                        text = parts.joinToString("  ·  "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    val memK = if (memoryTotalTokens < 1000) "<1k" else "${memoryTotalTokens / 1000}k"
-                    Text(
-                        text = "总数据量 ~$memK token（已压缩，不计入当前窗口）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF757575),
-                    )
+                    Spacer(Modifier.height(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(6.dp).background(Color(0xFF1565C0), CircleShape))
+                        Spacer(Modifier.width(6.dp))
+                        val parts = mutableListOf<String>()
+                        if (memoryKeyFactCount > 0) parts.add("关键事实 $memoryKeyFactCount")
+                        if (memorySummaryCount > 0) parts.add("摘要 $memorySummaryCount")
+                        if (memoryEntryCount > 0) parts.add("短记忆 $memoryEntryCount")
+                        val memK = if (memoryTotalTokens < 1000) "<1k" else "${memoryTotalTokens / 1000}k"
+                        Text(
+                            text = "${parts.joinToString(" · ")}  ·  ~$memK token",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF1565C0),
+                        )
+                    }
                 }
                 val summary = contextSummary
                 if (summary.isNotBlank()) {

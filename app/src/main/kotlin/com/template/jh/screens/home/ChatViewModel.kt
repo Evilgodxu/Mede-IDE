@@ -60,7 +60,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -138,8 +137,12 @@ class ChatViewModel(
     @Volatile private var activeConversation: Conversation? = null
     private var pendingInitialMessages: List<Message>? = null
 
-    // system prompt 缓存：变化时 invalidate
+    // system prompt 缓存 + 预计算依赖值
     @Volatile private var _sysPromptCache: String? = null
+    @Volatile private var sysPromptUserName: String = ""
+    @Volatile private var sysPromptRules: List<Rule> = emptyList()
+    @Volatile private var sysPromptSkills: List<com.template.jh.model.SkillItem> = emptyList()
+    @Volatile private var sysPromptDeepThink: Boolean = false
 
     /** 刷新记忆状态并失效 system prompt 缓存 */
     private fun refreshMemoryState() {
@@ -157,7 +160,7 @@ class ChatViewModel(
 
     init {
         scanModels()
-        // 监听系统提示词依赖项，变化时清除缓存
+        // Launch 1: system prompt 依赖项预计算（不再每次 runBlocking）
         viewModelScope.launch {
             combine(
                 preferencesRepo.deepThinkEnabled,
@@ -165,39 +168,41 @@ class ChatViewModel(
                 preferencesRepo.rules,
                 preferencesRepo.skills,
                 _state.map { it.cloudModelEnabled }.distinctUntilChanged(),
-            ) { _: Array<*> -> Unit }
-            .collect { _sysPromptCache = null }
+            ) { think: Boolean, name: String, rules: List<Rule>, skills: List<com.template.jh.model.SkillItem>, _: Boolean ->
+                sysPromptDeepThink = think
+                sysPromptUserName = name
+                sysPromptRules = rules
+                sysPromptSkills = skills
+                _sysPromptCache = null
+            }.collect {}
         }
+        // Launch 2: 初始数据加载 + engine/download state + model params 恢复 监听
+        viewModelScope.launch {
+            // 恢复模型参数配置（修复重启重置问题）
+            try {
+                val savedParams = preferencesRepo.modelParams.first()
+                if (savedParams != ModelParams()) {
+                    liteRTManager.modelParams = savedParams
+                    liteRTManager.enableSpeculativeDecoding = savedParams.enableSpeculativeDecoding
+                    liteRTManager.backendType = savedParams.backendType
+                    _state.update {
+                        it.copy(
+                            modelParams = savedParams,
+                            backendType = savedParams.backendType,
+                            enableSpeculativeDecoding = savedParams.enableSpeculativeDecoding,
+                            contextMaxTokens = if (!it.cloudModelEnabled) savedParams.contextWindowTokens else it.contextMaxTokens,
+                        )
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        // Launch 3: 初始数据加载 + engine/download state 监听
         viewModelScope.launch {
             val saved = conversationRepo.load()
             _state.update { it.copy(conversations = saved) }
-        }
-        // 加载对话记忆
-        viewModelScope.launch {
             conversationMemory.load()
             refreshMemoryState()
-        }
-        viewModelScope.launch {
-            liteRTManager.state.collect { engineState ->
-                _state.update {
-                    it.copy(
-                        engineStatus = engineState.status,
-                        engineErrorMessage = engineState.errorMessage,
-                        modelName = engineState.modelName,
-                        // 本地模型加载成功后使用引擎推断的实际窗口大小
-                        contextMaxTokens = if (!it.cloudModelEnabled && engineState.status == EngineStatus.Ready && engineState.contextWindow > 0)
-                            engineState.contextWindow else it.contextMaxTokens,
-                        isMultimodal = liteRTManager.isMultimodal,
-                    )
-                }
-                // 模型加载成功时保存路径
-                if (engineState.status == EngineStatus.Ready && engineState.modelPath.isNotEmpty()) {
-                    preferencesRepo.setLastModelPath(engineState.modelPath)
-                }
-            }
-        }
-        // 启动时自动加载上次模型（已读取最新的 backend 配置）
-        viewModelScope.launch {
+            // 启动时自动加载上次模型
             try {
                 val autoLoad = preferencesRepo.autoLoadLastModel.first()
                 val lastPath = preferencesRepo.lastModelPath.first()
@@ -214,55 +219,60 @@ class ChatViewModel(
                     }
                 }
             } catch (_: Exception) {}
-        }
-        // 同步 backend 配置到 LiteRTManager
-        viewModelScope.launch {
-            preferencesRepo.backendType.collect { type ->
-                liteRTManager.backendType = type
-                _state.update { it.copy(backendType = type) }
+            // engine state + download state 合并监听
+            launch {
+                liteRTManager.state.collect { engineState ->
+                    _state.update {
+                        it.copy(
+                            engineStatus = engineState.status,
+                            engineErrorMessage = engineState.errorMessage,
+                            modelName = engineState.modelName,
+                            contextMaxTokens = if (!it.cloudModelEnabled && engineState.status == EngineStatus.Ready && engineState.contextWindow > 0)
+                                engineState.contextWindow else it.contextMaxTokens,
+                            isMultimodal = liteRTManager.isMultimodal,
+                        )
+                    }
+                    if (engineState.status == EngineStatus.Ready && engineState.modelPath.isNotEmpty()) {
+                        preferencesRepo.setLastModelPath(engineState.modelPath)
+                    }
+                }
             }
-        }
-        viewModelScope.launch {
-            preferencesRepo.npuLibraryDir.collect { dir ->
-                liteRTManager.npuLibraryDir = dir
-                _state.update { it.copy(npuLibraryDir = dir) }
-            }
-        }
-        // 同步 MTP (Speculative Decoding) 配置
-        viewModelScope.launch {
-            preferencesRepo.enableSpeculativeDecoding.collect { enabled ->
-                liteRTManager.enableSpeculativeDecoding = enabled
-                _state.update { it.copy(enableSpeculativeDecoding = enabled) }
-            }
-        }
-        viewModelScope.launch {
-            liteRTManager.downloadState.collect { ds ->
-                _state.update {
-                    it.copy(
-                        downloadStatus = ds.status,
-                        downloadProgress = ds.progress,
-                        downloadFileName = ds.fileName,
-                        downloadErrorMessage = ds.errorMessage,
-                    )
+            launch {
+                liteRTManager.downloadState.collect { ds ->
+                    _state.update {
+                        it.copy(
+                            downloadStatus = ds.status,
+                            downloadProgress = ds.progress,
+                            downloadFileName = ds.fileName,
+                            downloadErrorMessage = ds.errorMessage,
+                        )
+                    }
                 }
             }
         }
+        // Launch 3: backend + MTP 配置同步（合并 3 个 flow → 1）
         viewModelScope.launch {
-            preferencesRepo.cloudModelEnabled.collect { enabled ->
-                _state.update { it.copy(cloudModelEnabled = enabled) }
-            }
+            combine(
+                preferencesRepo.backendType,
+                preferencesRepo.npuLibraryDir,
+                preferencesRepo.enableSpeculativeDecoding,
+            ) { type: BackendType, npuDir: String, mtp: Boolean ->
+                liteRTManager.backendType = type
+                liteRTManager.npuLibraryDir = npuDir
+                liteRTManager.enableSpeculativeDecoding = mtp
+                _state.update { it.copy(backendType = type, npuLibraryDir = npuDir, enableSpeculativeDecoding = mtp) }
+            }.collect {}
         }
+        // Launch 4: 云端配置同步（合并 3 个 flow → 1）
         viewModelScope.launch {
-            preferencesRepo.cloudModelProfiles.collect { profiles ->
-                _state.update { it.copy(cloudModelProfiles = profiles) }
+            combine(
+                preferencesRepo.cloudModelEnabled,
+                preferencesRepo.cloudModelProfiles,
+                preferencesRepo.activeCloudProfileId,
+            ) { enabled: Boolean, profiles: List<CloudModelProfile>, activeId: String ->
+                _state.update { it.copy(cloudModelEnabled = enabled, cloudModelProfiles = profiles, activeCloudProfileId = activeId) }
                 updateContextMaxTokens()
-            }
-        }
-        viewModelScope.launch {
-            preferencesRepo.activeCloudProfileId.collect { id ->
-                _state.update { it.copy(activeCloudProfileId = id) }
-                updateContextMaxTokens()
-            }
+            }.collect {}
         }
     }
 
@@ -361,6 +371,8 @@ class ChatViewModel(
                 contextMaxTokens = if (!it.cloudModelEnabled) params.contextWindowTokens else it.contextMaxTokens,
             )
         }
+        // 持久化参数（修复重启重置问题）
+        viewModelScope.launch { preferencesRepo.setModelParams(params) }
         // 应用参数后重新加载模型以生效（官方行为）
         val modelPath = liteRTManager.currentModelPath ?: return
         loadModel(modelPath)
@@ -411,8 +423,7 @@ class ChatViewModel(
         }
         val fileBlock = buildFileAttachmentBlock()
         val userContent = buildString {
-            appendLine("[用户请求]")
-            appendLine(text)
+            append(text)
             if (fileBlock.isNotBlank()) {
                 appendLine()
                 append(fileBlock)
@@ -721,7 +732,6 @@ class ChatViewModel(
         activeConversation?.let { return it }
         val initialMessages = pendingInitialMessages
         pendingInitialMessages = null
-        val thinkingEnabled = runBlocking { preferencesRepo.deepThinkEnabled.first() }
         val conv = liteRTManager.createConversation(
             ConversationConfig(
                 systemInstruction = Contents.of(buildSystemInstruction()),
@@ -729,8 +739,8 @@ class ChatViewModel(
                 samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
                 tools = listOf(tool(aiToolSet)),
                 automaticToolCalling = autoToolCalling,
-                channels = null,  // 使用模型默认 channel 配置
-                extraContext = mapOf("enable_thinking" to thinkingEnabled),
+                channels = null,
+                extraContext = mapOf("enable_thinking" to sysPromptDeepThink),
             )
         )
         activeConversation = conv
@@ -846,8 +856,7 @@ You are a helpful AI coding assistant. When responding to the user, use Chinese 
         )
         sb.appendLine()
 
-        val userName = runBlocking { preferencesRepo.userName.first() }
-        if (userName.isNotBlank()) sb.append("\n用户: $userName")
+        if (sysPromptUserName.isNotBlank()) sb.append("\n用户: $sysPromptUserName")
 
         // 注入对话历史记忆（本地模型限制长度防止撑满上下文）
         val convId = _state.value.activeConversationId ?: ""
@@ -864,15 +873,13 @@ You are a helpful AI coding assistant. When responding to the user, use Chinese 
             sb.append("\n\n$keyFactsCtx\n")
         }
 
-        val allRules = runBlocking { preferencesRepo.rules.first() }
-        if (allRules.isNotEmpty()) {
+        if (sysPromptRules.isNotEmpty()) {
             sb.append("\n\n## 系统规则（必须严格遵守）")
-            allRules.forEach { r -> sb.append("\n- ${r.name}: ${r.content}") }
+            sysPromptRules.forEach { r -> sb.append("\n- ${r.name}: ${r.content}") }
             sb.append("\n严格遵守以上所有规则。")
         }
 
-        val skills = runBlocking { preferencesRepo.skills.first() }
-        val enabledSkills = skills.filter { it.enabled }
+        val enabledSkills = sysPromptSkills.filter { it.enabled }
         if (enabledSkills.isNotEmpty()) {
             sb.append("\n\n## 已启用技能")
             enabledSkills.forEach { s ->
@@ -1828,20 +1835,15 @@ You are a helpful AI coding assistant. When responding to the user, use Chinese 
             // 将工具结果（含上下文更新）发给 LiteRT Conversation
             currentMessage = Message.tool(Contents.of(listOf(Content.ToolResponse("call_${currentMsgId.take(8)}", combinedResult))))
 
-            // 本地模型上下文预算检查：每轮结束后估算总输入，超限则重建 Conversation
+            // 本地模型上下文预算检查：LiteRT Conversation 原生管理 KV-cache，不销毁重建
+            // 仅做 UI 层消息数量预警，超出时不阻塞对话流程
             val sysOverhead = estimateSystemPromptTokens()
             val contextBudget = _state.value.contextMaxTokens.coerceAtLeast(DEFAULT_LOCAL_CONTEXT_WINDOW)
             val localBudget = contextBudget - estimateTokens(text) - estimateTokens(combinedResult) - 512 - sysOverhead
             if (estimateContextTokens(_state.value.messages) > localBudget) {
-                try { activeConversation?.close() } catch (_: Exception) {}
-                activeConversation = null
-                pendingInitialMessages = null
-                val reassembled = selectContextForLocal(_state.value.messages, contextBudget - 512 - sysOverhead)
-                pendingInitialMessages = chatMessagesToLiteRT(reassembled)
-                val newConv = ensureConversation()
-                conv = newConv
-                // 系统级通知使用 System 角色，避免与用户消息混淆
-                currentMessage = Message.system("[SYSTEM_NOTIFICATION] 上下文已自动压缩以节省 token 预算。请继续基于已有信息分析。如需查询早期内容可使用 searchConversationMemory。")
+                // 修剪 UI 消息列表，LiteRT Conversation 的 KV-cache 由引擎自行管理
+                val trimmed = selectContextForLocal(_state.value.messages, contextBudget - 512 - sysOverhead)
+                _state.update { it.copy(messages = trimmed) }
             }
         }
     }

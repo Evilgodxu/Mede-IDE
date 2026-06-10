@@ -80,13 +80,13 @@ class ConversationMemory(private val context: Context) {
     // Layer 4: 语义索引
     private val vectorIndex = VectorIndex()
 
-    // 持久化文件
+    // 持久化文件（合并为单文件减少 I/O）
     private val memoryDir: File get() = File(context.filesDir, "conversation_memory")
-    private val shortTermFile: File get() = File(memoryDir, "short_term.json")
-    private val summaryFile: File get() = File(memoryDir, "summaries.json")
-    private val evictedFile: File get() = File(memoryDir, "evicted.json")
-    private val keyFactsFile: File get() = File(memoryDir, "key_facts.json")
+    private val memoryFile: File get() = File(memoryDir, "memory.json")
     private val indexDir: File get() = File(memoryDir, "vector_index")
+
+    // 批量索引：累积 addEntry 的条目，save 时一次性构建
+    private val pendingIndexEntries = mutableListOf<Pair<String, String>>()
 
     // === 配置 ===
     companion object {
@@ -126,7 +126,7 @@ class ConversationMemory(private val context: Context) {
         // Layer 2: 短期
         shortTerm.add(entry)
 
-        // Layer 4: 语义索引
+        // Layer 4: 语义索引（批量构建，延迟到 save 时一次性写入）
         val indexedContent = buildString {
             appendLine("角色: ${entry.role}")
             appendLine("关键词: ${entry.keywords.joinToString(", ")}")
@@ -134,7 +134,11 @@ class ConversationMemory(private val context: Context) {
             if (entry.hasCode) appendLine("[含代码块]")
             append(entry.content.take(2000))
         }
-        vectorIndex.addDocument("memory_${entry.id}", indexedContent)
+        pendingIndexEntries.add("memory_${entry.id}" to indexedContent)
+        if (pendingIndexEntries.size >= 10) {
+            pendingIndexEntries.forEach { (id, content) -> vectorIndex.addDocument(id, content) }
+            pendingIndexEntries.clear()
+        }
 
         Log.d(TAG, "addEntry: role=$role id=${entry.id} kw=${entry.keywords.size}")
     }
@@ -373,85 +377,59 @@ class ConversationMemory(private val context: Context) {
         try {
             if (!memoryDir.exists()) memoryDir.mkdirs()
 
-            // 加载短期记忆
-            if (shortTermFile.exists()) {
-                val json = shortTermFile.readText()
-                val arr = JSONArray(json)
+            // 优先读取合并文件，回退到旧版多文件
+            if (memoryFile.exists()) {
+                val root = JSONObject(memoryFile.readText())
                 shortTerm.clear()
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    shortTerm.add(Entry(
-                        id = obj.optString("id"),
-                        timestamp = obj.optLong("timestamp"),
-                        role = obj.optString("role"),
-                        content = obj.optString("content", ""),
-                        summary = obj.optString("summary", ""),
-                        keywords = jsonArrToList(obj.optJSONArray("keywords")),
-                        filePaths = jsonArrToList(obj.optJSONArray("filePaths")),
-                        hasCode = obj.optBoolean("hasCode"),
-                        hasToolCall = obj.optBoolean("hasToolCall"),
-                        conversationId = obj.optString("conversationId", ""),
-                    ))
+                root.optJSONArray("shortTerm")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        shortTerm.add(Entry(
+                            id = obj.optString("id"), timestamp = obj.optLong("timestamp"),
+                            role = obj.optString("role"), content = obj.optString("content", ""),
+                            summary = obj.optString("summary", ""), keywords = jsonArrToList(obj.optJSONArray("keywords")),
+                            filePaths = jsonArrToList(obj.optJSONArray("filePaths")),
+                            hasCode = obj.optBoolean("hasCode"), hasToolCall = obj.optBoolean("hasToolCall"),
+                            conversationId = obj.optString("conversationId", ""),
+                        ))
+                    }
                 }
-            }
-
-            // 加载淘汰缓存
-            if (evictedFile.exists()) {
-                val json = evictedFile.readText()
-                val arr = JSONArray(json)
                 evictedEntries.clear()
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    val entry = Entry(
-                        id = obj.optString("id"),
-                        timestamp = obj.optLong("timestamp"),
-                        role = obj.optString("role"),
-                        content = obj.optString("content", ""),
-                        summary = obj.optString("summary", ""),
-                        keywords = jsonArrToList(obj.optJSONArray("keywords")),
-                        filePaths = jsonArrToList(obj.optJSONArray("filePaths")),
-                        hasCode = obj.optBoolean("hasCode"),
-                        hasToolCall = obj.optBoolean("hasToolCall"),
-                        conversationId = obj.optString("conversationId", ""),
-                    )
-                    evictedEntries[entry.id] = entry
+                root.optJSONArray("evicted")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        val entry = Entry(
+                            id = obj.optString("id"), timestamp = obj.optLong("timestamp"),
+                            role = obj.optString("role"), content = obj.optString("content", ""),
+                            summary = obj.optString("summary", ""), keywords = jsonArrToList(obj.optJSONArray("keywords")),
+                            filePaths = jsonArrToList(obj.optJSONArray("filePaths")),
+                            hasCode = obj.optBoolean("hasCode"), hasToolCall = obj.optBoolean("hasToolCall"),
+                            conversationId = obj.optString("conversationId", ""),
+                        )
+                        evictedEntries[entry.id] = entry
+                    }
                 }
-            }
-
-            // 加载摘要
-            if (summaryFile.exists()) {
-                val json = summaryFile.readText()
-                val arr = JSONArray(json)
                 summaries.clear()
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    summaries.add(Summary(
-                        periodStart = obj.optLong("periodStart"),
-                        periodEnd = obj.optLong("periodEnd"),
-                        summary = obj.optString("summary"),
-                        entryCount = obj.optInt("entryCount"),
-                    ))
+                root.optJSONArray("summaries")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        summaries.add(Summary(periodStart = obj.optLong("periodStart"), periodEnd = obj.optLong("periodEnd"),
+                            summary = obj.optString("summary"), entryCount = obj.optInt("entryCount")))
+                    }
                 }
-            }
-
-            // 加载关键事实（Layer 1）
-            if (keyFactsFile.exists()) {
-                val json = keyFactsFile.readText()
-                val arr = JSONArray(json)
                 keyFacts.clear()
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    keyFacts.add(KeyFact(
-                        id = obj.optString("id"),
-                        timestamp = obj.optLong("timestamp"),
-                        content = obj.optString("content"),
-                        source = obj.optString("source", ""),
-                        type = obj.optString("type", "context"),
-                    ))
+                root.optJSONArray("keyFacts")?.let { arr ->
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        keyFacts.add(KeyFact(id = obj.optString("id"), timestamp = obj.optLong("timestamp"),
+                            content = obj.optString("content"), source = obj.optString("source", ""),
+                            type = obj.optString("type", "context")))
+                    }
                 }
+                summarizedEntryCount = root.optInt("summarizedEntryCount", 0)
             }
 
-            // 加载语义索引；若索引为空但短期/缓存有数据则重建
+            // 加载语义索引
             vectorIndex.load(indexDir)
             if (vectorIndex.size == 0 && (shortTerm.isNotEmpty() || evictedEntries.isNotEmpty())) {
                 val allEntries = shortTerm + evictedEntries.values
@@ -466,7 +444,7 @@ class ConversationMemory(private val context: Context) {
                     vectorIndex.addDocument("memory_${entry.id}", indexedContent)
                 }
                 vectorIndex.save(indexDir)
-                Log.d(TAG, "vector index rebuilt from ${allEntries.size} entries (shortTerm=${shortTerm.size}, evicted=${evictedEntries.size})")
+                Log.d(TAG, "vector index rebuilt from ${allEntries.size} entries")
             }
 
             Log.d(TAG, "loaded: ${keyFacts.size} facts, ${shortTerm.size} shortTerm, ${evictedEntries.size} evicted, ${summaries.size} summaries, ${vectorIndex.size} indexed")
@@ -481,76 +459,60 @@ class ConversationMemory(private val context: Context) {
         try {
             if (!memoryDir.exists()) memoryDir.mkdirs()
 
-            // 保存短期记忆
+            // flush 批量索引
+            if (pendingIndexEntries.isNotEmpty()) {
+                pendingIndexEntries.forEach { (id, content) -> vectorIndex.addDocument(id, content) }
+                pendingIndexEntries.clear()
+            }
+            vectorIndex.save(indexDir)
+
+            // 单文件序列化所有层
+            val root = JSONObject()
+
             val shortArr = JSONArray()
             shortTerm.forEach { e ->
                 shortArr.put(JSONObject().apply {
-                    put("id", e.id)
-                    put("timestamp", e.timestamp)
-                    put("role", e.role)
-                    put("content", e.content.take(500))
-                    put("summary", e.summary)
-                    put("keywords", JSONArray(e.keywords))
-                    put("filePaths", JSONArray(e.filePaths))
-                    put("hasCode", e.hasCode)
-                    put("hasToolCall", e.hasToolCall)
-                    put("conversationId", e.conversationId)
+                    put("id", e.id); put("timestamp", e.timestamp); put("role", e.role)
+                    put("content", e.content.take(500)); put("summary", e.summary)
+                    put("keywords", JSONArray(e.keywords)); put("filePaths", JSONArray(e.filePaths))
+                    put("hasCode", e.hasCode); put("hasToolCall", e.hasToolCall); put("conversationId", e.conversationId)
                 })
             }
-            shortTermFile.writeText(shortArr.toString(2))
+            root.put("shortTerm", shortArr)
 
-            // 保存淘汰缓存（限制大小防止膨胀）
             val evictedArr = JSONArray()
-            val evictedList = evictedEntries.values.toList().takeLast(200)
-            evictedList.forEach { e ->
+            evictedEntries.values.toList().takeLast(200).forEach { e ->
                 evictedArr.put(JSONObject().apply {
-                    put("id", e.id)
-                    put("timestamp", e.timestamp)
-                    put("role", e.role)
-                    put("content", e.content.take(500))
-                    put("summary", e.summary)
-                    put("keywords", JSONArray(e.keywords))
-                    put("filePaths", JSONArray(e.filePaths))
-                    put("hasCode", e.hasCode)
-                    put("hasToolCall", e.hasToolCall)
-                    put("conversationId", e.conversationId)
+                    put("id", e.id); put("timestamp", e.timestamp); put("role", e.role)
+                    put("content", e.content.take(500)); put("summary", e.summary)
+                    put("keywords", JSONArray(e.keywords)); put("filePaths", JSONArray(e.filePaths))
+                    put("hasCode", e.hasCode); put("hasToolCall", e.hasToolCall); put("conversationId", e.conversationId)
                 })
             }
-            evictedFile.writeText(evictedArr.toString(2))
+            root.put("evicted", evictedArr)
 
-            // 保存摘要
-            if (summariesDirty) {
-                val sumArr = JSONArray()
-                summaries.forEach { s ->
-                    sumArr.put(JSONObject().apply {
-                        put("periodStart", s.periodStart)
-                        put("periodEnd", s.periodEnd)
-                        put("summary", s.summary)
-                        put("entryCount", s.entryCount)
-                    })
-                }
-                summaryFile.writeText(sumArr.toString(2))
-                summariesDirty = false
+            val sumArr = JSONArray()
+            summaries.forEach { s ->
+                sumArr.put(JSONObject().apply {
+                    put("periodStart", s.periodStart); put("periodEnd", s.periodEnd)
+                    put("summary", s.summary); put("entryCount", s.entryCount)
+                })
             }
+            root.put("summaries", sumArr)
 
-            // 保存语义索引
-            vectorIndex.save(indexDir)
-
-            // 保存关键事实（Layer 1）
-            if (keyFactsDirty) {
-                val factArr = JSONArray()
-                keyFacts.forEach { f ->
-                    factArr.put(JSONObject().apply {
-                        put("id", f.id)
-                        put("timestamp", f.timestamp)
-                        put("content", f.content)
-                        put("source", f.source)
-                        put("type", f.type)
-                    })
-                }
-                keyFactsFile.writeText(factArr.toString(2))
-                keyFactsDirty = false
+            val factArr = JSONArray()
+            keyFacts.forEach { f ->
+                factArr.put(JSONObject().apply {
+                    put("id", f.id); put("timestamp", f.timestamp); put("content", f.content)
+                    put("source", f.source); put("type", f.type)
+                })
             }
+            root.put("keyFacts", factArr)
+            root.put("summarizedEntryCount", summarizedEntryCount)
+
+            memoryFile.writeText(root.toString(2))
+            summariesDirty = false
+            keyFactsDirty = false
 
             Log.d(TAG, "saved: ${keyFacts.size} facts, ${shortTerm.size} shortTerm, ${evictedEntries.size} evicted, ${vectorIndex.size} indexed")
             FileLogger.d(TAG, "saved: ${keyFacts.size} facts, ${shortTerm.size} shortTerm, ${evictedEntries.size} evicted, ${vectorIndex.size} indexed")

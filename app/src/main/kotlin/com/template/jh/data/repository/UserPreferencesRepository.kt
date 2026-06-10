@@ -54,6 +54,8 @@ class UserPreferencesRepository(private val context: Context) {
         val NPU_LIBRARY_DIR = stringPreferencesKey("npu_library_dir")
         // MTP (Multi-Turn Prediction / Speculative Decoding)
         val ENABLE_SPECULATIVE_DECODING = booleanPreferencesKey("enable_speculative_decoding")
+        // 模型参数持久化（topK/topP/temperature/seed/contextWindow）
+        val MODEL_PARAMS_JSON = stringPreferencesKey("model_params_json")
     }
 
     val themeMode: Flow<String> = context.dataStore.data
@@ -374,6 +376,40 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun setEnableSpeculativeDecoding(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.ENABLE_SPECULATIVE_DECODING] = enabled }
+    }
+
+    // 模型参数完整持久化（避免重启重置为默认值）
+    val modelParams: Flow<com.template.jh.model.chat.ModelParams> = context.dataStore.data
+        .map { prefs ->
+            val json = prefs[PreferencesKeys.MODEL_PARAMS_JSON]
+            if (json != null) {
+                try {
+                    val obj = JSONObject(json)
+                    com.template.jh.model.chat.ModelParams(
+                        topK = obj.optInt("topK", 10),
+                        topP = obj.optDouble("topP", 0.95),
+                        temperature = obj.optDouble("temperature", 0.8),
+                        seed = obj.optInt("seed", 0),
+                        contextWindowTokens = obj.optInt("contextWindowTokens", 4096),
+                        enableSpeculativeDecoding = obj.optBoolean("enableSpeculativeDecoding", false),
+                        backendType = BackendType.fromName(obj.optString("backendType", "CPU")),
+                    )
+                } catch (_: Exception) { com.template.jh.model.chat.ModelParams() }
+            } else com.template.jh.model.chat.ModelParams()
+        }
+
+    suspend fun setModelParams(params: com.template.jh.model.chat.ModelParams) {
+        context.dataStore.edit { prefs ->
+            val obj = JSONObject()
+            obj.put("topK", params.topK)
+            obj.put("topP", params.topP)
+            obj.put("temperature", params.temperature)
+            obj.put("seed", params.seed)
+            obj.put("contextWindowTokens", params.contextWindowTokens)
+            obj.put("enableSpeculativeDecoding", params.enableSpeculativeDecoding)
+            obj.put("backendType", params.backendType.name)
+            prefs[PreferencesKeys.MODEL_PARAMS_JSON] = obj.toString()
+        }
     }
 
     private fun rulesToJson(rules: List<Rule>): String {

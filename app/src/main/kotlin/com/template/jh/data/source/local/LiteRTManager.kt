@@ -68,6 +68,11 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
     @Volatile var backendType: BackendType = BackendType.CPU
     @Volatile var npuLibraryDir: String = ""
 
+    // === 扫描缓存 ===
+    private var modelsCache: List<ModelInfo>? = null
+    private var modelsCacheTime: Long = 0L
+    private val modelsCacheTtlMs = 30_000L
+
     // 图像/多模态相关配置（仅多模态模型生效）
     @Volatile var maxNumImages: Int = 4
     @Volatile var visualTokenBudget: Int = 1120  // Gemma4 支持: 70, 140, 280, 560, 1120
@@ -121,7 +126,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
                     if (!response.isSuccessful) {
                         throw IOException("服务器返回 ${response.code}: ${response.message}")
                     }
-                    val body = response.body ?: throw IOException("响应体为空")
+                    val body = response.body
                     val totalBytes = body.contentLength()
                     val input = body.byteStream()
                     FileOutputStream(destFile).use { output ->
@@ -158,6 +163,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
                 }
             }
             if (!downloadCancelled) {
+                modelsCache = null  // 下载完成，失效扫描缓存
                 _downloadState.value = DownloadState(status = DownloadStatus.Completed, fileName = fileName, progress = 1f)
             }
         } catch (e: java.util.concurrent.CancellationException) {
@@ -280,8 +286,11 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
 
     override fun close() { unloadModel() }
 
-    // 扫描模型文件（.litertlm，递归+MediaStore双通道）
+    // 扫描模型文件（.litertlm，递归+MediaStore双通道，30s 缓存）
     fun scanModels(customPaths: List<String> = emptyList()): List<ModelInfo> {
+        val cached = modelsCache
+        val now = System.currentTimeMillis()
+        if (cached != null && customPaths.isEmpty() && (now - modelsCacheTime) < modelsCacheTtlMs) return cached
         val seen = mutableSetOf<String>()
         val models = mutableListOf<ModelInfo>()
 
@@ -367,6 +376,8 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
             }
         } catch (_: Exception) {}
 
+        modelsCache = models
+        modelsCacheTime = System.currentTimeMillis()
         return models
     }
 
