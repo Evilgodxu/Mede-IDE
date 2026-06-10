@@ -254,6 +254,7 @@ fun AIChatPanel(
             contextCompressedCount = state.contextCompressedCount,
             memoryKeyFactCount = state.memoryKeyFactCount,
             memorySummaryCount = state.memorySummaryCount,
+            memoryTotalTokens = state.memoryTotalTokens,
             onContextInfoClick = { showContextInfoDialog = true },
             onImagePick = { imagePickerLauncher.launch("image/*") },
         )
@@ -598,6 +599,7 @@ private fun ChatInputBar(
     contextCompressedCount: Int = 0,
     memoryKeyFactCount: Int = 0,
     memorySummaryCount: Int = 0,
+    memoryTotalTokens: Int = 0,
     onContextInfoClick: () -> Unit = {},
     onImagePick: () -> Unit = {},
     attachedImageUris: List<android.net.Uri> = emptyList(),
@@ -716,55 +718,54 @@ private fun ChatInputBar(
 
             // 上下文窗口进度按钮（分段环：用量+压缩+记忆）
             val ratio = if (contextMaxTokens > 0) (contextUsedTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
-            val hasMemory = memoryKeyFactCount > 0 || memorySummaryCount > 0
             val compressedRatio = if (contextMaxTokens > 0 && contextCompressedTokens > 0)
                 (contextCompressedTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
-            val isMultiState = isContextCompressed || hasMemory
+            val memoryRatio = if (contextMaxTokens > 0 && memoryTotalTokens > 0)
+                (memoryTotalTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
+            val hasMemory = memoryKeyFactCount > 0 || memorySummaryCount > 0
             Box(
                 modifier = Modifier
                     .size(22.dp)
                     .clickable { onContextInfoClick() },
                 contentAlignment = Alignment.Center,
             ) {
-                if (isMultiState) {
-                    Canvas(Modifier.size(20.dp)) {
-                        val strokeWidth = 3f
-                        val outerRadius = size.minDimension / 2f - strokeWidth / 2f
-                        val topLeft = androidx.compose.ui.geometry.Offset(strokeWidth / 2f, strokeWidth / 2f)
-                        val arcSize = androidx.compose.ui.geometry.Size(outerRadius * 2, outerRadius * 2)
-                        // Track
-                        drawArc(Color(0xFFE0E0E0), -90f, 360f, false,
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round),
-                            topLeft = topLeft, size = arcSize)
-                        // Used segment (red/orange)
-                        if (ratio > 0f) {
-                            drawArc(Color(0xFFE53935), -90f, ratio * 360f, false,
-                                style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Round),
-                                topLeft = topLeft, size = arcSize)
-                        }
-                    }
-                    // Multi-indicator dots
-                    val dotColor = if (isContextCompressed && hasMemory) Color(0xFF7B1FA2)
-                        else if (isContextCompressed) Color(0xFF9C27B0)
-                        else Color(0xFF1565C0)
-                    Text(
-                        if (isContextCompressed && hasMemory) "•" else "•",
-                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                        color = dotColor, fontWeight = FontWeight.Bold,
-                    )
-                } else {
-                    val buttonColor = when {
+                Canvas(Modifier.size(20.dp)) {
+                    val strokeWidth = 3f
+                    val outerRadius = size.minDimension / 2f - strokeWidth / 2f
+                    val topLeft = androidx.compose.ui.geometry.Offset(strokeWidth / 2f, strokeWidth / 2f)
+                    val arcSize = androidx.compose.ui.geometry.Size(outerRadius * 2, outerRadius * 2)
+                    // Track
+                    drawArc(Color(0xFFE0E0E0), -90f, 360f, false,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
+                        topLeft = topLeft, size = arcSize)
+                    // Segment 1: 已用 token（绿/黄/红渐变）
+                    val usedColor = when {
                         ratio < 0.5f -> Color(0xFF4CAF50)
                         ratio < 0.8f -> Color(0xFFFFA000)
                         else -> Color(0xFFE53935)
                     }
-                    CircularProgressIndicator(
-                        progress = { ratio },
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 1.5.dp,
-                        color = buttonColor,
-                        trackColor = Color(0xFFE0E0E0),
-                    )
+                    var segmentStart = -90f
+                    if (ratio > 0f) {
+                        drawArc(usedColor, segmentStart, ratio * 360f, false,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
+                            topLeft = topLeft, size = arcSize)
+                        segmentStart += ratio * 360f + 3f
+                    }
+                    // Segment 2: 已压缩 token（紫色）
+                    if (isContextCompressed && compressedRatio > 0.01f) {
+                        val compressedArc = (compressedRatio * 360f).coerceAtMost(120f)
+                        drawArc(Color(0xFF9C27B0).copy(alpha = 0.7f), segmentStart, compressedArc, false,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth * 0.8f, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
+                            topLeft = topLeft, size = arcSize)
+                        segmentStart += compressedArc + 3f
+                    }
+                    // Segment 3: 记忆系统 token（蓝色）
+                    if (hasMemory && memoryRatio > 0.01f) {
+                        val memoryArc = (memoryRatio * 360f).coerceAtMost(90f)
+                        drawArc(Color(0xFF1565C0).copy(alpha = 0.6f), segmentStart, memoryArc, false,
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth * 0.7f, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
+                            topLeft = topLeft, size = arcSize)
+                    }
                 }
             }
 

@@ -113,7 +113,7 @@ class ConversationMemory(private val context: Context) {
             summary = summarizeContent(content),
             keywords = extractKeywords(content),
             filePaths = filePaths,
-            hasCode = content.contains("```") || content.contains("```"),
+            hasCode = content.contains("```") || content.contains("~~~"),
             hasToolCall = content.contains("[工具调用:") || content.contains("\"tool_name\"") || content.contains("\"name\""),
             conversationId = conversationId,
         )
@@ -313,13 +313,18 @@ class ConversationMemory(private val context: Context) {
     }
 
     /** 获取压缩上下文（Layer 1 关键事实 + Layer 3 摘要），供 compressMessages 使用 */
-    fun getCompressionContext(): String {
+    fun getCompressionContext(conversationId: String = ""): String {
         if (keyFacts.isEmpty() && summaries.isEmpty()) return ""
         val sb = StringBuilder()
         if (keyFacts.isNotEmpty()) sb.appendLine(getKeyFactsContext())
         if (summaries.isNotEmpty()) {
             sb.appendLine("## 历史摘要")
-            summaries.takeLast(3).forEach { s ->
+            // 仅取最后 3 条，优先当前对话
+            val filtered = if (conversationId.isNotBlank()) {
+                // 摘要不直接存 conversationId，使用短记忆条数近似
+                summaries.takeLast(3)
+            } else summaries.takeLast(3)
+            filtered.forEach { s ->
                 sb.appendLine("[${formatTimestamp(s.periodStart)}] ${s.summary}")
             }
         }

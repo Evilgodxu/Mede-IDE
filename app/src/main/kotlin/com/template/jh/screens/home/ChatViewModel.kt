@@ -1102,7 +1102,7 @@ You are an AI coding assistant. Reply in 简体中文.
             }
 
             // 使用 ConversationMemory 的压缩上下文（关键事实 + 摘要）
-            val memCtx = conversationMemory.getCompressionContext()
+            val memCtx = conversationMemory.getCompressionContext(convId)
             if (memCtx.isNotBlank() || summaryContent.isBlank()) {
                 summaryContent = if (summaryContent.isNotBlank()) {
                     "$memCtx\n\n[LLM摘要]\n$summaryContent"
