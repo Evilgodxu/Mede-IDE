@@ -1916,10 +1916,13 @@ You are an AI coding assistant. Reply in 简体中文.
         }
 
         // 注入 callback 使探索阶段的工具执行对 UI 可见
-        aiToolSet.callback = ToolExecutionCallback { name, args ->
-            val act = toolNameToActivity(name)
-            val detail = args["path"] ?: args["command"] ?: args["query"] ?: ""
-            _state.update { it.copy(modelActivity = act, activityDetail = detail) }
+        aiToolSet.callback = object : ToolExecutionCallback {
+            override fun onToolStart(name: String, args: Map<String, String>) {
+                val act = toolNameToActivity(name)
+                val detail = args["path"] ?: args["command"] ?: args["query"] ?: ""
+                _state.update { it.copy(modelActivity = act, activityDetail = detail) }
+            }
+            override fun onToolResult(name: String, args: Map<String, String>, result: String) {}
         }
 
         val exploreMessages = StringBuilder()

@@ -15,7 +15,7 @@ import java.net.URLEncoder
 import org.jsoup.Jsoup
 
 /** 工具执行状态回调 — 由 ChatViewModel 注入，打破 automaticToolCalling 黑盒 */
-fun interface ToolExecutionCallback {
+interface ToolExecutionCallback {
     fun onToolStart(name: String, args: Map<String, String>)
     fun onToolResult(name: String, args: Map<String, String>, result: String)
 }

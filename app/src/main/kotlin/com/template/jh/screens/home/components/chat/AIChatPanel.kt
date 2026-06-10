@@ -1082,11 +1082,22 @@ private fun ContextInfoDialog(
     val ratio = if (maxTokens > 0) (usedTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
     val compressedRatio = if (maxTokens > 0) (contextCompressedTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
     val memoryRatio = if (maxTokens > 0) (memoryTotalTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
+    val hasMemory = memoryKeyFactCount > 0 || memorySummaryCount > 0 || memoryEntryCount > 0
+    // 图例活跃颜色（与分段弧色同步）
+    val usedLegendColor = when {
+        ratio < 50f -> Color(0xFF4CAF50)
+        ratio < 80f -> Color(0xFFFFA000)
+        else -> Color(0xFFE53935)
+    }
+    // 屏幕高度 75%
+    val dialogMaxHeight = with(androidx.compose.ui.platform.LocalConfiguration.current) {
+        (screenHeightDp.dp * 0.75f).coerceAtLeast(200.dp)
+    }
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
                 .widthIn(min = 300.dp, max = 380.dp)
-                .heightIn(max = 480.dp),
+                .heightIn(max = dialogMaxHeight),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
@@ -1098,7 +1109,8 @@ private fun ContextInfoDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text("上下文窗口", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-                // 分段甜甜圈图表
+
+                // === 分段甜甜圈图表（与按钮版本一致的连续三段布局） ===
                 Box(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center,
@@ -1109,34 +1121,38 @@ private fun ContextInfoDialog(
                             val outerRadius = size.minDimension / 2f - strokeWidth / 2f
                             val topLeft = androidx.compose.ui.geometry.Offset(strokeWidth / 2f, strokeWidth / 2f)
                             val arcSize = androidx.compose.ui.geometry.Size(outerRadius * 2, outerRadius * 2)
-                            val cs = androidx.compose.ui.graphics.StrokeCap.Round
 
                             // Track
                             drawArc(Color(0xFFE8E8E8), -90f, 360f, false,
-                                style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = cs),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
                                 topLeft = topLeft, size = arcSize)
-                            // Used segment
-                            if (ratio > 0f) {
-                                drawArc(
-                                    if (ratio < 50f) Color(0xFF4CAF50) else if (ratio < 80f) Color(0xFFFFA000) else Color(0xFFE53935),
-                                    -90f, ratio / 100f * 360f, false,
-                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = cs),
+
+                            var segStart = -90f
+                            // Segment 1: 已用 token（绿/黄/红）
+                            if (ratio > 0.5f) {
+                                drawArc(usedLegendColor, segStart, ratio / 100f * 360f, false,
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
                                     topLeft = topLeft, size = arcSize)
-                            }
-                            // Compressed segment (outer ghost arc)
-                            if (isContextCompressed && compressedRatio > 0f) {
-                                val startAngle = -90f + 360f * (ratio / 100f).coerceAtMost(0.95f)
-                                drawArc(Color(0xFF9C27B0).copy(alpha = 0.5f), startAngle,
-                                    (compressedRatio / 100f * 360f).coerceAtMost(180f), false,
-                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth * 0.6f, cap = cs),
+                                segStart += ratio / 100f * 360f + 3f
+                            } else if (ratio > 0f) {
+                                drawArc(usedLegendColor, segStart, ratio / 100f * 360f, false,
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
                                     topLeft = topLeft, size = arcSize)
+                                segStart += ratio / 100f * 360f + 3f
                             }
-                            // Memory segment (outer dashed indicator)
-                            if (memoryRatio > 0f) {
-                                val startAngle = -90f + 360f * 0.97f
-                                drawArc(Color(0xFF1565C0).copy(alpha = 0.6f), startAngle,
-                                    (memoryRatio / 100f * 360f).coerceAtMost(45f), false,
-                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth * 0.5f, cap = cs),
+                            // Segment 2: 已压缩（紫色）
+                            if (isContextCompressed && compressedRatio > 1f) {
+                                val compressedArc = (compressedRatio / 100f * 360f).coerceAtMost(150f)
+                                drawArc(Color(0xFF9C27B0).copy(alpha = 0.65f), segStart, compressedArc, false,
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
+                                    topLeft = topLeft, size = arcSize)
+                                segStart += compressedArc + 3f
+                            }
+                            // Segment 3: 记忆系统（蓝色）
+                            if (hasMemory && memoryRatio > 1f) {
+                                val memoryArc = (memoryRatio / 100f * 360f).coerceAtMost(90f)
+                                drawArc(Color(0xFF1565C0).copy(alpha = 0.6f), segStart, memoryArc, false,
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
                                     topLeft = topLeft, size = arcSize)
                             }
                         }
@@ -1147,6 +1163,7 @@ private fun ContextInfoDialog(
                         )
                     }
                 }
+
                 // 颜色图例
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1154,8 +1171,7 @@ private fun ContextInfoDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(8.dp).background(
-                            if (ratio < 50f) Color(0xFF4CAF50) else if (ratio < 80f) Color(0xFFFFA000) else Color(0xFFE53935), CircleShape))
+                        Box(Modifier.size(8.dp).background(usedLegendColor, CircleShape))
                         Spacer(Modifier.width(4.dp))
                         Text("当前", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -1166,7 +1182,7 @@ private fun ContextInfoDialog(
                             Text("已压缩", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    if (memoryTotalTokens > 0) {
+                    if (hasMemory) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(8.dp).background(Color(0xFF1565C0), CircleShape))
                             Spacer(Modifier.width(4.dp))
@@ -1174,7 +1190,10 @@ private fun ContextInfoDialog(
                         }
                     }
                 }
+
                 HorizontalDivider()
+
+                // === Token 用量 ===
                 Text("Token 用量", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
                 val usedK = if (usedTokens >= 1000) "${"%.1f".format(usedTokens / 1000f)}k" else "$usedTokens"
                 val maxK = if (maxTokens >= 1000) "${maxTokens / 1000}k" else "$maxTokens"
@@ -1183,6 +1202,7 @@ private fun ContextInfoDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
                 if (isContextCompressed) {
                     Spacer(Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1196,7 +1216,7 @@ private fun ContextInfoDialog(
                         )
                     }
                 }
-                val hasMemory = memoryKeyFactCount > 0 || memorySummaryCount > 0 || memoryEntryCount > 0
+
                 if (hasMemory) {
                     Spacer(Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1214,6 +1234,8 @@ private fun ContextInfoDialog(
                         )
                     }
                 }
+
+                // === 上下文摘要 ===
                 val summary = contextSummary
                 if (summary.isNotBlank()) {
                     Spacer(Modifier.height(4.dp))
@@ -1227,6 +1249,8 @@ private fun ContextInfoDialog(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+
+                // === 已打开文件 ===
                 if (openedFilePaths.isNotEmpty()) {
                     HorizontalDivider()
                     Text("已打开文件", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
@@ -1244,12 +1268,6 @@ private fun ContextInfoDialog(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                Spacer(Modifier.height(4.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) {
-                        Text("关闭")
-                    }
                 }
             }
         }
