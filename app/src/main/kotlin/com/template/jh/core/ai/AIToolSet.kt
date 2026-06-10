@@ -134,7 +134,6 @@ class AIToolSet(
             tools.put(buildCreateDirectoryTool())
             tools.put(buildListFilesTool())
             tools.put(buildGrepTool())
-            tools.put(buildSearchInFilesTool())
             tools.put(buildGlobTool())
             tools.put(buildSearchCodebaseTool())
             tools.put(buildRunCommandTool())
@@ -221,10 +220,6 @@ class AIToolSet(
         private fun buildGlobTool() = toolDef("glob", "Find files by name pattern (glob syntax)", listOf("pattern"),
             "pattern" to p("string", "Glob pattern, e.g. '*.kt', '**/*.xml', 'Main*'"),
             "maxResults" to p("integer", "Max results (default 100)"),
-        )
-        private fun buildSearchInFilesTool() = toolDef("searchInFiles", "Search file contents by exact substring (case-insensitive)", listOf("query"),
-            "query" to p("string", "Text to search for (exact match, case-insensitive)"),
-            "extension" to p("string", "File extension filter, e.g. 'kt'"),
         )
     }
 
@@ -461,39 +456,6 @@ class AIToolSet(
         }
     }
 
-    @Tool(description = "Batch delete multiple files or directories in one call. All paths resolved relative to project root. Use when you need to clean up several files at once.")
-    fun batchDeleteFile(
-        @ToolParam(description = "JSON array of file/directory paths relative to project root, e.g. '[\"src/temp.kt\",\"old/\"]'") pathsJson: String,
-    ): String = traceTool("batchDeleteFile", "pathsJson" to pathsJson) {
-        Log.d("AIToolSet", "batchDeleteFile: $pathsJson")
-        FileLogger.d("AIToolSet", "batchDeleteFile: $pathsJson")
-        val fm = fileManager ?: return err("No project folder is open.")
-        return try {
-            val paths = org.json.JSONArray(pathsJson)
-            val results = mutableListOf<String>()
-            for (i in 0 until paths.length()) {
-                val rawPath = paths.getString(i)
-                val path = resolvePathOrAbsolute(rawPath)
-                val result = fm.deleteFile(path)
-                if (result.startsWith("Failed") || result.startsWith("No project")) {
-                    results.add(err("$path: $result"))
-                } else {
-                    FileOperationEvents.notify(path, "delete")
-                    results.add(ok("$path: Deleted"))
-                }
-            }
-            ok("Batch delete results:\n${results.joinToString("\n")}")
-        } catch (e: org.json.JSONException) {
-            val m = "Invalid paths JSON: ${e.message}"
-            Log.e("AIToolSet", "batchDeleteFile: $m")
-            FileLogger.e("AIToolSet", "batchDeleteFile: $m")
-            err(m)
-        } catch (e: Exception) {
-            Log.e("AIToolSet", "batchDeleteFile failed: ${e.message}", e)
-            FileLogger.e("AIToolSet", "batchDeleteFile failed: ${e.message}", e)
-            err("${e.message}")
-        }
-    }
 
     @Tool(description = "Create a new directory. Automatically creates parent directories as needed. For creating nested paths, provide the full path.")
     fun createDirectory(
@@ -729,24 +691,6 @@ class AIToolSet(
         }
     }
 
-    @Tool(description = "Search file contents by exact substring match (case-insensitive). Simpler than grep, use when you know the exact text to find. For regex patterns, use grep instead.")
-    fun searchInFiles(
-        @ToolParam(description = "Text to search for (exact match, case insensitive)") query: String,
-        @ToolParam(description = "File extension filter, e.g. 'kt' for Kotlin files only. Leave empty for all text files.") extension: String = "",
-    ): String {
-        Log.d("AIToolSet", "searchInFiles: query=$query ext=$extension")
-        FileLogger.d("AIToolSet", "searchInFiles: query=$query ext=$extension")
-        val result = fileManager?.searchInFiles(query, extension)
-            ?: return err("No project folder is open.")
-        return if (result.startsWith("Failed") || result.startsWith("No project")) {
-            FileLogger.w("AIToolSet", "searchInFiles failed: ${result.take(200)}")
-            err(result)
-        } else {
-            FileLogger.d("AIToolSet", "searchInFiles: found ${result.lines().size} lines of results")
-            result
-        }
-    }
-
     @Tool(description = "Search codebase by meaning using semantic similarity. Converts query into a search vector and finds related code across the project. Use for exploring unfamiliar code or finding implementations by behavior (e.g. 'where is user authentication?' or 'how does error handling work?'). Prefer over grep when you don't know exact terms.")
     fun searchCodebase(
         @ToolParam(description = "Natural language query describing what you're looking for, e.g. 'Where is user authentication implemented?' or 'How does error handling work?'") query: String,
@@ -817,8 +761,8 @@ class AIToolSet(
      */
     fun toolNames(): List<String> = listOf(
         "readFile", "writeFile", "replaceInFile", "batchReplaceInFile",
-        "deleteFile", "batchDeleteFile", "createDirectory", "listFiles",
-        "grep", "searchInFiles", "searchCodebase", "glob",
+        "deleteFile", "createDirectory", "listFiles",
+        "grep", "searchCodebase", "glob",
         "runCommand", "searchWeb", "readLints",
         "searchConversationMemory", "getRecentConversationMemory",
     )

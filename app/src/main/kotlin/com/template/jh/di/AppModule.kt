@@ -1,6 +1,7 @@
 package com.template.jh.di
 
 import com.template.jh.core.ai.AIToolSet
+import com.template.jh.core.ai.InputOptimizer
 import com.template.jh.core.ai.ToolCallHandler
 import com.template.jh.core.memory.ContextManager
 import com.template.jh.core.memory.ConversationMemory
@@ -29,6 +30,7 @@ val appModule = module {
     single { ImageProcessor(androidContext()) }
     single { ContextManager(get()) }
     single { ToolCallHandler(get(), get()) }
+    single { InputOptimizer(get(), get()) }
 
     viewModel { HomeViewModel(androidContext() as android.app.Application, get(), get()) }
     viewModel {
@@ -36,7 +38,7 @@ val appModule = module {
             androidContext() as android.app.Application,
             get(), get(), get(), get(),
             get(), get(), get(), get(),
-            get(), get(), get(),
+            get(), get(), get(), get(),
         )
     }
 }

@@ -57,13 +57,15 @@ class ToolCallHandler(
                 args.g("pattern", "query"), args.g("extension", "ext"), args.g("glob"),
                 args.gBool("ignoreCase", "ignore_case", "caseSensitive", "case_sensitive"),
                 args.gInt("contextLines", "context_lines", "context", default = 2))
-            "searchInFiles" -> aiToolSet.searchInFiles(args.g("query"), args.g("extension", "ext"))
             "searchCodebase" -> aiToolSet.searchCodebase(args.g("query"), args.g("targetDirectories", "target_directories", "directories"))
+            "glob" -> aiToolSet.glob(args.g("pattern"), args.gInt("maxResults", "max_results", default = 100))
             "runCommand" -> aiToolSet.runCommand(args.g("command"))
             "searchWeb" -> aiToolSet.searchWeb(args.g("query"))
             "deleteFile" -> aiToolSet.deleteFile(args.g("path"))
             "createDirectory" -> aiToolSet.createDirectory(args.g("path", "dirPath", "dir_path"))
             "readLints" -> aiToolSet.readLints()
+            "searchConversationMemory" -> aiToolSet.searchConversationMemory(args.g("query"))
+            "getRecentConversationMemory" -> aiToolSet.getRecentConversationMemory(args.gInt("count", default = 5))
             else -> "Unknown tool: $name"
         }
         FileLogger.d("ToolCallHandler", "executeAiTool: $name returned ${result.take(200)}")
@@ -86,7 +88,7 @@ class ToolCallHandler(
             "replaceInFile", "batchReplaceInFile" -> ModelActivity.EditingFile
             "deleteFile" -> ModelActivity.DeletingFile
             "createDirectory" -> ModelActivity.CreatingDirectory
-            "grep", "searchInFiles", "glob" -> ModelActivity.SearchingCode
+            "grep", "glob" -> ModelActivity.SearchingCode
             "searchCodebase" -> ModelActivity.SearchingCode
             "searchWeb" -> ModelActivity.SearchingWeb
             "searchConversationMemory", "getRecentConversationMemory" -> ModelActivity.SearchingCode

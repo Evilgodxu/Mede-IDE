@@ -257,6 +257,8 @@ fun AIChatPanel(
             memoryTotalTokens = state.memoryTotalTokens,
             onContextInfoClick = { showContextInfoDialog = true },
             onImagePick = { imagePickerLauncher.launch("image/*") },
+            optimizeMode = viewModel.optimizeMode,
+            onOptimizeModeChange = { viewModel.setOptimizeMode(it) },
         )
 
         if (showContextInfoDialog) {
@@ -605,6 +607,8 @@ private fun ChatInputBar(
     onDetachImage: (android.net.Uri) -> Unit = {},
     attachedFileRefs: List<AttachedFile> = emptyList(),
     onDetachFile: (Int) -> Unit = {},
+    optimizeMode: com.template.jh.core.ai.InputOptimizer.Mode = com.template.jh.core.ai.InputOptimizer.Mode.CODE,
+    onOptimizeModeChange: (com.template.jh.core.ai.InputOptimizer.Mode) -> Unit = {},
 ) {
     val context = LocalContext.current
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -675,8 +679,9 @@ private fun ChatInputBar(
 
         // 工具栏：按面板宽度平均间距排列按钮
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-            // 优化按钮
-            if (engineStatus == EngineStatus.Ready) {
+            // 优化按钮（长按切换模式）
+            var showOptimizeModeMenu by remember { mutableStateOf(false) }
+            Box {
                 if (isOptimizing) {
                     IconButton(onClick = {}, Modifier.size(28.dp), enabled = false) {
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
@@ -684,8 +689,13 @@ private fun ChatInputBar(
                 } else {
                     IconButton(
                         onClick = onOptimize,
-                        Modifier.size(32.dp),
-                        enabled = inputText.isNotBlank() && !isLoading
+                        modifier = Modifier
+                            .size(32.dp)
+                            .combinedClickable(
+                                onClick = onOptimize,
+                                onLongClick = { showOptimizeModeMenu = true },
+                                enabled = inputText.isNotBlank() && !isLoading,
+                            ),
                     ) {
                         Icon(
                             Icons.Default.AutoAwesome,
@@ -696,6 +706,34 @@ private fun ChatInputBar(
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                             }
+                        )
+                    }
+                }
+                DropdownMenu(
+                    expanded = showOptimizeModeMenu,
+                    onDismissRequest = { showOptimizeModeMenu = false },
+                ) {
+                    com.template.jh.core.ai.InputOptimizer.Mode.entries.forEach { mode ->
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(mode.icon, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
+                                        Text(mode.label, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                                        Text(mode.description, style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 9.sp, maxLines = 1)
+                                    }
+                                }
+                            },
+                            onClick = {
+                                onOptimizeModeChange(mode)
+                                showOptimizeModeMenu = false
+                            },
+                            leadingIcon = if (mode == optimizeMode) {
+                                { Icon(Icons.Default.Check, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary) }
+                            } else null,
                         )
                     }
                 }

@@ -82,10 +82,6 @@ You are an AI coding assistant. Reply in 简体中文.
 
     // === 编辑器上下文 ===
 
-    fun buildOptimizePrompt(): String {
-        return "You are a text refining tool. ONLY fix typos and grammar in the input text. Output ONLY the corrected text, nothing else. Do not add, remove, rephrase, or explain anything. If no errors exist, output the exact input as-is."
-    }
-
     fun buildEditorContext(
         activeFilePath: String,
         projectRootName: String,

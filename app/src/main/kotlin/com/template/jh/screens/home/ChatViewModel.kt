@@ -81,6 +81,7 @@ class ChatViewModel(
     private val toolCallHandler: ToolCallHandler,
     private val contextManager: ContextManager,
     private val imageProcessor: ImageProcessor,
+    private val inputOptimizer: com.template.jh.core.ai.InputOptimizer,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -566,30 +567,38 @@ class ChatViewModel(
         _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
     }
 
-    // ========== 输入优化 ==========
+    // ========== 输入优化（独立于推理工作流） ==========
+
+    private var _optimizeMode = com.template.jh.core.ai.InputOptimizer.Mode.CODE
+    val optimizeMode: com.template.jh.core.ai.InputOptimizer.Mode get() = _optimizeMode
+
+    fun setOptimizeMode(mode: com.template.jh.core.ai.InputOptimizer.Mode) {
+        _optimizeMode = mode
+    }
 
     fun optimizeInput() {
         val text = _state.value.inputText.trim()
-        if (text.isEmpty() || !liteRTManager.isInitialized) return
+        if (text.isEmpty()) return
         if (_state.value.isOptimizing) return
+        val mode = _optimizeMode
         _state.update { it.copy(isOptimizing = true) }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val conv = liteRTManager.createConversation(ConversationConfig(
-                    systemInstruction = Contents.of(contextManager.buildOptimizePrompt()),
-                    samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
-                    tools = emptyList(),
-                ))
-                conv.use { c ->
-                    val optimized = StringBuilder()
-                    c.sendMessageAsync(Message.user(text)).catch { t ->
-                        Log.e("ChatViewModel", "optimizeInput failed", t)
-                        FileLogger.e("ChatViewModel", "optimizeInput failed: ${t.message}", t)
-                    }.collect { chunk -> optimized.append(chunk.toString()) }
-                    val result = optimized.toString().trim()
-                    if (result.isNotEmpty() && result != text) {
-                        _state.update { it.copy(inputText = result) }
-                    }
+                val result = if (_state.value.cloudModelEnabled) {
+                    val profile = _state.value.cloudModelProfiles.find { it.id == _state.value.activeCloudProfileId }
+                    if (profile != null) {
+                        val cfg = com.template.jh.model.chat.CloudModelConfig(
+                            enabled = true, apiEndpoint = profile.apiEndpoint,
+                            apiKey = profile.apiKey, modelName = profile.modelName,
+                            maxTokens = profile.maxTokens,
+                        )
+                        inputOptimizer.optimizeWithCloud(text, mode, cfg)
+                    } else text
+                } else {
+                    inputOptimizer.optimizeWithLocal(text, mode)
+                }
+                if (result.isNotEmpty() && result != text) {
+                    _state.update { it.copy(inputText = result) }
                 }
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "optimizeInput error", e)
