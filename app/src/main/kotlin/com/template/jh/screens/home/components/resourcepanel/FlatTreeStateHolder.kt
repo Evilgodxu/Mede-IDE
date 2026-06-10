@@ -1,19 +1,17 @@
 package com.template.jh.screens.home.components.resourcepanel
 
-import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.template.jh.model.FileItem
 
-// 扁平目录树状态管理器 - 使用相对路径作为键
+/**
+ * 简单目录树状态管理 — 扁平列表 + 异步子节点加载
+ * 去除了复杂的自动扁平化逻辑，改用直观的递归展开
+ */
 class FlatTreeStateHolder {
-    var rootNodes: List<ResourceNode> by mutableStateOf(emptyList())
-        private set
-
     var visibleNodes: List<ResourceNode> by mutableStateOf(emptyList())
         private set
 
@@ -21,153 +19,125 @@ class FlatTreeStateHolder {
         private set
 
     private val expandedKeys = mutableSetOf<String>()
-    private val childrenCache = mutableStateMapOf<String, List<FileItemNode>>()
+    private val childrenCache = mutableMapOf<String, List<ResourceNode>>()
+    private var rootItems = listOf<FileItem>()
 
-    // 设置根节点（根变更时清理已不可用的展开/缓存状态）
-    fun setRoot(fileItems: List<FileItem>) {
-        val newPaths = fileItems.map { it.relativePath }.toSet()
-        expandedKeys.removeAll { key ->
-            val topLevel = key.substringBefore('/')
-            topLevel !in newPaths
-        }
-        childrenCache.keys.removeAll { key ->
-            val topLevel = key.substringBefore('/')
-            topLevel !in newPaths
-        }
-        rootNodes = fileItems.map {
-            ResourceNode(
-                uri = it.uri,
-                name = it.name,
-                relativePath = it.relativePath,
-                isDirectory = it.isDirectory,
-                depth = 0,
-                filePath = it.filePath,
-            )
-        }
-        rebuildVisibleNodes()
-    }
-
-    // 加载子节点
-    fun loadAndExpand(
-        relativePath: String,
-        onLoad: (String, (List<FileItem>) -> Unit) -> Unit,
-    ) {
-        if (relativePath in loadingKeys) return
-        loadingKeys = loadingKeys + relativePath
-
-        onLoad(relativePath) { children ->
-            childrenCache[relativePath] = children.map {
-                FileItemNode(it.name, it.uri, it.relativePath, it.isDirectory, it.filePath)
-            }
-            loadingKeys = loadingKeys - relativePath
-            expandedKeys.add(relativePath)
-            rebuildVisibleNodes()
-        }
-    }
-
-    // 清除状态（根变更时调用）
-    fun clear() {
+    /** 设置根文件列表，清除所有展开/缓存状态 */
+    fun setRoot(files: List<FileItem>) {
+        val same = files.size == rootItems.size &&
+                files.zip(rootItems).all { (a, b) -> a.relativePath == b.relativePath }
+        if (same) return
+        rootItems = files
         expandedKeys.clear()
         childrenCache.clear()
         loadingKeys = emptySet()
-        rootNodes = emptyList()
-        visibleNodes = emptyList()
+        rebuild()
     }
 
-    // 切换展开/折叠
+    /** 展开/折叠目录 */
     fun toggle(
         node: ResourceNode,
         onLoad: (String, (List<FileItem>) -> Unit) -> Unit,
     ) {
         if (!node.isDirectory) return
         if (isExpanded(node)) {
-            collapse(node)
+            expandedKeys.remove(node.relativePath)
+            rebuild()
         } else {
             if (childrenCache.containsKey(node.relativePath)) {
                 expandedKeys.add(node.relativePath)
-                rebuildVisibleNodes()
+                rebuild()
             } else {
-                loadAndExpand(node.relativePath, onLoad)
+                loadAndExpand(node, onLoad)
             }
         }
-    }
-
-    fun collapse(node: ResourceNode) {
-        expandedKeys.remove(node.relativePath)
-        val childKeys = expandedKeys.filter { it.startsWith("${node.relativePath}/") }
-        expandedKeys.removeAll(childKeys.toSet())
-        rebuildVisibleNodes()
     }
 
     fun isExpanded(node: ResourceNode): Boolean = node.relativePath in expandedKeys
     fun isLoading(key: String): Boolean = key in loadingKeys
 
-    // 判断目录是否应自动扁平化（已展开且只有一个子目录）
-    private fun shouldFlatten(path: String): Boolean {
-        if (path !in expandedKeys) return false
-        val cached = childrenCache[path] ?: return false
-        return cached.size == 1 && cached[0].isDirectory
-    }
-
-    // 递归扁平化：合并路径名称，直到遇到非单子目录节点
-    private fun flattenChain(
-        result: MutableList<ResourceNode>,
-        prefixName: String,
-        path: String,
-        uri: Uri,
-        filePath: String,
-        depth: Int,
-    ) {
-        val child = childrenCache[path]!![0]
-        val mergedName = "$prefixName/${child.name}"
-        if (shouldFlatten(child.relativePath)) {
-            flattenChain(result, mergedName, child.relativePath, child.uri, child.filePath, depth)
-        } else {
-            result.add(ResourceNode(child.uri, mergedName, child.relativePath, true, depth, child.filePath))
-            if (child.relativePath in expandedKeys) {
-                appendChildren(result, child.relativePath, depth + 1)
-            }
-        }
-    }
-
-    // 重建可见节点列表
-    private fun rebuildVisibleNodes() {
-        val result = mutableListOf<ResourceNode>()
-        for (root in rootNodes) {
-            if (shouldFlatten(root.relativePath)) {
-                flattenChain(result, root.name, root.relativePath, root.uri, root.filePath, 0)
-            } else {
-                result.add(root)
-                if (root.isDirectory && root.relativePath in expandedKeys) {
-                    appendChildren(result, root.relativePath, 1)
-                }
-            }
-        }
-        visibleNodes = result
-    }
-
-    private fun appendChildren(result: MutableList<ResourceNode>, parentPath: String, depth: Int) {
-        val cached = childrenCache[parentPath] ?: return
-        for (child in cached) {
-            if (shouldFlatten(child.relativePath)) {
-                flattenChain(result, child.name, child.relativePath, child.uri, child.filePath, depth)
-            } else {
-                val node = ResourceNode(child.uri, child.name, child.relativePath, child.isDirectory, depth, child.filePath)
-                result.add(node)
-                if (child.isDirectory && child.relativePath in expandedKeys) {
-                    appendChildren(result, child.relativePath, depth + 1)
-                }
-            }
-        }
-    }
-
+    /** 刷新指定目录的子节点（重命名/删除/创建后调用） */
     fun refreshParent(
         parentPath: String,
         onLoad: (String, (List<FileItem>) -> Unit) -> Unit,
     ) {
         childrenCache.remove(parentPath)
         if (parentPath in expandedKeys) {
-            loadAndExpand(parentPath, onLoad)
+            val parentDepth = findNodeDepth(parentPath)
+            loadChildren(parentPath, parentDepth, onLoad)
+        }
+    }
+
+    // === 内部方法 ===
+
+    private fun loadAndExpand(
+        node: ResourceNode,
+        onLoad: (String, (List<FileItem>) -> Unit) -> Unit,
+    ) {
+        val key = node.relativePath
+        if (key in loadingKeys) return
+        loadingKeys = loadingKeys + key
+        onLoad(key) { children ->
+            childrenCache[key] = children.map {
+                ResourceNode(it.uri, it.name, it.relativePath, it.isDirectory, node.depth + 1, it.filePath)
+            }
+            loadingKeys = loadingKeys - key
+            expandedKeys.add(key)
+            rebuild()
+        }
+    }
+
+    private fun loadChildren(
+        parentPath: String,
+        parentDepth: Int,
+        onLoad: (String, (List<FileItem>) -> Unit) -> Unit,
+    ) {
+        if (parentPath in loadingKeys) return
+        loadingKeys = loadingKeys + parentPath
+        onLoad(parentPath) { children ->
+            childrenCache[parentPath] = children.map {
+                ResourceNode(it.uri, it.name, it.relativePath, it.isDirectory, parentDepth + 1, it.filePath)
+            }
+            loadingKeys = loadingKeys - parentPath
+            if (parentPath !in expandedKeys) expandedKeys.add(parentPath)
+            rebuild()
+        }
+    }
+
+    private fun findNodeDepth(path: String): Int {
+        var depth = 0
+        var current = path
+        while (current.contains('/')) {
+            current = current.substringBeforeLast('/')
+            depth++
+        }
+        return depth
+    }
+
+    private fun rebuild() {
+        val result = mutableListOf<ResourceNode>()
+        for (item in rootItems) {
+            val node = ResourceNode(item.uri, item.name, item.relativePath, item.isDirectory, 0, item.filePath)
+            result.add(node)
+            if (item.isDirectory && item.relativePath in expandedKeys) {
+                appendChildrenRecursive(result, item.relativePath, 1)
+            }
+        }
+        visibleNodes = result
+    }
+
+    private fun appendChildrenRecursive(
+        result: MutableList<ResourceNode>,
+        parentPath: String,
+        depth: Int,
+    ) {
+        val children = childrenCache[parentPath] ?: return
+        for (child in children) {
+            val node = child.copy(depth = depth)
+            result.add(node)
+            if (child.isDirectory && child.relativePath in expandedKeys) {
+                appendChildrenRecursive(result, child.relativePath, depth + 1)
+            }
         }
     }
 }

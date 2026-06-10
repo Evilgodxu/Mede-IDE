@@ -148,6 +148,9 @@ dependencies {
     // HTML 解析（网络搜索）
     implementation(libs.jsoup)
 
+    // Markdown 渲染（匹配 Gallery 官方）
+    implementation("org.commonmark:commonmark:0.21.0")
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))

@@ -101,6 +101,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -451,28 +452,37 @@ private fun ModelItemView(
         Text("Mede", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
 
-        // 思考内容：可折叠展示（来自 LiteRT-LM channels）
+        // 思考内容（匹配 Gallery 官方样式：可展开+虚线分隔）
         if (item.channelContent != null) {
-            var thinkExpanded by remember { mutableStateOf(false) }
-            Box(
-                modifier = Modifier
-                    .widthIn(max = 360.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                    .clickable { thinkExpanded = !thinkExpanded }
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("思考", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(4.dp))
-                        Text(if (thinkExpanded) "▼" else "▶", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (thinkExpanded) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(item.channelContent, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-                    }
+            var thinkExpanded by remember { mutableStateOf(true) }
+            val dividerColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+            Column(modifier = Modifier.widthIn(max = 360.dp)) {
+                Row(
+                    modifier = Modifier.clickable { thinkExpanded = !thinkExpanded }.padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(if (thinkExpanded) "▼" else "▶",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(2.dp))
+                    Text("思考", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (thinkExpanded) {
+                    Text(item.channelContent,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                }
+                // Gallery 风格虚线分隔
+                Canvas(modifier = Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 8.dp)) {
+                    drawLine(
+                        color = dividerColor,
+                        start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                        end = androidx.compose.ui.geometry.Offset(size.width, 0f),
+                        strokeWidth = 1f,
+                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f)
+                    )
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -526,7 +536,7 @@ private fun StreamingCursor() {
 
 /**
  * 参考 Google AI Edge Gallery BufferedFadingMarkdownText 实现。
- * 流式文本输出时使用交叉淡入淡出动画，避免逐字文本闪烁。
+ * 流式文本输出时使用交叉淡入淡出动画 + Markdown 渲染。
  */
 @Composable
 private fun BufferedFadingText(
@@ -536,8 +546,22 @@ private fun BufferedFadingText(
     style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodySmall,
     color: Color = MaterialTheme.colorScheme.onSurface,
 ) {
-    var text1 by remember { mutableStateOf(text) }
-    var text2 by remember { mutableStateOf("") }
+    val mdParser = remember { org.commonmark.parser.Parser.builder().build() }
+    val mdRenderer = remember { org.commonmark.renderer.html.HtmlRenderer.builder().build() }
+
+    fun markdownToAnnotated(md: String): AnnotatedString {
+        if (md.isBlank()) return AnnotatedString("")
+        val html = mdRenderer.render(mdParser.parse(md))
+        val spanned = if (android.os.Build.VERSION.SDK_INT >= 24) {
+            android.text.Html.fromHtml(html, android.text.Html.FROM_HTML_MODE_LEGACY)
+        } else {
+            @Suppress("DEPRECATION") android.text.Html.fromHtml(html)
+        }
+        return AnnotatedString(spanned.toString())
+    }
+
+    var text1 by remember { mutableStateOf(markdownToAnnotated(text)) }
+    var text2 by remember { mutableStateOf(AnnotatedString("")) }
     val alpha2 = remember { Animatable(0f) }
     val currentText by rememberUpdatedState(text)
     var showOverlay by remember { mutableStateOf(true) }
@@ -546,11 +570,12 @@ private fun BufferedFadingText(
         snapshotFlow { currentText }
             .conflate()
             .collect { newText ->
-                if (newText == text1) return@collect
-                text2 = newText
+                val newAnno = markdownToAnnotated(newText)
+                if (newAnno.toString() == text1.toString()) return@collect
+                text2 = newAnno
                 alpha2.snapTo(0f)
                 alpha2.animateTo(1f, animationSpec = tween(120, easing = LinearOutSlowInEasing))
-                text1 = newText
+                text1 = newAnno
                 val unused = awaitFrame()
                 alpha2.snapTo(0f)
             }

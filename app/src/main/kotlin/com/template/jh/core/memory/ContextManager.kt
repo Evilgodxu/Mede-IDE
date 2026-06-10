@@ -55,24 +55,6 @@ You are an AI coding assistant. Reply in 简体中文.
         )
         sb.appendLine()
         if (userName.isNotBlank()) sb.append("\n用户: $userName")
-        if (rules.isNotEmpty()) {
-            sb.append("\n\n## 系统规则（必须严格遵守）")
-            rules.forEach { r -> sb.append("\n- ${r.name}: ${r.content}") }
-            sb.append("\n严格遵守以上所有规则。")
-        }
-        val enabledSkills = skills.filter { it.enabled }
-        if (enabledSkills.isNotEmpty()) {
-            sb.append("\n\n## 已启用技能")
-            enabledSkills.forEach { s ->
-                sb.append("\n\n### ${s.name}")
-                if (s.description.isNotBlank()) sb.append("\n${s.description}")
-                if (s.prompt.isNotBlank()) {
-                    val skillPrompt = if (!cloudModelEnabled && s.prompt.length > 500)
-                        s.prompt.take(500) + "\n...(技能提示已截断)" else s.prompt
-                    sb.append("\n$skillPrompt")
-                }
-            }
-        }
         _sysPromptCache = sb.toString()
         return sb.toString()
     }

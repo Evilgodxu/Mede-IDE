@@ -51,13 +51,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -66,7 +66,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class ChatViewModel(
     application: Application,
@@ -518,7 +517,7 @@ class ChatViewModel(
         val userMsg = ChatMessage(role = ChatRole.User, content = userContent, imageUris = images)
         val modelMsgId = java.util.UUID.randomUUID().toString()
         val placeholderMsg = ChatMessage(id = modelMsgId, role = ChatRole.Model, content = "", isStreaming = true)
-        _state.update { it.copy(messages = it.messages + userMsg + placeholderMsg, inputText = "", attachedImageUris = emptyList(), attachedFileRefs = emptyList(), isLoading = true, modelActivity = ModelActivity.Thinking, activityDetail = "") }
+        _state.update { it.copy(messages = it.messages + userMsg + placeholderMsg, inputText = "", attachedImageUris = emptyList(), attachedFileRefs = emptyList(), isLoading = true) }
         val ctx = getApplication<Application>()
         sendJob?.cancel()
         sendJob = viewModelScope.launch(Dispatchers.IO) {
@@ -548,9 +547,10 @@ class ChatViewModel(
                     processWithCloudTools(text, modelMsgId, ctx, tempImagePaths)
                 } else {
                     ensureConversation(autoToolCalling = false)
-                    processWithJsonTools(text, modelMsgId, ctx, tempImagePaths)
+                    processLocalMessage(text, modelMsgId, tempImagePaths)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
+                _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 throw e
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "sendMessage failed", e)
@@ -563,6 +563,7 @@ class ChatViewModel(
 
     fun cancelGeneration() {
         sendJob?.cancel()
+        // 不销毁会话，匹配官方示例永不关闭模式
         _state.value.messages.lastOrNull()?.let { msg -> if (msg.isStreaming) finalizeModelMessage(msg.id) }
         _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
     }
@@ -626,17 +627,10 @@ class ChatViewModel(
 
     private fun ensureConversation(autoToolCalling: Boolean = false): Conversation {
         val initialMsgs = pendingInitialMessages
-        if (initialMsgs != null) {
-            pendingInitialMessages = null
-            activeConversation?.let { try { it.close() } catch (_: Exception) {} }
-            activeConversation = null
-        } else {
-            if (sysPromptVersion != convSysPromptVersion) {
-                activeConversation?.let { try { it.close() } catch (_: Exception) {} }
-                activeConversation = null
-            }
-            activeConversation?.let { conv -> if (conv.isAlive) return conv }
-        }
+        pendingInitialMessages = null
+        // 每轮重建，匹配 Gallery 官方应用模式
+        activeConversation?.let { try { it.close() } catch (_: Exception) {} }
+        activeConversation = null
         convSysPromptVersion = sysPromptVersion
         val conv = liteRTManager.createConversation(
             ConversationConfig(
@@ -645,66 +639,74 @@ class ChatViewModel(
                 samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
                 tools = listOf(tool(aiToolSet)),
                 automaticToolCalling = autoToolCalling,
-                channels = null,
-                extraContext = mapOf("enable_thinking" to sysPromptDeepThink),
+                channels = listOf(com.google.ai.edge.litertlm.Channel("thinking", "<think>", "</think>")),
             )
         )
         activeConversation = conv
         return conv
     }
 
-    // ========== 本地模型处理 ==========
+    // ========== 本地模型处理（含工具调用） ==========
 
-    private suspend fun processWithJsonTools(
+    private suspend fun processLocalMessage(
         text: String, msgId: String,
-        ctx: Application,
         imagePaths: List<String> = emptyList(),
     ) {
-        var conv = activeConversation ?: return
-        val editorCtx = buildEditorContext()
-        val hasImages = imagePaths.isNotEmpty()
-        val startTime = System.currentTimeMillis()
-        var totalOutputChars = 0
-
+        val conv = activeConversation
+        if (conv == null) {
+            Log.e("ChatViewModel", "processLocalMessage: activeConversation is null")
+            updateModelMessage(msgId, "\n\n[错误: 模型会话未就绪]", false)
+            finalizeModelMessage(msgId)
+            _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
+            return
+        }
+        // 上下文注入消息渠道（不走系统指令）
         val convId = _state.value.activeConversationId ?: ""
         val memoryCtx = contextManager.getMemoryContext(convId)
         val keyFactsCtx = contextManager.getKeyFactsContext()
+        val editorCtx = buildEditorContext()
+        val messageBuilder = StringBuilder()
+        if (memoryCtx.isNotBlank()) messageBuilder.appendLine(memoryCtx).appendLine()
+        if (keyFactsCtx.isNotBlank()) messageBuilder.appendLine(keyFactsCtx).appendLine()
+        if (editorCtx.isNotBlank()) messageBuilder.appendLine(editorCtx).appendLine()
+        if (sysPromptRules.isNotEmpty()) {
+            messageBuilder.appendLine("【系统规则】")
+            sysPromptRules.forEach { r -> messageBuilder.appendLine("- ${r.name}: ${r.content}") }
+            messageBuilder.appendLine()
+        }
+        val enabledSkills = sysPromptSkills.filter { it.enabled }
+        if (enabledSkills.isNotEmpty()) {
+            messageBuilder.appendLine("【已启用技能】")
+            enabledSkills.forEach { s ->
+                messageBuilder.appendLine("${s.name}: ${s.description}")
+                if (s.prompt.isNotBlank()) messageBuilder.appendLine(s.prompt.take(500))
+            }
+            messageBuilder.appendLine()
+        }
+        messageBuilder.append(text)
+        val userText = messageBuilder.toString().trim()
 
-        // 上下文与用户消息合并为单条 Content
-        val contentList = mutableListOf<Content>()
-        if (memoryCtx.isNotBlank()) {
-            val maxMemoryLen = 600
-            val trimmed = if (memoryCtx.length > maxMemoryLen)
-                memoryCtx.take(maxMemoryLen) + "\n...(记忆已截断)" else memoryCtx
-            contentList.add(Content.Text("【对话记忆】\n$trimmed"))
+        val hasImages = imagePaths.isNotEmpty()
+        val thinkCtx = mapOf("enable_thinking" to sysPromptDeepThink)
+        var currentMessage: Message = if (hasImages) {
+            val contents = mutableListOf<Content>(Content.Text(userText))
+            imagePaths.forEach { contents.add(Content.ImageFile(absolutePath = it)) }
+            Message.user(Contents.of(contents))
+        } else {
+            Message.user(userText)
         }
-        if (keyFactsCtx.isNotBlank()) {
-            contentList.add(Content.Text("【关键事实】\n$keyFactsCtx"))
-        }
-        if (editorCtx.isNotBlank()) {
-            contentList.add(Content.Text("【编辑器上下文】\n$editorCtx"))
-        }
-        contentList.add(Content.Text(text))
-        if (hasImages) {
-            imagePaths.forEach { contentList.add(Content.ImageFile(absolutePath = it)) }
-        }
-
         var currentMsgId = msgId
-        var currentMessage: Message = Message.user(Contents.of(contentList))
-        var rounds = 0
-        var lastTextResponse = ""
+        var channelContent: String? = null
 
-        while (rounds < ChatConfig.MAX_TOOL_RETRY_ROUNDS) {
-            val roundText = StringBuilder()
-            var channelContent: String? = null
-            val roundToolCalls = mutableListOf<ToolCall>()
+        try {
+            for (round in 0..<ChatConfig.MAX_TOOL_RETRY_ROUNDS) {
+                val roundText = StringBuilder()
+                val roundToolCalls = mutableListOf<ToolCall>()
 
-            try {
-                conv.sendMessageAsync(currentMessage).collect { msg ->
+                conv.sendMessageAsync(currentMessage, extraContext = thinkCtx).collect { msg ->
                     val c = msg.contents.toString()
                     if (c.isNotEmpty()) {
                         roundText.append(c)
-                        totalOutputChars += c.length
                         updateModelMessage(currentMsgId, c, true)
                     }
                     if (msg.toolCalls.isNotEmpty()) {
@@ -714,128 +716,45 @@ class ChatViewModel(
                         channelContent = (channelContent ?: "") + msg.channels.values.joinToString("\n")
                     }
                 }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
-                throw e
-            } catch (e: Exception) {
-                val duration = System.currentTimeMillis() - startTime
-                recordUsage(LlmCallRecord(
-                    modelName = _state.value.modelName.ifEmpty { "local" },
-                    provider = "local",
-                    promptTokens = text.length / 2,
-                    completionTokens = totalOutputChars / 2,
-                    durationMs = duration,
-                    success = false,
-                    errorMessage = e.message,
-                ))
-                Log.e("ChatViewModel", "processWithJsonTools failed", e)
-                FileLogger.e("ChatViewModel", "processWithJsonTools failed: ${e.message}", e)
-                updateModelMessage(currentMsgId, "\n\n[错误: ${e.message}]", false)
-                finalizeModelMessage(currentMsgId)
-                _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
-                return
-            }
 
-            rounds++
+                if (roundToolCalls.isEmpty()) {
+                    // 无工具调用 → 最终回复
+                    break
+                }
 
-            // 处理原生工具调用（automaticToolCalling=false → msg.toolCalls 直接暴露）
-            if (roundToolCalls.isNotEmpty()) {
-                val modifyingTools = mutableSetOf<String>()
+                // 执行工具调用
                 val toolResults = mutableListOf<Content.ToolResponse>()
                 val display = StringBuilder()
 
-                for ((i, tc) in roundToolCalls.withIndex()) {
+                for (tc in roundToolCalls) {
                     val argsStr = tc.arguments.mapValues { it.value?.toString() ?: "" }
                     val name = tc.name
-
-                    val act = toolCallHandler.toolNameToActivity(name)
-                    val detail = argsStr["path"] ?: argsStr["command"] ?: argsStr["query"] ?: ""
-                    _state.update { it.copy(modelActivity = act, activityDetail = detail) }
-
-                    if (name in ChatConfig.MODIFYING_TOOLS) modifyingTools.add(name)
-                    if (name in ChatConfig.OPEN_FILE_TOOLS) {
-                        val rawPath = argsStr["path"]
-                        if (rawPath != null) requestOpenFile(toolCallHandler.resolveToolPath(rawPath))
-                    }
-
                     val result = withContext(Dispatchers.IO) {
                         toolCallHandler.executeAiTool(name, argsStr)
                     }
-
                     display.appendLine("[工具调用: $name]")
                     display.appendLine(result)
-                    if (i < roundToolCalls.size - 1) display.appendLine()
-
-                    // 将 lint 注入追加到最后一条工具结果后
                     toolResults.add(Content.ToolResponse(name, result))
-                }
-
-                // Lint 自动注入
-                if (modifyingTools.isNotEmpty()) {
-                    val lintBlock = withContext(Dispatchers.IO) {
-                        val r = aiToolSet.readLints()
-                        if (r.contains("No lint errors") || r.contains("读取诊断失败") || r.contains("No errors")) null
-                        else "[Lint 诊断]\n$r"
-                    }
-                    if (lintBlock != null) {
-                        val last = toolResults.removeLast()
-                        toolResults.add(Content.ToolResponse(last.name, "${last.response}\n\n$lintBlock"))
-                        display.appendLine().appendLine(lintBlock)
-                    }
                 }
 
                 // 显示工具结果
                 updateModelMessage(currentMsgId, "\n\n${display.toString().trimEnd()}", false)
                 finalizeModelMessage(currentMsgId)
-                _state.update { it.copy(modelActivity = ModelActivity.ProcessingResult, activityDetail = "") }
 
                 // 发回工具结果，进入下一轮
                 currentMessage = Message.tool(Contents.of(toolResults))
                 currentMsgId = java.util.UUID.randomUUID().toString()
-                _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true), isLoading = true) }
-                lastTextResponse = ""
-                continue
+                _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true)) }
             }
-
-            // 无工具调用 → 最终回复
-            val response = roundText.toString().trim()
-            val cleanResponse = toolCallHandler.stripToolCallJson(response)
-
-            if (cleanResponse.length < 3) {
-                FileLogger.w("ChatViewModel", "quality: empty/short response round=$rounds")
-                currentMessage = Message.system("[你没有输出有效内容，请直接输出最终答案]")
-                lastTextResponse = ""
-                continue
-            }
-            val textContent = cleanResponse.take(200)
-            if (rounds > 1 && textContent == lastTextResponse) {
-                FileLogger.w("ChatViewModel", "quality: repetitive text response round=$rounds")
-                currentMessage = Message.system("[输出内容重复，请换一个思路]")
-                lastTextResponse = ""
-                continue
-            }
-            lastTextResponse = textContent
-
-            if (channelContent != null) {
-                _state.update { s ->
-                    s.copy(messages = s.messages.map { msg ->
-                        if (msg.id == currentMsgId) msg.copy(channelContent = channelContent) else msg
-                    })
-                }
-            }
-
-            val duration = System.currentTimeMillis() - startTime
-            recordUsage(LlmCallRecord(
-                modelName = _state.value.modelName.ifEmpty { "local" },
-                provider = "local",
-                promptTokens = text.length / 2,
-                completionTokens = totalOutputChars / 2,
-                durationMs = duration,
-                success = true, errorMessage = null,
-            ))
-            finalizeModelMessage(currentMsgId)
-            _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
-            return
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            FileLogger.e("ChatViewModel", "processLocalMessage failed: ${e.message}", e)
+            updateModelMessage(currentMsgId, "\n\n[错误: ${e.message}]", false)
+        } finally {
+            finalizeModelMessage(currentMsgId, channelContent = channelContent)
+            try { conv.close() } catch (_: Exception) {}
+            if (activeConversation === conv) { activeConversation = null }
         }
     }
 
@@ -1124,9 +1043,17 @@ class ChatViewModel(
     }
 
     private fun closeConversation() {
-        try { activeConversation?.close() } catch (_: Exception) {}
+        val old = activeConversation
         activeConversation = null
         pendingInitialMessages = null
+        if (old != null) {
+            try { old.cancelProcess() } catch (_: Exception) {}
+            // 异步销毁旧会话，C++ ~SessionAdvanced 的 WaitUntilDone 可能耗时很久
+            // 阻塞的话 → 单线程执行池被旧任务占满 → 新会话任务排队
+            viewModelScope.launch(Dispatchers.IO) {
+                try { old.close() } catch (_: Exception) {}
+            }
+        }
     }
 
     // ========== 对话历史管理 ==========
@@ -1257,7 +1184,10 @@ class ChatViewModel(
     override fun onCleared() {
         super.onCleared()
         sendJob?.cancel()
-        closeConversation()
+        // onCleared 中 viewModelScope 可能已取消，需要同步关闭
+        try { activeConversation?.close() } catch (_: Exception) {}
+        activeConversation = null
+        pendingInitialMessages = null
         saveCurrentToHistory()
         liteRTManager.close()
     }

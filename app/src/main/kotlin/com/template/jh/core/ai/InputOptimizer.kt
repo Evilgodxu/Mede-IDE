@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.template.jh.data.source.local.toSamplerConfig
+import kotlinx.coroutines.withTimeoutOrNull
 /**
  * 输入优化器 — 独立于主推理工作流。
  *
@@ -47,19 +48,22 @@ ONLY输出优化后的文本，不要添加任何解释。
         val manager = liteRTManager ?: return text
         if (!manager.isInitialized) return text
 
+        // 优化指令拼入用户消息而非系统指令，确保模型正确执行
+        val userMessage = "${mode.prompt()}\n\n$text"
         val conv = manager.createConversation(
             com.google.ai.edge.litertlm.ConversationConfig(
-                systemInstruction = com.google.ai.edge.litertlm.Contents.of(mode.prompt()),
                 samplerConfig = manager.modelParams.toSamplerConfig(),
-                tools = emptyList(),
             )
         )
         return conv.use { c ->
             val optimized = StringBuilder()
-            c.sendMessageAsync(
-                com.google.ai.edge.litertlm.Message.user(text)
-            ).collect { chunk -> optimized.append(chunk.toString()) }
-            optimized.toString().trim().ifEmpty { text }
+            val collectResult = withTimeoutOrNull(60_000L) {
+                c.sendMessageAsync(
+                    com.google.ai.edge.litertlm.Message.user(userMessage)
+                ).collect { chunk -> optimized.append(chunk.toString()) }
+            }
+            if (collectResult == null) text
+            else optimized.toString().trim().ifEmpty { text }
         }
     }
 
