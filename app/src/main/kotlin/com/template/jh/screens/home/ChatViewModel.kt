@@ -319,10 +319,12 @@ class ChatViewModel(
 
     fun loadModel(modelPath: String) {
         viewModelScope.launch {
+            sendJob?.cancel() // 取消正在进行的生成
             val backend = _state.value.backendType
             val npuDir = _state.value.npuLibraryDir
             liteRTManager.backendType = backend
             liteRTManager.npuLibraryDir = npuDir
+            closeConversation() // 引擎重载前销毁旧 Conversation，避免悬挂引用
             liteRTManager.loadModel(modelPath)
             // 切换到本地模型时自动关闭云端
             preferencesRepo.setCloudModelEnabled(false)
@@ -333,6 +335,8 @@ class ChatViewModel(
     fun loadModelFromUri(uri: Uri) {
         closeModelPicker()
         viewModelScope.launch {
+            sendJob?.cancel() // 取消正在进行的生成
+            closeConversation() // 引擎重载前销毁旧 Conversation
             liteRTManager.loadModelFromUri(uri)
             preferencesRepo.setCloudModelEnabled(false)
             _state.update { it.copy(cloudModelEnabled = false) }
