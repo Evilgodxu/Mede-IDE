@@ -243,7 +243,7 @@ object HeatColors {
         val g = (1f - ratio * 1.2f).coerceIn(0f, 1f)
         val red = (r * 220 + (1 - r) * 76).toInt()
         val green = (g * 175 + (1 - g) * 175).toInt()
-        return (0xFF shl 24) or (red shl 16) or (green shl 8) or 50
+        return (0xFFL shl 24) or (red.toLong() shl 16) or (green.toLong() shl 8) or 50L
     }
 
     // 分段色板

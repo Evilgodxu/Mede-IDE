@@ -7,7 +7,6 @@ import android.view.TextureView
 import android.view.TextureView.SurfaceTextureListener
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,8 +18,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,6 +77,7 @@ fun VideoPlayer(
     val context = LocalContext.current
     var controlsVisible by remember { mutableStateOf(true) }
     var surfaceReady by remember { mutableStateOf(false) }
+    var isFullscreen by remember { mutableStateOf(false) }
 
     // 进度轮询
     LaunchedEffect(state.isPlaying) {
@@ -87,6 +91,15 @@ fun VideoPlayer(
 
     // 路径变化时重新初始化，否则复用已有播放器
     val needInit = videoPath != state.currentVideoPath || state.mediaPlayer == null
+
+    // 全屏容器
+    if (isFullscreen) {
+        FullscreenOverlay(state, controlsVisible, surfaceReady, needInit, videoPath, context,
+            onToggleControls = { controlsVisible = !controlsVisible },
+            onDismiss = { isFullscreen = false },
+        )
+        return
+    }
 
     Box(
         modifier = modifier.fillMaxSize().background(Color(0xFF1E1E1E)),
@@ -178,16 +191,15 @@ fun VideoPlayer(
                 .clickable { controlsVisible = !controlsVisible },
         )
 
-        // 底部控制覆盖层
+        // 底部控制覆盖层（紧凑单行 + 顶部滑块）
         if (controlsVisible) {
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .background(Color(0x80000000))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .background(Color(0x99000000)),
             ) {
+                // 进度滑块（紧贴控制栏上方，无额外 padding）
                 if (state.isPrepared && state.duration > 0) {
                     Slider(
                         value = (state.currentPosition / state.duration).coerceIn(0f, 1f),
@@ -196,41 +208,229 @@ fun VideoPlayer(
                             state.mediaPlayer?.seekTo(pos)
                             state.currentPosition = pos.toFloat()
                         },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(20.dp),
                         colors = SliderDefaults.colors(
                             thumbColor = MaterialTheme.colorScheme.primary,
                             activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = Color(0x44FFFFFF),
                         ),
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(formatDuration(state.currentPosition.toInt()),
-                            style = MaterialTheme.typography.labelSmall, color = Color(0xFFCCCCCC))
-                        Text(formatDuration(state.duration.toInt()),
-                            style = MaterialTheme.typography.labelSmall, color = Color(0xFFCCCCCC))
-                    }
-                    Spacer(Modifier.height(4.dp))
                 }
+                // 控制按钮行
                 Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = {
-                        state.mediaPlayer?.let {
-                            if (it.isPlaying) { it.pause(); state.isPlaying = false }
-                            else { it.start(); state.isPlaying = true }
-                        }
-                    }, modifier = Modifier.size(48.dp)) {
+                    // 后退 15 秒
+                    IconButton(
+                        onClick = {
+                            val pos = ((state.currentPosition - 15000).toInt()).coerceAtLeast(0)
+                            state.mediaPlayer?.seekTo(pos)
+                            state.currentPosition = pos.toFloat()
+                        },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(Icons.Default.SkipPrevious, null, Modifier.size(20.dp), tint = Color.White)
+                    }
+                    Spacer(Modifier.width(2.dp))
+                    // 播放/暂停
+                    IconButton(
+                        onClick = {
+                            state.mediaPlayer?.let {
+                                if (it.isPlaying) { it.pause(); state.isPlaying = false }
+                                else { it.start(); state.isPlaying = true }
+                            }
+                        },
+                        modifier = Modifier.size(36.dp),
+                    ) {
                         Icon(
                             if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            null, Modifier.size(32.dp), tint = Color.White,
+                            null, Modifier.size(24.dp), tint = Color.White,
                         )
                     }
+                    Spacer(Modifier.width(2.dp))
+                    // 前进 15 秒
+                    IconButton(
+                        onClick = {
+                            val pos = ((state.currentPosition + 15000).toInt()).coerceAtMost(state.duration.toInt())
+                            state.mediaPlayer?.seekTo(pos)
+                            state.currentPosition = pos.toFloat()
+                        },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(Icons.Default.SkipNext, null, Modifier.size(20.dp), tint = Color.White)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    // 时间显示
+                    Text(
+                        "${formatDuration(state.currentPosition.toInt())} / ${formatDuration(state.duration.toInt())}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFCCCCCC),
+                    )
                     Spacer(Modifier.weight(1f))
+                    // 全屏切换
+                    IconButton(
+                        onClick = { isFullscreen = !isFullscreen },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                            null, Modifier.size(18.dp), tint = Color.White,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun FullscreenOverlay(
+    state: VideoPlaybackState,
+    controlsVisible: Boolean,
+    surfaceReady: Boolean,
+    needInit: Boolean,
+    videoPath: String,
+    context: android.content.Context,
+    onToggleControls: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+        ) {
+            // 视频渲染
+            AndroidView(
+                factory = { ctx ->
+                    TextureView(ctx).apply {
+                        surfaceTextureListener = object : SurfaceTextureListener {
+                            override fun onSurfaceTextureAvailable(surface: SurfaceTexture, w: Int, h: Int) {
+                                if (!needInit) {
+                                    state.mediaPlayer?.setSurface(android.view.Surface(surface))
+                                    return
+                                }
+                                try {
+                                    state.mediaPlayer?.apply { if (state.isPlaying) stop(); release() }
+                                    state.mediaPlayer = null
+                                    state.isPlaying = false
+                                    state.isPrepared = false
+                                    state.duration = 0f
+                                    state.errorMsg = null
+                                    val mp = MediaPlayer()
+                                    val uri = if (videoPath.startsWith("content://")) Uri.parse(videoPath)
+                                    else Uri.fromFile(File(videoPath))
+                                    mp.setDataSource(context, uri)
+                                    mp.setSurface(android.view.Surface(surface))
+                                    mp.setOnPreparedListener {
+                                        state.duration = it.duration.toFloat()
+                                        state.isPrepared = true
+                                        state.currentPosition = state.mediaPlayer?.currentPosition?.toFloat() ?: 0f
+                                        it.start()
+                                        state.isPlaying = true
+                                    }
+                                    mp.setOnErrorListener { _, w, e -> state.errorMsg = "播放失败: what=$w extra=$e"; true }
+                                    mp.setOnCompletionListener {
+                                        state.isPlaying = false
+                                        state.currentPosition = 0f
+                                        mp.seekTo(0)
+                                    }
+                                    mp.prepareAsync()
+                                    state.mediaPlayer = mp
+                                } catch (e: Exception) {
+                                    state.errorMsg = "加载失败: ${e.message}"
+                                }
+                            }
+                            override fun onSurfaceTextureSizeChanged(s: SurfaceTexture, w: Int, h: Int) {}
+                            override fun onSurfaceTextureDestroyed(s: SurfaceTexture): Boolean {
+                                state.mediaPlayer?.setSurface(null)
+                                return true
+                            }
+                            override fun onSurfaceTextureUpdated(s: SurfaceTexture) {}
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            // 点击切换控制层
+            Box(Modifier.fillMaxSize().clickable { onToggleControls() })
+
+            // 底部控制栏（与主播放器相同布局）
+            if (controlsVisible) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(Color(0x99000000)),
+                ) {
+                    if (state.isPrepared && state.duration > 0) {
+                        Slider(
+                            value = (state.currentPosition / state.duration).coerceIn(0f, 1f),
+                            onValueChange = { f ->
+                                val pos = (f * state.duration).toInt()
+                                state.mediaPlayer?.seekTo(pos)
+                                state.currentPosition = pos.toFloat()
+                            },
+                            modifier = Modifier.fillMaxWidth().height(20.dp),
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                inactiveTrackColor = Color(0x44FFFFFF),
+                            ),
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = {
+                            val pos = ((state.currentPosition - 15000).toInt()).coerceAtLeast(0)
+                            state.mediaPlayer?.seekTo(pos)
+                            state.currentPosition = pos.toFloat()
+                        }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.SkipPrevious, null, Modifier.size(22.dp), tint = Color.White)
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        IconButton(onClick = {
+                            state.mediaPlayer?.let {
+                                if (it.isPlaying) { it.pause(); state.isPlaying = false }
+                                else { it.start(); state.isPlaying = true }
+                            }
+                        }, modifier = Modifier.size(44.dp)) {
+                            Icon(
+                                if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                null, Modifier.size(28.dp), tint = Color.White,
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        IconButton(onClick = {
+                            val pos = ((state.currentPosition + 15000).toInt()).coerceAtMost(state.duration.toInt())
+                            state.mediaPlayer?.seekTo(pos)
+                            state.currentPosition = pos.toFloat()
+                        }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.SkipNext, null, Modifier.size(22.dp), tint = Color.White)
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            "${formatDuration(state.currentPosition.toInt())} / ${formatDuration(state.duration.toInt())}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFFCCCCCC),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.FullscreenExit, null, Modifier.size(22.dp), tint = Color.White)
+                        }
+                    }
                 }
             }
         }

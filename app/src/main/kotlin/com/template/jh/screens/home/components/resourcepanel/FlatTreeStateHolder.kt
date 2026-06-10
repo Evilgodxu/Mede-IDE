@@ -23,8 +23,17 @@ class FlatTreeStateHolder {
     private val expandedKeys = mutableSetOf<String>()
     private val childrenCache = mutableStateMapOf<String, List<FileItemNode>>()
 
-    // 设置根节点
+    // 设置根节点（根变更时清理已不可用的展开/缓存状态）
     fun setRoot(fileItems: List<FileItem>) {
+        val newPaths = fileItems.map { it.relativePath }.toSet()
+        expandedKeys.removeAll { key ->
+            val topLevel = key.substringBefore('/')
+            topLevel !in newPaths
+        }
+        childrenCache.keys.removeAll { key ->
+            val topLevel = key.substringBefore('/')
+            topLevel !in newPaths
+        }
         rootNodes = fileItems.map {
             ResourceNode(
                 uri = it.uri,
@@ -54,6 +63,15 @@ class FlatTreeStateHolder {
             expandedKeys.add(relativePath)
             rebuildVisibleNodes()
         }
+    }
+
+    // 清除状态（根变更时调用）
+    fun clear() {
+        expandedKeys.clear()
+        childrenCache.clear()
+        loadingKeys = emptySet()
+        rootNodes = emptyList()
+        visibleNodes = emptyList()
     }
 
     // 切换展开/折叠

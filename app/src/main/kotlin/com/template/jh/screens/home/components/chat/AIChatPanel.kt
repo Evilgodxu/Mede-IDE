@@ -687,8 +687,7 @@ private fun ChatInputBar(
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
                     }
                 } else {
-                    IconButton(
-                        onClick = onOptimize,
+                    Box(
                         modifier = Modifier
                             .size(32.dp)
                             .combinedClickable(
@@ -696,6 +695,7 @@ private fun ChatInputBar(
                                 onLongClick = { showOptimizeModeMenu = true },
                                 enabled = inputText.isNotBlank() && !isLoading,
                             ),
+                        contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             Icons.Default.AutoAwesome,

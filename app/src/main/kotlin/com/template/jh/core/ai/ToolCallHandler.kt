@@ -50,7 +50,8 @@ class ToolCallHandler(
             "writeFile" -> aiToolSet.writeFile(
                 args.g("path"), args.g("content"), args.gBool("overwrite", default = false))
             "replaceInFile" -> aiToolSet.replaceInFile(
-                args.g("path"), args.g("old_string", "oldString", "old_str"), args.g("new_string", "newString", "new_str"))
+                args.g("path"), args.g("old_string", "oldString", "old_str"), args.g("new_string", "newString", "new_str"),
+                args.gInt("lineStart", "line_start", default = 0), args.gInt("lineEnd", "line_end", default = 0))
             "batchReplaceInFile" -> aiToolSet.batchReplaceInFile(
                 args.g("path"), args.g("edits", "editsJson", "edits_json"))
             "grep" -> aiToolSet.grep(

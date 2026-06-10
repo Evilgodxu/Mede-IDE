@@ -5,8 +5,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.ui.graphics.vector.ImageVector
-import kotlinx.coroutines.flow.Flow
-
+import com.template.jh.data.source.local.toSamplerConfig
 /**
  * 输入优化器 — 独立于主推理工作流。
  *

@@ -11,6 +11,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,7 +45,8 @@ fun ResourcePanel(
 ) {
     val treeState = rememberFlatTreeState()
 
-    remember(files) { treeState.setRoot(files) }
+    // 根文件列表变更时重建树（使用 LaunchedEffect 避免组合期间修改 State）
+    LaunchedEffect(files) { treeState.setRoot(files) }
 
     var renameTarget by remember { mutableStateOf<ResourceNode?>(null) }
     var createTarget by remember { mutableStateOf<ResourceNode?>(null) }

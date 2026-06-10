@@ -71,7 +71,7 @@ fun SearchPanel(
             placeholder = { Text("搜索内容...", style = MaterialTheme.typography.bodySmall) },
             singleLine = true,
             textStyle = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             trailingIcon = {
                 if (pattern.isNotEmpty()) {
                     IconButton(onClick = { pattern = ""; results = emptyList() }) {
@@ -91,7 +91,7 @@ fun SearchPanel(
                 placeholder = { Text("扩展名", style = MaterialTheme.typography.labelSmall) },
                 singleLine = true,
                 textStyle = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.width(80.dp).heightIn(min = 36.dp),
+                modifier = Modifier.width(96.dp).heightIn(min = 40.dp),
             )
             Spacer(Modifier.width(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -135,7 +135,7 @@ fun SearchPanel(
                     placeholder = { Text("替换为...", style = MaterialTheme.typography.bodySmall) },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f).heightIn(min = 36.dp),
+                    modifier = Modifier.weight(1f).heightIn(min = 40.dp),
                 )
                 Spacer(Modifier.width(4.dp))
                 OutlinedButton(

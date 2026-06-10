@@ -181,10 +181,12 @@ class AIToolSet(
             "content" to p("string", "Complete file content"),
             "overwrite" to p("boolean", "Overwrite existing file? Default false"),
         )
-        private fun buildReplaceInFileTool() = toolDef("replaceInFile", "Edit file by replacing exact code block", listOf("path", "old_string", "new_string"),
+        private fun buildReplaceInFileTool() = toolDef("replaceInFile", "Edit file by replacing exact code block. Optional line range (lineStart/lineEnd) limits search scope.", listOf("path", "old_string", "new_string"),
             "path" to p("string", "File path — absolute or relative to project root"),
-            "old_string" to p("string", "Exact code block to find (unique in file)"),
+            "old_string" to p("string", "Exact code block to find (unique in file or line range)"),
             "new_string" to p("string", "Replacement code block"),
+            "lineStart" to p("integer", "Limit search to lines from this line (1-based). 0 = whole file."),
+            "lineEnd" to p("integer", "Limit search to lines up to this line (1-based). 0 = whole file."),
         )
         private fun buildBatchReplaceInFileTool() = toolDef("batchReplaceInFile", "Edit file at multiple non-overlapping locations", listOf("path", "edits"),
             "path" to p("string", "File path — absolute or relative to project root"),
@@ -321,43 +323,61 @@ class AIToolSet(
 
     // 代码编辑工具 - 类似 SearchReplace，只修改指定内容
     // 这是唯一推荐的编辑方式：提供 old_string（要查找的代码块）和 new_string（新代码块）
-    @Tool(description = "Edit an existing file by replacing a specific code block. Provide the exact code to find (old_string) and the replacement (new_string). The old_string must be unique in the file - include enough context (function signature, class name, etc.) to ensure uniqueness. Returns OK with a summary of what was replaced.")
+    @Tool(description = "Edit an existing file by replacing a specific code block. Provide the exact code to find (old_string) and the replacement (new_string). The old_string must be unique in the file - include enough context (function signature, class name, etc.) to ensure uniqueness. Optionally limit search to a line range (lineStart/lineEnd, 1-based). Returns OK with a summary of what was replaced.")
     fun replaceInFile(
         @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
         @ToolParam(description = "The exact code block to find. Must be unique in the file. Include function signature or class definition for uniqueness.") old_string: String,
         @ToolParam(description = "The new code block to replace with.") new_string: String,
-    ): String = traceTool("replaceInFile", "path" to path, "old_string" to old_string, "new_string" to new_string) {
+        @ToolParam(description = "Limit search to lines starting from this line (1-based). 0 = search entire file.") lineStart: Int = 0,
+        @ToolParam(description = "Limit search to lines up to this line (1-based). 0 = search entire file.") lineEnd: Int = 0,
+    ): String = traceTool("replaceInFile", "path" to path, "old_string" to old_string, "new_string" to new_string, "lineStart" to lineStart, "lineEnd" to lineEnd) {
         val fm = fileManager ?: run {
             FileLogger.w("AIToolSet", "replaceInFile: no project folder open")
             return err("No project folder is open.")
         }
         val resolvedPath = resolvePathOrAbsolute(path)
         return try {
-            Log.d("AIToolSet", "replaceInFile: path=$resolvedPath oldLen=${old_string.length} newLen=${new_string.length}")
-            FileLogger.d("AIToolSet", "replaceInFile: path=$resolvedPath oldLen=${old_string.length} newLen=${new_string.length}")
-            val original = readFileRaw(resolvedPath)
-            if (original == null) {
+            Log.d("AIToolSet", "replaceInFile: path=$resolvedPath oldLen=${old_string.length} newLen=${new_string.length} lineStart=$lineStart lineEnd=$lineEnd")
+            FileLogger.d("AIToolSet", "replaceInFile: path=$resolvedPath oldLen=${old_string.length} newLen=${new_string.length} lineStart=$lineStart lineEnd=$lineEnd")
+            val fullOriginal = readFileRaw(resolvedPath)
+            if (fullOriginal == null) {
                 Log.w("AIToolSet", "replaceInFile: file not found: $resolvedPath")
                 FileLogger.w("AIToolSet", "replaceInFile: file not found: $resolvedPath")
                 return err("Cannot replace: file not found. Use writeFile to create first.")
             }
+            // 行范围过滤：仅搜索指定行范围内的内容
+            val allLines = fullOriginal.lines()
+            val hasRange = lineStart > 0 || lineEnd > 0
+            val start = if (hasRange) (lineStart - 1).coerceIn(0, allLines.size) else 0
+            val end = if (hasRange) {
+                if (lineEnd > 0) lineEnd.coerceAtMost(allLines.size) else allLines.size
+            } else allLines.size
+            if (hasRange && start >= allLines.size) return err("lineStart $lineStart exceeds file length ${allLines.size}")
+            // 搜索内容：全文或行范围子集
+            val searchContent = if (hasRange) allLines.subList(start, end).joinToString("\n") else fullOriginal
+            val displayRange = if (hasRange) " (lines $lineStart-${end})" else ""
 
-            when (val result = CodeEditTool.replace(original, old_string, new_string)) {
+            when (val result = CodeEditTool.replace(searchContent, old_string, new_string)) {
                 is CodeEditTool.ReplaceResult.Success -> {
-                    val newContent = normalizeBlankLines(result.newText)
-                    val writeResult = fm.writeFile(resolvedPath, newContent)
+                    // 行范围模式：拼接完整文件（前段 + 替换后范围 + 后段）
+                    val finalContent = if (hasRange) {
+                        val before = allLines.subList(0, start).joinToString("\n")
+                        val after = if (end < allLines.size) "\n" + allLines.subList(end, allLines.size).joinToString("\n") else ""
+                        val mid = if (before.isEmpty()) result.newText else "\n" + result.newText
+                        normalizeBlankLines(before + mid + after)
+                    } else {
+                        normalizeBlankLines(result.newText)
+                    }
+                    val writeResult = fm.writeFile(resolvedPath, finalContent)
                     if (writeResult.startsWith("Failed") || writeResult.startsWith("No project")) {
                         FileLogger.e("AIToolSet", "replaceInFile: replace OK but write failed: $writeResult")
                         return err("Replace succeeded but write failed: $writeResult")
                     }
                     FileOperationEvents.notify(resolvedPath, "modify")
                     FileLogger.d("AIToolSet", "replaceInFile succeeded: $resolvedPath")
-                    // 计算变化统计
                     val oldLines = old_string.lines().size
                     val newLines = new_string.lines().size
-                    val oldWords = old_string.count { it == ' ' || it == '\n' } + 1
-                    val newWords = new_string.count { it == ' ' || it == '\n' } + 1
-                    ok("$resolvedPath — ${result.message}. Changed $oldLines lines → $newLines lines.")
+                    ok("$resolvedPath$displayRange — ${result.message}. Changed $oldLines lines → $newLines lines.")
                 }
                 is CodeEditTool.ReplaceResult.Error -> {
                     FileLogger.w("AIToolSet", "replaceInFile: CodeEditTool rejected: ${result.message.take(200)}")
