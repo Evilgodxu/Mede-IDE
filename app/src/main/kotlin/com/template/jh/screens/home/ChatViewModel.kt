@@ -10,6 +10,7 @@ import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.ToolCall
 import com.google.ai.edge.litertlm.tool
 import com.template.jh.core.ai.AIToolSet
 import com.template.jh.core.ai.FileOperationEvents
@@ -488,7 +489,7 @@ class ChatViewModel(
         val userMsg = ChatMessage(role = ChatRole.User, content = userContent, imageUris = images)
         val modelMsgId = java.util.UUID.randomUUID().toString()
         val placeholderMsg = ChatMessage(id = modelMsgId, role = ChatRole.Model, content = "", isStreaming = true)
-        _state.update { it.copy(messages = it.messages + userMsg + placeholderMsg, inputText = "", attachedImageUris = emptyList(), attachedFileRefs = emptyList(), isLoading = true) }
+        _state.update { it.copy(messages = it.messages + userMsg + placeholderMsg, inputText = "", attachedImageUris = emptyList(), attachedFileRefs = emptyList(), isLoading = true, modelActivity = ModelActivity.Thinking, activityDetail = "") }
         val ctx = getApplication<Application>()
         sendJob?.cancel()
         sendJob = viewModelScope.launch(Dispatchers.IO) {
@@ -517,7 +518,7 @@ class ChatViewModel(
                 if (isCloud) {
                     processWithCloudTools(text, modelMsgId, ctx, tempImagePaths)
                 } else {
-                    ensureConversation(autoToolCalling = true)
+                    ensureConversation(autoToolCalling = false)
                     processWithJsonTools(text, modelMsgId, ctx, tempImagePaths)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -630,96 +631,56 @@ class ChatViewModel(
 
         val convId = _state.value.activeConversationId ?: ""
         val memoryCtx = contextManager.getMemoryContext(convId)
+        val keyFactsCtx = contextManager.getKeyFactsContext()
+
+        // 上下文与用户消息合并为单条 Content
+        val contentList = mutableListOf<Content>()
         if (memoryCtx.isNotBlank()) {
             val maxMemoryLen = 600
             val trimmed = if (memoryCtx.length > maxMemoryLen)
                 memoryCtx.take(maxMemoryLen) + "\n...(记忆已截断)" else memoryCtx
-            conv.sendMessageAsync(Message.system(trimmed)).collect {}
+            contentList.add(Content.Text("【对话记忆】\n$trimmed"))
         }
-        val keyFactsCtx = contextManager.getKeyFactsContext()
         if (keyFactsCtx.isNotBlank()) {
-            conv.sendMessageAsync(Message.system(keyFactsCtx)).collect {}
+            contentList.add(Content.Text("【关键事实】\n$keyFactsCtx"))
         }
         if (editorCtx.isNotBlank()) {
-            conv.sendMessageAsync(Message.system(editorCtx)).collect {}
+            contentList.add(Content.Text("【编辑器上下文】\n$editorCtx"))
         }
-
-        val firstMessage: Message = if (hasImages) {
-            val contentList = mutableListOf<Content>().apply {
-                add(Content.Text(text))
-                imagePaths.forEach { add(Content.ImageFile(absolutePath = it)) }
-            }
-            Message.user(Contents.of(contentList))
-        } else {
-            Message.user(text)
-        }
-
-        _state.update { it.copy(modelActivity = ModelActivity.Thinking, activityDetail = "") }
-
-        val toolResults = java.util.concurrent.ConcurrentLinkedDeque<Triple<String, String, Map<String, String>>>()
-        toolCallHandler.callback = object : ToolExecutionCallback {
-            override fun onToolStart(name: String, args: Map<String, String>) {
-                val act = toolCallHandler.toolNameToActivity(name)
-                val detail = args["path"] ?: args["command"] ?: args["query"] ?: ""
-                _state.update { it.copy(modelActivity = act, activityDetail = detail) }
-            }
-            override fun onToolResult(name: String, args: Map<String, String>, result: String) {
-                toolResults.add(Triple(name, result, args))
-            }
+        contentList.add(Content.Text(text))
+        if (hasImages) {
+            imagePaths.forEach { contentList.add(Content.ImageFile(absolutePath = it)) }
         }
 
         var currentMsgId = msgId
-        var currentMessage = firstMessage
+        var currentMessage: Message = Message.user(Contents.of(contentList))
         var rounds = 0
         var lastTextResponse = ""
 
         while (rounds < ChatConfig.MAX_TOOL_RETRY_ROUNDS) {
-            val fullResponse = StringBuilder()
+            val roundText = StringBuilder()
             var channelContent: String? = null
-            val modifyingTools = mutableSetOf<String>()
+            val roundToolCalls = mutableListOf<ToolCall>()
 
             try {
                 conv.sendMessageAsync(currentMessage).collect { msg ->
                     val c = msg.contents.toString()
-                    fullResponse.append(c)
-                    totalOutputChars += c.length
-                    updateModelMessage(currentMsgId, c, true)
+                    if (c.isNotEmpty()) {
+                        roundText.append(c)
+                        totalOutputChars += c.length
+                        updateModelMessage(currentMsgId, c, true)
+                    }
+                    if (msg.toolCalls.isNotEmpty()) {
+                        roundToolCalls.addAll(msg.toolCalls)
+                    }
                     if (msg.channels.isNotEmpty()) {
                         channelContent = (channelContent ?: "") + msg.channels.values.joinToString("\n")
                     }
                 }
-                while (true) {
-                    val entry = toolResults.pollFirst() ?: break
-                    val (name, _, args) = entry
-                    if (name in ChatConfig.MODIFYING_TOOLS) { modifyingTools.add(name) }
-                    if (name in ChatConfig.OPEN_FILE_TOOLS) {
-                        val rawPath = args["path"]
-                        if (rawPath != null) requestOpenFile(toolCallHandler.resolveToolPath(rawPath))
-                    }
-                }
-                if (modifyingTools.isNotEmpty()) {
-                    val lintBlock = withContext(Dispatchers.IO) {
-                        val result = aiToolSet.readLints()
-                        if (result.contains("No lint errors") || result.contains("读取诊断失败") || result.contains("No errors")) null
-                        else "[Lint 诊断]\n$result"
-                    }
-                    if (lintBlock != null) {
-                        conv.sendMessageAsync(Message.system(lintBlock)).collect {}
-                    }
-                }
-                if (channelContent != null) {
-                    _state.update { s ->
-                        s.copy(messages = s.messages.map { msg ->
-                            if (msg.id == currentMsgId) msg.copy(channelContent = channelContent) else msg
-                        })
-                    }
-                }
             } catch (e: kotlinx.coroutines.CancellationException) {
-                toolCallHandler.callback = null
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 throw e
             } catch (e: Exception) {
-                toolCallHandler.callback = null
                 val duration = System.currentTimeMillis() - startTime
                 recordUsage(LlmCallRecord(
                     modelName = _state.value.modelName.ifEmpty { "local" },
@@ -738,15 +699,78 @@ class ChatViewModel(
                 return
             }
 
-            val response = fullResponse.toString().trim()
             rounds++
 
-            if (response.length < 3) {
-                FileLogger.w("ChatViewModel", "quality: empty/short response round=$rounds")
-                currentMessage = Message.system("[你没有输出有效内容，请直接输出最终答案]")
+            // 处理原生工具调用（automaticToolCalling=false → msg.toolCalls 直接暴露）
+            if (roundToolCalls.isNotEmpty()) {
+                val modifyingTools = mutableSetOf<String>()
+                val toolResults = mutableListOf<Content.ToolResponse>()
+                val display = StringBuilder()
+
+                for ((i, tc) in roundToolCalls.withIndex()) {
+                    val argsStr = tc.arguments.mapValues { it.value?.toString() ?: "" }
+                    val name = tc.name
+
+                    val act = toolCallHandler.toolNameToActivity(name)
+                    val detail = argsStr["path"] ?: argsStr["command"] ?: argsStr["query"] ?: ""
+                    _state.update { it.copy(modelActivity = act, activityDetail = detail) }
+
+                    if (name in ChatConfig.MODIFYING_TOOLS) modifyingTools.add(name)
+                    if (name in ChatConfig.OPEN_FILE_TOOLS) {
+                        val rawPath = argsStr["path"]
+                        if (rawPath != null) requestOpenFile(toolCallHandler.resolveToolPath(rawPath))
+                    }
+
+                    val result = withContext(Dispatchers.IO) {
+                        toolCallHandler.executeAiTool(name, argsStr)
+                    }
+
+                    display.appendLine("[工具调用: $name]")
+                    display.appendLine(result)
+                    if (i < roundToolCalls.size - 1) display.appendLine()
+
+                    // 将 lint 注入追加到最后一条工具结果后
+                    toolResults.add(Content.ToolResponse(name, result))
+                }
+
+                // Lint 自动注入
+                if (modifyingTools.isNotEmpty()) {
+                    val lintBlock = withContext(Dispatchers.IO) {
+                        val r = aiToolSet.readLints()
+                        if (r.contains("No lint errors") || r.contains("读取诊断失败") || r.contains("No errors")) null
+                        else "[Lint 诊断]\n$r"
+                    }
+                    if (lintBlock != null) {
+                        val last = toolResults.removeLast()
+                        toolResults.add(Content.ToolResponse(last.name, "${last.response}\n\n$lintBlock"))
+                        display.appendLine().appendLine(lintBlock)
+                    }
+                }
+
+                // 显示工具结果
+                updateModelMessage(currentMsgId, "\n\n${display.toString().trimEnd()}", false)
+                finalizeModelMessage(currentMsgId)
+                _state.update { it.copy(modelActivity = ModelActivity.ProcessingResult, activityDetail = "") }
+
+                // 发回工具结果，进入下一轮
+                currentMessage = Message.tool(Contents.of(toolResults))
+                currentMsgId = java.util.UUID.randomUUID().toString()
+                _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true), isLoading = true) }
+                lastTextResponse = ""
                 continue
             }
-            val textContent = response.removePrefix("```").removeSuffix("```").take(200)
+
+            // 无工具调用 → 最终回复
+            val response = roundText.toString().trim()
+            val cleanResponse = toolCallHandler.stripToolCallJson(response)
+
+            if (cleanResponse.length < 3) {
+                FileLogger.w("ChatViewModel", "quality: empty/short response round=$rounds")
+                currentMessage = Message.system("[你没有输出有效内容，请直接输出最终答案]")
+                lastTextResponse = ""
+                continue
+            }
+            val textContent = cleanResponse.take(200)
             if (rounds > 1 && textContent == lastTextResponse) {
                 FileLogger.w("ChatViewModel", "quality: repetitive text response round=$rounds")
                 currentMessage = Message.system("[输出内容重复，请换一个思路]")
@@ -754,6 +778,14 @@ class ChatViewModel(
                 continue
             }
             lastTextResponse = textContent
+
+            if (channelContent != null) {
+                _state.update { s ->
+                    s.copy(messages = s.messages.map { msg ->
+                        if (msg.id == currentMsgId) msg.copy(channelContent = channelContent) else msg
+                    })
+                }
+            }
 
             val duration = System.currentTimeMillis() - startTime
             recordUsage(LlmCallRecord(
@@ -766,7 +798,6 @@ class ChatViewModel(
             ))
             finalizeModelMessage(currentMsgId)
             _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
-            toolCallHandler.callback = null
             return
         }
     }

@@ -84,33 +84,63 @@ class FlatTreeStateHolder {
     fun isExpanded(node: ResourceNode): Boolean = node.relativePath in expandedKeys
     fun isLoading(key: String): Boolean = key in loadingKeys
 
+    // 判断目录是否应自动扁平化（已展开且只有一个子目录）
+    private fun shouldFlatten(path: String): Boolean {
+        if (path !in expandedKeys) return false
+        val cached = childrenCache[path] ?: return false
+        return cached.size == 1 && cached[0].isDirectory
+    }
+
+    // 递归扁平化：合并路径名称，直到遇到非单子目录节点
+    private fun flattenChain(
+        result: MutableList<ResourceNode>,
+        prefixName: String,
+        path: String,
+        uri: Uri,
+        filePath: String,
+        depth: Int,
+    ) {
+        val child = childrenCache[path]!![0]
+        val mergedName = "$prefixName/${child.name}"
+        if (shouldFlatten(child.relativePath)) {
+            flattenChain(result, mergedName, child.relativePath, child.uri, child.filePath, depth)
+        } else {
+            result.add(ResourceNode(child.uri, mergedName, child.relativePath, true, depth, child.filePath))
+            if (child.relativePath in expandedKeys) {
+                appendChildren(result, child.relativePath, depth + 1)
+            }
+        }
+    }
+
     // 重建可见节点列表
     private fun rebuildVisibleNodes() {
         val result = mutableListOf<ResourceNode>()
-        fun appendChildren(parentPath: String, depth: Int) {
-            val cached = childrenCache[parentPath] ?: return
-            for (child in cached) {
-                val childNode = ResourceNode(
-                    uri = child.uri,
-                    name = child.name,
-                    relativePath = child.relativePath,
-                    isDirectory = child.isDirectory,
-                    depth = depth,
-                    filePath = child.filePath,
-                )
-                result.add(childNode)
-                if (child.isDirectory && child.relativePath in expandedKeys) {
-                    appendChildren(child.relativePath, depth + 1)
+        for (root in rootNodes) {
+            if (shouldFlatten(root.relativePath)) {
+                flattenChain(result, root.name, root.relativePath, root.uri, root.filePath, 0)
+            } else {
+                result.add(root)
+                if (root.isDirectory && root.relativePath in expandedKeys) {
+                    appendChildren(result, root.relativePath, 1)
                 }
             }
         }
-        for (root in rootNodes) {
-            result.add(root)
-            if (root.isDirectory && root.relativePath in expandedKeys) {
-                appendChildren(root.relativePath, 1)
+        visibleNodes = result
+    }
+
+    private fun appendChildren(result: MutableList<ResourceNode>, parentPath: String, depth: Int) {
+        val cached = childrenCache[parentPath] ?: return
+        for (child in cached) {
+            if (shouldFlatten(child.relativePath)) {
+                flattenChain(result, child.name, child.relativePath, child.uri, child.filePath, depth)
+            } else {
+                val node = ResourceNode(child.uri, child.name, child.relativePath, child.isDirectory, depth, child.filePath)
+                result.add(node)
+                if (child.isDirectory && child.relativePath in expandedKeys) {
+                    appendChildren(result, child.relativePath, depth + 1)
+                }
             }
         }
-        visibleNodes = result
     }
 
     fun refreshParent(
