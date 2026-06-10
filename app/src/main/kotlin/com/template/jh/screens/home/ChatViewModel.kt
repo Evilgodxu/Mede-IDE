@@ -191,6 +191,34 @@ class ChatViewModel(
         }
     }
 
+    /** 构建上下文仪表板数据（在 Composable 中调用） */
+    fun buildDashboardData(): DashboardData {
+        val s = _state.value
+        val snapshot = com.template.jh.core.memory.VisualizerEngine.buildSnapshot(
+            messages = s.messages,
+            maxTokens = s.contextMaxTokens,
+            isCompressed = s.isContextCompressed,
+            compressedTokens = s.contextCompressedTokens,
+            compressedCount = s.contextCompressedCount,
+        )
+        val breakdown = com.template.jh.core.memory.VisualizerEngine.buildTokenBreakdown(
+            messages = s.messages,
+            sysPromptTokens = contextManager.estimateSystemPromptTokens(contextManager.getSysPromptCache()),
+        )
+        val architecture = com.template.jh.core.memory.VisualizerEngine.buildMemoryArchitecture(conversationMemory)
+        val keyFactCategories = com.template.jh.core.memory.VisualizerEngine.buildKeyFactCategories(conversationMemory)
+        val compressionHistory = com.template.jh.core.memory.VisualizerEngine.buildCompressionHistory(s.messages)
+        return DashboardData(snapshot, breakdown, architecture, keyFactCategories, compressionHistory)
+    }
+
+    data class DashboardData(
+        val snapshot: com.template.jh.core.memory.ContextSnapshot,
+        val breakdown: com.template.jh.core.memory.TokenBreakdown,
+        val architecture: com.template.jh.core.memory.MemoryArchitecture,
+        val keyFactCategories: com.template.jh.core.memory.KeyFactCategories,
+        val compressionHistory: List<com.template.jh.core.memory.CompressionRecord>,
+    )
+
     private suspend fun applyCompressResult(result: ContextManager.CompressResult) {
         if (result.removedTokens > 0) {
             _state.update {

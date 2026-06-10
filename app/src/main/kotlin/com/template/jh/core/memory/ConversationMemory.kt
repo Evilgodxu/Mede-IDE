@@ -27,13 +27,15 @@ class ConversationMemory(private val context: Context) {
         val id: String = UUID.randomUUID().toString().take(8),
         val timestamp: Long = System.currentTimeMillis(),
         val role: String = "",          // user / model / tool
-        val content: String = "",        // 原始内容（短期层保留）
+        val content: String = "",        // 原始内容（短期层保留，截断至 500 字符存储）
         val summary: String = "",        // 摘要
         val keywords: List<String> = emptyList(),
         val filePaths: List<String> = emptyList(),
         val hasCode: Boolean = false,
         val hasToolCall: Boolean = false,
         val conversationId: String = "", // 所属对话 ID，空表示跨对话
+        val category: String = "",       // code / file / search / question / decision / general
+        val tokenEstimate: Int = 0,      // 该条目的 token 估算
     )
 
     /** 关键事实（Layer 1） */
@@ -74,17 +76,20 @@ class ConversationMemory(private val context: Context) {
         filePaths: List<String> = emptyList(),
         conversationId: String = "",
     ) = withContext(Dispatchers.Default) {
+        val tokens = (content.length / 3.5f).toInt()
         val entry = Entry(
             id = UUID.randomUUID().toString().take(8),
             timestamp = System.currentTimeMillis(),
             role = role,
-            content = content,
+            content = content.take(500),  // 精确保留
             summary = summarizeContent(content),
             keywords = extractKeywords(content),
             filePaths = filePaths,
             hasCode = content.contains("```") || content.contains("~~~"),
             hasToolCall = content.contains("[工具调用:") || content.contains("\"tool_name\"") || content.contains("\"name\""),
             conversationId = conversationId,
+            category = categorizeContent(content, role),
+            tokenEstimate = tokens,
         )
 
         // Layer 1: 提取关键事实（仅 user/model 角色）
@@ -95,7 +100,7 @@ class ConversationMemory(private val context: Context) {
         // Layer 2: 短期
         shortTerm.add(entry)
 
-        Log.d(TAG, "addEntry: role=$role id=${entry.id} kw=${entry.keywords.size}")
+        Log.d(TAG, "addEntry: role=$role id=${entry.id} cat=${entry.category} kw=${entry.keywords.size}")
     }
 
     /** 从对话消息批量添加（每轮调用一次） */
@@ -299,6 +304,8 @@ class ConversationMemory(private val context: Context) {
                             filePaths = jsonArrToList(obj.optJSONArray("filePaths")),
                             hasCode = obj.optBoolean("hasCode"), hasToolCall = obj.optBoolean("hasToolCall"),
                             conversationId = obj.optString("conversationId", ""),
+                            category = obj.optString("category", "general"),
+                            tokenEstimate = obj.optInt("tokenEstimate", 0),
                         ))
                     }
                 }
@@ -334,6 +341,7 @@ class ConversationMemory(private val context: Context) {
                     put("content", e.content.take(500)); put("summary", e.summary)
                     put("keywords", JSONArray(e.keywords)); put("filePaths", JSONArray(e.filePaths))
                     put("hasCode", e.hasCode); put("hasToolCall", e.hasToolCall); put("conversationId", e.conversationId)
+                    put("category", e.category); put("tokenEstimate", e.tokenEstimate)
                 })
             }
             root.put("shortTerm", shortArr)
@@ -477,6 +485,24 @@ class ConversationMemory(private val context: Context) {
             .replace(Regex("\\n{2,}"), " ")
             .trim()
         return if (cleaned.length > 120) cleaned.take(120) + "..." else cleaned
+    }
+
+    /** 内容分类 */
+    private fun categorizeContent(text: String, role: String): String {
+        val lower = text.lowercase().take(300)
+        return when {
+            text.contains("```") || text.contains("~~~") ||
+            lower.contains("class ") || lower.contains("fun ") || lower.contains("def ") -> "code"
+            lower.contains("文件") || lower.contains("file") || lower.contains("路径") ||
+            lower.contains(".kt") || lower.contains(".py") || lower.contains(".js") -> "file"
+            lower.contains("搜索") || lower.contains("search") || lower.contains("grep") ||
+            lower.contains("查找") || lower.contains("find") -> "search"
+            lower.contains("决定") || lower.contains("确认") || lower.contains("采用") ||
+            lower.contains("方案") || lower.contains("选择") -> "decision"
+            lower.contains("?") || lower.contains("？") || lower.contains("如何") ||
+            lower.contains("怎么") || lower.contains("什么") || lower.contains("为什么") -> "question"
+            else -> "general"
+        }
     }
 
     private fun formatTimestamp(ts: Long): String {

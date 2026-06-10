@@ -260,19 +260,18 @@ fun AIChatPanel(
         )
 
         if (showContextInfoDialog) {
-            ContextInfoDialog(
-                usedTokens = contextUsedTokens,
-                maxTokens = contextMaxTokens,
-                messagesCount = state.messages.size,
-                openedFilePaths = state.openedFilePaths,
-                isContextCompressed = state.isContextCompressed,
-                contextCompressedTokens = state.contextCompressedTokens,
-                contextCompressedCount = state.contextCompressedCount,
+            val dashData = remember(state.messages, state.isContextCompressed, state.contextCompressedTokens,
+                state.memoryKeyFactCount, state.memoryTotalTokens) {
+                viewModel.buildDashboardData()
+            }
+            ContextDashboard(
+                snapshot = dashData.snapshot,
+                breakdown = dashData.breakdown,
+                architecture = dashData.architecture,
+                keyFactCategories = dashData.keyFactCategories,
+                compressionHistory = dashData.compressionHistory,
                 contextSummary = state.contextSummary,
-                memoryKeyFactCount = state.memoryKeyFactCount,
-                memorySummaryCount = state.memorySummaryCount,
-                memoryEntryCount = state.memoryEntryCount,
-                memoryTotalTokens = state.memoryTotalTokens,
+                openedFilePaths = state.openedFilePaths,
                 onDismiss = { showContextInfoDialog = false },
             )
         }
@@ -1061,217 +1060,5 @@ private class VoiceRecognizerManager {
     }
 }
 
-
-// 上下文窗口详情对话框
-@Composable
-private fun ContextInfoDialog(
-    usedTokens: Int,
-    maxTokens: Int,
-    messagesCount: Int,
-    openedFilePaths: List<String>,
-    isContextCompressed: Boolean = false,
-    contextCompressedTokens: Int = 0,
-    contextCompressedCount: Int = 0,
-    contextSummary: String = "",
-    memoryKeyFactCount: Int = 0,
-    memorySummaryCount: Int = 0,
-    memoryEntryCount: Int = 0,
-    memoryTotalTokens: Int = 0,
-    onDismiss: () -> Unit,
-) {
-    val ratio = if (maxTokens > 0) (usedTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
-    val compressedRatio = if (maxTokens > 0) (contextCompressedTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
-    val memoryRatio = if (maxTokens > 0) (memoryTotalTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
-    val hasMemory = memoryKeyFactCount > 0 || memorySummaryCount > 0 || memoryEntryCount > 0
-    // 图例活跃颜色（与分段弧色同步）
-    val usedLegendColor = when {
-        ratio < 50f -> Color(0xFF4CAF50)
-        ratio < 80f -> Color(0xFFFFA000)
-        else -> Color(0xFFE53935)
-    }
-    // 屏幕高度 75%
-    val dialogMaxHeight = with(androidx.compose.ui.platform.LocalConfiguration.current) {
-        (screenHeightDp.dp * 0.75f).coerceAtLeast(200.dp)
-    }
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            modifier = Modifier
-                .widthIn(min = 300.dp, max = 380.dp)
-                .heightIn(max = dialogMaxHeight),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-        ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text("上下文窗口", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-
-                // === 分段甜甜圈图表（与按钮版本一致的连续三段布局） ===
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(72.dp)) {
-                        Canvas(Modifier.fillMaxSize()) {
-                            val strokeWidth = 10f
-                            val outerRadius = size.minDimension / 2f - strokeWidth / 2f
-                            val topLeft = androidx.compose.ui.geometry.Offset(strokeWidth / 2f, strokeWidth / 2f)
-                            val arcSize = androidx.compose.ui.geometry.Size(outerRadius * 2, outerRadius * 2)
-
-                            // Track
-                            drawArc(Color(0xFFE8E8E8), -90f, 360f, false,
-                                style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
-                                topLeft = topLeft, size = arcSize)
-
-                            var segStart = -90f
-                            // Segment 1: 已用 token（绿/黄/红）
-                            if (ratio > 0.5f) {
-                                drawArc(usedLegendColor, segStart, ratio / 100f * 360f, false,
-                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
-                                    topLeft = topLeft, size = arcSize)
-                                segStart += ratio / 100f * 360f + 3f
-                            } else if (ratio > 0f) {
-                                drawArc(usedLegendColor, segStart, ratio / 100f * 360f, false,
-                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
-                                    topLeft = topLeft, size = arcSize)
-                                segStart += ratio / 100f * 360f + 3f
-                            }
-                            // Segment 2: 已压缩（紫色）
-                            if (isContextCompressed && compressedRatio > 1f) {
-                                val compressedArc = (compressedRatio / 100f * 360f).coerceAtMost(150f)
-                                drawArc(Color(0xFF9C27B0).copy(alpha = 0.65f), segStart, compressedArc, false,
-                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
-                                    topLeft = topLeft, size = arcSize)
-                                segStart += compressedArc + 3f
-                            }
-                            // Segment 3: 记忆系统（蓝色）
-                            if (hasMemory && memoryRatio > 1f) {
-                                val memoryArc = (memoryRatio / 100f * 360f).coerceAtMost(90f)
-                                drawArc(Color(0xFF1565C0).copy(alpha = 0.6f), segStart, memoryArc, false,
-                                    style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidth, cap = androidx.compose.ui.graphics.StrokeCap.Butt),
-                                    topLeft = topLeft, size = arcSize)
-                            }
-                        }
-                        Text(
-                            text = "${ratio.toInt()}%",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-
-                // 颜色图例
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(8.dp).background(usedLegendColor, CircleShape))
-                        Spacer(Modifier.width(4.dp))
-                        Text("当前", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (isContextCompressed) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(8.dp).background(Color(0xFF9C27B0), CircleShape))
-                            Spacer(Modifier.width(4.dp))
-                            Text("已压缩", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    if (hasMemory) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(8.dp).background(Color(0xFF1565C0), CircleShape))
-                            Spacer(Modifier.width(4.dp))
-                            Text("记忆", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-
-                HorizontalDivider()
-
-                // === Token 用量 ===
-                Text("Token 用量", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
-                val usedK = if (usedTokens >= 1000) "${"%.1f".format(usedTokens / 1000f)}k" else "$usedTokens"
-                val maxK = if (maxTokens >= 1000) "${maxTokens / 1000}k" else "$maxTokens"
-                Text(
-                    text = "$usedK / $maxK  ·  $messagesCount 条消息",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                if (isContextCompressed) {
-                    Spacer(Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(6.dp).background(Color(0xFF9C27B0), CircleShape))
-                        Spacer(Modifier.width(6.dp))
-                        val removedK = if (contextCompressedTokens < 1000) "<1k" else "${contextCompressedTokens / 1000}k+"
-                        Text(
-                            text = "已压缩 $contextCompressedCount 次 · 累计释放 $removedK token",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF7B1FA2),
-                        )
-                    }
-                }
-
-                if (hasMemory) {
-                    Spacer(Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(6.dp).background(Color(0xFF1565C0), CircleShape))
-                        Spacer(Modifier.width(6.dp))
-                        val parts = mutableListOf<String>()
-                        if (memoryKeyFactCount > 0) parts.add("关键事实 $memoryKeyFactCount")
-                        if (memorySummaryCount > 0) parts.add("摘要 $memorySummaryCount")
-                        if (memoryEntryCount > 0) parts.add("短记忆 $memoryEntryCount")
-                        val memK = if (memoryTotalTokens < 1000) "<1k" else "${memoryTotalTokens / 1000}k"
-                        Text(
-                            text = "${parts.joinToString(" · ")}  ·  ~$memK token",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF1565C0),
-                        )
-                    }
-                }
-
-                // === 上下文摘要 ===
-                val summary = contextSummary
-                if (summary.isNotBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text("上下文摘要", fontWeight = FontWeight.SemiBold,
-                        style = MaterialTheme.typography.labelMedium, color = Color(0xFF7B1FA2))
-                    Text(
-                        text = summary.take(200),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 6,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                // === 已打开文件 ===
-                if (openedFilePaths.isNotEmpty()) {
-                    HorizontalDivider()
-                    Text("已打开文件", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
-                    openedFilePaths.take(5).forEach { path ->
-                        Text(
-                            text = path,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    if (openedFilePaths.size > 5) Text(
-                        text = "... 还有 ${openedFilePaths.size - 5} 个文件",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
 
 

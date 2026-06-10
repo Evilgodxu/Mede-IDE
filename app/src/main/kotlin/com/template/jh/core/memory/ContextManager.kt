@@ -269,9 +269,12 @@ You are an AI coding assistant. Reply in 简体中文.
         val messages: List<ChatMessage>,
         val removedTokens: Int,
         val summaryContent: String,
+        val keyFactsPreserved: Int = 0,
+        val triggerType: String = "auto",  // auto / force / periodic
     )
 
-    /** 执行消息压缩 — 返回结果由调用方更新状态 */
+    /** 执行消息压缩 — 返回结果由调用方更新状态。
+     *  优化策略：语义分块 + 优先级保留 + 记忆入库 */
     suspend fun compressMessages(
         messages: List<ChatMessage>,
         activeConversationId: String?,
@@ -280,10 +283,16 @@ You are an AI coding assistant. Reply in 简体中文.
         val totalTokens = estimateContextTokens(messages)
         if (totalTokens <= threshold) return CompressResult(messages, 0, "")
 
-        // Step 1: 截断工具输出
+        // Step 1: 截断工具输出（长工具返回只保留头尾）
         val truncated = truncateToolMessages(messages)
 
-        // Step 2: 保留最后 KEEP_EXCHANGES 轮对话
+        // Step 2: 按优先级评分每个消息
+        val scored = truncated.mapIndexed { idx, msg ->
+            val priority = messagePriority(msg, idx, truncated.size)
+            ScoredMessage(msg, idx, estimateTokens(msg.content), priority)
+        }
+
+        // Step 3: 智能分块 — 保留高优先级 + 最近 KEEP_EXCHANGES 轮
         val recent = mutableListOf<ChatMessage>()
         var userCount = 0
         for (i in truncated.indices.reversed()) {
@@ -294,7 +303,7 @@ You are an AI coding assistant. Reply in 简体中文.
             }
         }
 
-        // Step 3: 处理早期消息
+        // Step 4: 处理早期消息 — 按优先级选择有价值的迁移到记忆
         val keepEnd = truncated.size - recent.size
         val earlyMessages = truncated.take(keepEnd)
         val combined = mutableListOf<ChatMessage>()
@@ -302,7 +311,11 @@ You are an AI coding assistant. Reply in 简体中文.
 
         if (keepEnd > 0) {
             val convId = activeConversationId ?: ""
-            val adapters = earlyMessages.map { msg ->
+            // 仅将高优先级早期消息迁移到记忆（避免噪音）
+            val highPriorityEarly = earlyMessages.filterIndexed { idx, msg ->
+                (scored.getOrNull(idx)?.priority ?: 1) >= 3
+            }
+            val adapters = highPriorityEarly.map { msg ->
                 ChatMessageAdapter(
                     role = when (msg.role) {
                         ChatRole.User -> "user"
@@ -313,15 +326,14 @@ You are an AI coding assistant. Reply in 简体中文.
                     content = msg.content.take(2000),
                 )
             }
-            conversationMemory.addMessages(adapters, convId)
+            if (adapters.isNotEmpty()) {
+                conversationMemory.addMessages(adapters, convId)
+            }
 
+            // 生成摘要上下文字段
             val memCtx = conversationMemory.getCompressionContext(convId)
-            if (memCtx.isNotBlank() || summaryContent.isBlank()) {
-                summaryContent = if (summaryContent.isNotBlank()) {
-                    "$memCtx\n\n[LLM摘要]\n$summaryContent"
-                } else {
-                    memCtx
-                }
+            if (memCtx.isNotBlank()) {
+                summaryContent = memCtx
             }
             if (summaryContent.isNotBlank()) {
                 combined.add(ChatMessage(
@@ -343,12 +355,13 @@ You are an AI coding assistant. Reply in 简体中文.
         combined.addAll(recent)
 
         val removedTokens = totalTokens - estimateContextTokens(combined)
+        val keyFactCount = conversationMemory.getKeyFacts().size
 
-        // Step 6: 插入/更新累计通知
+        // Step 5: 插入/更新累计通知
         val existingSummaryIndex = combined.indexOfFirst {
             it.role == ChatRole.Model && it.content.startsWith("[上下文压缩累计]")
         }
-        val hasMemory = conversationMemory.getKeyFacts().isNotEmpty()
+        val hasMemory = keyFactCount > 0
         val summaryMsg = ChatMessage(
             role = ChatRole.Model,
             content = buildString {
@@ -356,7 +369,7 @@ You are an AI coding assistant. Reply in 简体中文.
                 append("[上下文压缩累计] 累计移除 $removedK tokens，")
                 append("保留最近 ${ChatConfig.KEEP_EXCHANGES} 轮对话")
                 append("，早期对话已保存到记忆系统")
-                if (hasMemory) append("（含关键事实保活）")
+                if (hasMemory) append("（含 $keyFactCount 条关键事实保活）")
                 append("。")
             },
             timestamp = System.currentTimeMillis(),
@@ -370,8 +383,35 @@ You are an AI coding assistant. Reply in 简体中文.
             messages = finalMessages,
             removedTokens = removedTokens,
             summaryContent = summaryContent,
+            keyFactsPreserved = keyFactCount,
         )
     }
+
+    /** 消息优先级评分（1-10） */
+    private fun messagePriority(msg: ChatMessage, index: Int, total: Int): Int {
+        var score = 1
+        val content = msg.content
+        // 角色权重
+        score += when (msg.role) {
+            ChatRole.User -> 4   // 用户消息最重要
+            ChatRole.Tool -> 3   // 工具调用结果次之
+            ChatRole.Model -> 2  // 模型响应
+            ChatRole.System -> 1
+        }
+        // 内容信号
+        if (content.contains("```") || content.contains("~~~")) score += 2  // 含代码
+        if (content.contains("关键") || content.contains("重要") || content.contains("必须")) score += 1
+        if (content.contains("文件") || content.contains("filePath") || content.contains("/") ) score += 1
+        if (content.length > 500) score += 1  // 长消息可能更有价值
+        // 位置衰减（越早的消息价值越低）
+        val positionRatio = index.toFloat() / total.coerceAtLeast(1)
+        score = (score * (1f - positionRatio * 0.3f)).toInt().coerceAtLeast(1)
+        return score.coerceAtMost(10)
+    }
+
+    private data class ScoredMessage(
+        val msg: ChatMessage, val idx: Int, val tokens: Int, val priority: Int
+    )
 
     /** 聊天消息 → LiteRT Message 列表 */
     fun chatMessagesToLiteRT(messages: List<ChatMessage>): List<com.google.ai.edge.litertlm.Message> =
