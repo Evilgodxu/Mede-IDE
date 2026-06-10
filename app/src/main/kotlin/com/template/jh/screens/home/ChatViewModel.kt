@@ -144,8 +144,12 @@ class ChatViewModel(
     @Volatile private var sysPromptRules: List<Rule> = emptyList()
     @Volatile private var sysPromptSkills: List<com.template.jh.model.SkillItem> = emptyList()
     @Volatile private var sysPromptDeepThink: Boolean = false
+    /** system prompt 版本号，缓存失效时递增 → ensureConversation 据此重建 */
+    @Volatile private var sysPromptVersion: Int = 0
+    /** ensureConversation 上次创建 Conversation 时的版本，不一致时重建 */
+    @Volatile private var convSysPromptVersion: Int = -1
 
-    /** 刷新记忆状态并失效 system prompt 缓存 */
+    /** 刷新记忆状态（不再失效 system prompt 缓存 — 记忆作为独立 system 消息注入） */
     private fun refreshMemoryState() {
         val stats = conversationMemory.getStats()
         _state.update {
@@ -156,7 +160,6 @@ class ChatViewModel(
                 memoryTotalTokens = stats.estimatedTokens,
             )
         }
-        _sysPromptCache = null
     }
 
     init {
@@ -175,6 +178,7 @@ class ChatViewModel(
                 sysPromptRules = rules
                 sysPromptSkills = skills
                 _sysPromptCache = null
+                sysPromptVersion++
             }.collect {}
         }
         // Launch 2: 初始数据加载 + engine/download state + model params 恢复 监听
@@ -470,14 +474,8 @@ class ChatViewModel(
                 } else if (isCloud) {
                     processWithCloudTools(text, modelMsgId, ctx, tempImagePaths)
                 } else {
-                    // LiteRT: 优先组装上下文（替代硬截断）
-                    val currentMsgs = _state.value.messages
-                    val contextBudget = _state.value.contextMaxTokens.coerceAtLeast(DEFAULT_LOCAL_CONTEXT_WINDOW)
-                    val available = contextBudget - estimateTokens(text) - 256 - estimateSystemPromptTokens()
-                    val assembled = selectContextForLocal(currentMsgs, available)
-                    pendingInitialMessages = chatMessagesToLiteRT(assembled)
-                    resetConversation()
-                    val conv = ensureConversation(autoToolCalling = true)
+                    // LiteRT: 复用 Conversation 增量发送，避免 KV Cache 重建
+                    ensureConversation(autoToolCalling = true)
                     processWithJsonTools(text, modelMsgId, ctx, tempImagePaths)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -730,13 +728,28 @@ class ChatViewModel(
     }
 
     private fun ensureConversation(autoToolCalling: Boolean = false): Conversation {
-        activeConversation?.let { return it }
-        val initialMessages = pendingInitialMessages
-        pendingInitialMessages = null
+        // 如有 pendingInitialMessages → 创建新 Conversation 注入历史（switchConversation / fallback）
+        val initialMsgs = pendingInitialMessages
+        if (initialMsgs != null) {
+            pendingInitialMessages = null
+            activeConversation?.let { try { it.close() } catch (_: Exception) {} }
+            activeConversation = null
+        } else {
+            // System prompt 变化 → 重建 Conversation
+            if (sysPromptVersion != convSysPromptVersion) {
+                activeConversation?.let { try { it.close() } catch (_: Exception) {} }
+                activeConversation = null
+            }
+            // 复用活跃 Conversation 避免 KV Cache 重建
+            activeConversation?.let { conv ->
+                if (conv.isAlive) return conv
+            }
+        }
+        convSysPromptVersion = sysPromptVersion
         val conv = liteRTManager.createConversation(
             ConversationConfig(
                 systemInstruction = Contents.of(buildSystemInstruction()),
-                initialMessages = initialMessages ?: emptyList(),
+                initialMessages = initialMsgs ?: emptyList(),
                 samplerConfig = liteRTManager.modelParams.toSamplerConfig(),
                 tools = listOf(tool(aiToolSet)),
                 automaticToolCalling = autoToolCalling,
@@ -815,21 +828,6 @@ You are an AI coding assistant. Reply in 简体中文.
         sb.appendLine()
 
         if (sysPromptUserName.isNotBlank()) sb.append("\n用户: $sysPromptUserName")
-
-        // 注入对话历史记忆（本地模型限制长度防止撑满上下文）
-        val convId = _state.value.activeConversationId ?: ""
-        val memoryCtx = conversationMemory.getMemoryContext(convId)
-        if (memoryCtx.isNotBlank()) {
-            val maxMemoryLen = if (!_state.value.cloudModelEnabled) 400 else 1200
-            val trimmed = if (memoryCtx.length > maxMemoryLen) memoryCtx.take(maxMemoryLen) + "\n...(记忆已截断)" else memoryCtx
-            sb.append("\n\n$trimmed\n")
-        }
-
-        // 注入关键事实（Layer 1，高优先级，不截断）
-        val keyFactsCtx = conversationMemory.getKeyFactsContext()
-        if (keyFactsCtx.isNotBlank()) {
-            sb.append("\n\n$keyFactsCtx\n")
-        }
 
         if (sysPromptRules.isNotEmpty()) {
             sb.append("\n\n## 系统规则（必须严格遵守）")
@@ -1561,6 +1559,20 @@ You are an AI coding assistant. Reply in 简体中文.
         val hasImages = imagePaths.isNotEmpty()
         val startTime = System.currentTimeMillis()
         var totalOutputChars = 0
+
+        // 将记忆上下文作为独立 system 消息注入（从 system prompt 分离，使系统提示可缓存）
+        val convId = _state.value.activeConversationId ?: ""
+        val memoryCtx = conversationMemory.getMemoryContext(convId)
+        if (memoryCtx.isNotBlank()) {
+            val maxMemoryLen = 600
+            val trimmed = if (memoryCtx.length > maxMemoryLen)
+                memoryCtx.take(maxMemoryLen) + "\n...(记忆已截断)" else memoryCtx
+            conv.sendMessageAsync(Message.system(trimmed)).collect {}
+        }
+        val keyFactsCtx = conversationMemory.getKeyFactsContext()
+        if (keyFactsCtx.isNotBlank()) {
+            conv.sendMessageAsync(Message.system(keyFactsCtx)).collect {}
+        }
 
         // 将编辑器上下文作为独立 system 消息注入，不从用户消息中拼接
         if (editorCtx.isNotBlank()) {
