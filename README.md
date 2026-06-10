@@ -156,8 +156,6 @@ git clone https://github.com/Evilgodxu/Android-AI-IDE.git
 3. 同步 Gradle 后直接运行
 
 4. （可选）加载 AI 模型：
-   - 在设置 → 模型中扫描设备上的 `.gguf` 模型文件
-   - 或从文件浏览器加载模型
 
 5. （可选）配置云端模型：
    - 在设置 → 模型中启用云端模型

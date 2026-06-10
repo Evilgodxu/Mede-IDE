@@ -148,14 +148,12 @@
     <string name="chat_streaming">生成中…</string>
 
     <!-- 规则设置 -->
-    <string name="rules_title">规则管理</string>
+    <string name="rules_title">系统规则</string>
     <string name="rules_description">创建规则作为上下文注入对话，模型对话时自动引用</string>
     <string name="rules_add">添加规则</string>
     <string name="rules_edit">编辑规则</string>
     <string name="rules_name_hint">规则名称</string>
     <string name="rules_content_hint">描述规则要求…</string>
-    <string name="rules_type_global">全局规则</string>
-    <string name="rules_type_project">项目规则</string>
     <string name="rules_count_hint">已启用 %d 条规则，对话时将自动注入为上下文参考</string>
     <string name="rules_save">保存</string>
     <string name="rules_cancel">取消</string>

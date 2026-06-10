@@ -251,6 +251,8 @@ fun AIChatPanel(
             isContextCompressed = state.isContextCompressed,
             contextCompressedTokens = state.contextCompressedTokens,
             contextCompressedCount = state.contextCompressedCount,
+            memoryKeyFactCount = state.memoryKeyFactCount,
+            memorySummaryCount = state.memorySummaryCount,
             onContextInfoClick = { showContextInfoDialog = true },
             onImagePick = { imagePickerLauncher.launch("image/*") },
         )
@@ -265,6 +267,10 @@ fun AIChatPanel(
                 contextCompressedTokens = state.contextCompressedTokens,
                 contextCompressedCount = state.contextCompressedCount,
                 contextSummary = state.contextSummary,
+                memoryKeyFactCount = state.memoryKeyFactCount,
+                memorySummaryCount = state.memorySummaryCount,
+                memoryEntryCount = state.memoryEntryCount,
+                memoryTotalTokens = state.memoryTotalTokens,
                 onDismiss = { showContextInfoDialog = false },
             )
         }
@@ -437,14 +443,13 @@ private fun ModelItemView(
     isActiveStreaming: Boolean,
 ) {
     val context = LocalContext.current
-    val thinkRegex = remember { Regex("""\[think\](.*?)\[/think]""", RegexOption.DOT_MATCHES_ALL) }
 
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalAlignment = Alignment.Start) {
         Text("Mede", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
 
-        // 思考块：可折叠展示
-        if (item.thinkBlocks.isNotEmpty()) {
+        // 思考内容：可折叠展示（来自 LiteRT-LM channels）
+        if (item.channelContent != null) {
             var thinkExpanded by remember { mutableStateOf(false) }
             Box(
                 modifier = Modifier
@@ -462,11 +467,8 @@ private fun ModelItemView(
                     }
                     if (thinkExpanded) {
                         Spacer(Modifier.height(4.dp))
-                        item.thinkBlocks.forEachIndexed { i, thinkContent ->
-                            if (i > 0) Spacer(Modifier.height(6.dp))
-                            Text(thinkContent, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-                        }
+                        Text(item.channelContent, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                     }
                 }
             }
@@ -593,6 +595,8 @@ private fun ChatInputBar(
     isContextCompressed: Boolean = false,
     contextCompressedTokens: Int = 0,
     contextCompressedCount: Int = 0,
+    memoryKeyFactCount: Int = 0,
+    memorySummaryCount: Int = 0,
     onContextInfoClick: () -> Unit = {},
     onImagePick: () -> Unit = {},
     attachedImageUris: List<android.net.Uri> = emptyList(),
@@ -711,6 +715,15 @@ private fun ChatInputBar(
 
             // 上下文窗口进度按钮
             val ratio = if (contextMaxTokens > 0) (contextUsedTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
+            val hasMemory = memoryKeyFactCount > 0 || memorySummaryCount > 0
+            val buttonColor = when {
+                isContextCompressed && hasMemory -> Color(0xFF7B1FA2)  // 紫色 = 压缩+记忆
+                isContextCompressed -> Color(0xFF9C27B0)              // 浅紫 = 仅压缩
+                hasMemory -> Color(0xFF1565C0)                        // 蓝色 = 有记忆
+                ratio < 0.5f -> Color(0xFF4CAF50)                     // 绿色
+                ratio < 0.8f -> Color(0xFFFFA000)                     // 橙色
+                else -> Color(0xFFE53935)                             // 红色
+            }
             Box(
                 modifier = Modifier
                     .size(22.dp)
@@ -721,15 +734,18 @@ private fun ChatInputBar(
                     progress = { ratio },
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 1.5.dp,
-                    color = if (isContextCompressed) Color(0xFF7B1FA2)
-                        else if (ratio < 0.5f) Color(0xFF4CAF50)
-                        else if (ratio < 0.8f) Color(0xFFFFA000)
-                        else Color(0xFFE53935),
+                    color = buttonColor,
                     trackColor = Color(0xFFE0E0E0),
                 )
-                if (isContextCompressed) {
-                    Text("C", style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(fontSize = 7.sp),
-                        color = Color(0xFF7B1FA2))
+                val label = when {
+                    isContextCompressed && hasMemory -> "CM"
+                    isContextCompressed -> "C"
+                    hasMemory -> "M"
+                    else -> ""
+                }
+                if (label.isNotEmpty()) {
+                    Text(label, style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(fontSize = 6.sp),
+                        color = buttonColor, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -1037,6 +1053,10 @@ private fun ContextInfoDialog(
     contextCompressedTokens: Int = 0,
     contextCompressedCount: Int = 0,
     contextSummary: String = "",
+    memoryKeyFactCount: Int = 0,
+    memorySummaryCount: Int = 0,
+    memoryEntryCount: Int = 0,
+    memoryTotalTokens: Int = 0,
     onDismiss: () -> Unit,
 ) {
     val ratio = if (maxTokens > 0) (usedTokens.toFloat() / maxTokens * 100).coerceIn(0f, 100f) else 0f
@@ -1100,6 +1120,28 @@ private fun ContextInfoDialog(
                         text = "已压缩 $contextCompressedCount 次，累计移除 $removedK token",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // 记忆系统状态
+                val hasMemory = memoryKeyFactCount > 0 || memorySummaryCount > 0 || memoryEntryCount > 0
+                if (hasMemory) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("记忆系统", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium,
+                        color = Color(0xFF1565C0))
+                    val parts = mutableListOf<String>()
+                    if (memoryKeyFactCount > 0) parts.add("关键事实 $memoryKeyFactCount 条")
+                    if (memorySummaryCount > 0) parts.add("摘要段 $memorySummaryCount 个")
+                    if (memoryEntryCount > 0) parts.add("短期记忆 $memoryEntryCount 条")
+                    Text(
+                        text = parts.joinToString("  ·  "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    val memK = if (memoryTotalTokens < 1000) "<1k" else "${memoryTotalTokens / 1000}k"
+                    Text(
+                        text = "总数据量 ~$memK token（已压缩，不计入当前窗口）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF757575),
                     )
                 }
                 val summary = contextSummary

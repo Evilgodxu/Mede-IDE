@@ -5,7 +5,6 @@ import com.template.jh.model.chat.ChatRole
 import com.template.jh.model.chat.DisplayItem
 import com.template.jh.model.chat.DisplayRole
 
-private val thinkRegex = Regex("""\[think\](.*?)\[/think]""", RegexOption.DOT_MATCHES_ALL)
 private val toolJsonRegex = Regex(
     """\{\s*"(?:name|tool_name)"\s*:\s*"[^"]*"\s*(?:,\s*"arguments"\s*:\s*\{[^}]*\}\s*)?\}""",
 )
@@ -22,13 +21,6 @@ private fun stripUserControlPrefixes(text: String): String {
         .replace(Regex("\\n\\[用户指定的文件.*"), "")
         .trim()
     return cleaned
-}
-
-private fun thinkBlocks(text: String): Pair<List<String>, String> {
-    if (text.length > 50_000) return emptyList<String>() to text  // 超大文本跳过正则
-    val blocks = thinkRegex.findAll(text).map { it.groupValues[1].trim() }.toList()
-    val cleaned = text.replace(thinkRegex, "").trim()
-    return blocks to cleaned
 }
 
 private fun stripToolCalls(text: String): String {
@@ -57,7 +49,7 @@ fun toDisplayItems(messages: List<ChatMessage>): List<DisplayItem> {
                 result.add(DisplayItem(
                     id = msg.id, role = DisplayRole.User,
                     content = stripUserControlPrefixes(msg.content),
-                    thinkBlocks = emptyList(), isStreaming = false,
+                    isStreaming = false,
                     timestamp = msg.timestamp, imageUris = msg.imageUris,
                 ))
                 i++
@@ -81,14 +73,15 @@ fun toDisplayItems(messages: List<ChatMessage>): List<DisplayItem> {
 
 /** 合并模型消息及紧随的工具结果，生成一条显示条目 */
 private fun mergeModelMessages(modelMsgs: List<ChatMessage>, toolMsgs: List<ChatMessage> = emptyList()): DisplayItem {
-    val allThinkBlocks = mutableListOf<String>()
     val contentParts = mutableListOf<String>()
+    var thinkingContent: String? = null
 
     for (msg in modelMsgs) {
-        val (blocks, cleaned) = thinkBlocks(msg.content)
-        allThinkBlocks.addAll(blocks)
-        val stripped = stripToolCalls(cleaned)
+        val stripped = stripToolCalls(msg.content)
         if (stripped.isNotBlank()) contentParts.add(stripped)
+        if (msg.channelContent != null) {
+            thinkingContent = (thinkingContent ?: "") + "\n" + msg.channelContent
+        }
     }
 
     // 追加工具结果到显示内容
@@ -98,8 +91,7 @@ private fun mergeModelMessages(modelMsgs: List<ChatMessage>, toolMsgs: List<Chat
 
     if (contentParts.isEmpty() && modelMsgs.isNotEmpty()) {
         val last = modelMsgs.last()
-        val (_, cleaned) = thinkBlocks(last.content)
-        val stripped = stripToolCalls(cleaned)
+        val stripped = stripToolCalls(last.content)
         if (stripped.isNotBlank()) contentParts.add(stripped)
         else if (toolMsgs.isNotEmpty()) contentParts.addAll(toolMsgs.mapNotNull { it.content.takeIf { it.isNotBlank() } })
     }
@@ -107,7 +99,7 @@ private fun mergeModelMessages(modelMsgs: List<ChatMessage>, toolMsgs: List<Chat
     return DisplayItem(
         id = modelMsgs.first().id, role = DisplayRole.Model,
         content = contentParts.joinToString("\n\n").trim(),
-        thinkBlocks = allThinkBlocks,
+        channelContent = thinkingContent?.trim(),
         isStreaming = modelMsgs.any { it.isStreaming },
         timestamp = modelMsgs.first().timestamp,
     )

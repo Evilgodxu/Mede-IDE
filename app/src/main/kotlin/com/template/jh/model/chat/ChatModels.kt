@@ -17,6 +17,7 @@ data class ChatMessage(
     val timestamp: Long = System.currentTimeMillis(),
     val toolCallId: String? = null,     // 工具调用 ID，用于 API role:tool 匹配
     val imageUris: List<Uri> = emptyList(), // 附加图片 URI（用于聊天消息中显示缩略图）
+    val channelContent: String? = null, // LiteRT-LM channels 中的思考内容
 )
 
 enum class ChatRole { User, Model, System, Tool }
@@ -88,19 +89,21 @@ data class DownloadState(
     val errorMessage: String = "",
 )
 
-// 模型推理参数
+// 模型推理参数（对应 LiteRT-LM SamplerConfig + EngineConfig）
 data class ModelParams(
-    val topK: Int = 20,
-    val topP: Double = 0.9,
-    val temperature: Double = 0.2,
+    val topK: Int = 10,
+    val topP: Double = 0.95,
+    val temperature: Double = 0.8,
     val seed: Int = 0,
-    val maxOutputTokens: Int = 1048576,
+    val contextWindowTokens: Int = 4096,         // EngineConfig.maxNumTokens = KV-cache 大小
+    val enableSpeculativeDecoding: Boolean = false, // MTP 推测解码
+    val backendType: BackendType = BackendType.CPU, // 推理后端
 ) {
     init {
         require(topK > 0) { "topK must be positive, got $topK" }
         require(topP in 0.0..1.0) { "topP must be 0~1, got $topP" }
         require(temperature >= 0) { "temperature must be >= 0, got $temperature" }
-        require(maxOutputTokens in 256..1048576) { "maxOutputTokens must be 256~1048576, got $maxOutputTokens" }
+        require(contextWindowTokens in 512..32768) { "contextWindowTokens must be 512~32768, got $contextWindowTokens" }
     }
 }
 
@@ -118,13 +121,11 @@ enum class BackendType(val displayName: String) {
 // 本地模型格式
 enum class ModelFormat {
     LiteRTLM,   // .litertlm 格式，使用 Google AI Edge LiteRT-LM 推理
-    GGUF,       // .gguf 格式，使用 llama.cpp 推理
     Unknown;
 
     companion object {
         fun fromFileName(name: String): ModelFormat = when {
             name.endsWith(".litertlm", ignoreCase = true) -> LiteRTLM
-            name.endsWith(".gguf", ignoreCase = true) -> GGUF
             else -> Unknown
         }
         fun fromPath(path: String): ModelFormat = fromFileName(path.substringAfterLast('/'))
@@ -183,8 +184,8 @@ enum class DisplayRole { User, Model, ToolActivity }
 data class DisplayItem(
     val id: String,
     val role: DisplayRole,
-    val content: String,           // 显示文本（已过滤工具调用 JSON/标记）
-    val thinkBlocks: List<String>, // 提取的 [think] 块内容
+    val content: String,              // 显示文本（已过滤工具调用 JSON/标记）
+    val channelContent: String? = null, // LiteRT-LM channels 思考内容（官方 API）
     val isStreaming: Boolean,
     val timestamp: Long,
     val imageUris: List<Uri> = emptyList(), // 图片 URI 列表（仅 User 消息）

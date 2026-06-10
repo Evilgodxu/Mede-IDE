@@ -106,9 +106,6 @@ class UserPreferencesRepository(private val context: Context) {
                         id = obj.optString("id"),
                         name = obj.optString("name"),
                         content = obj.optString("content"),
-                        type = com.template.jh.model.RuleType.entries
-                            .find { it.name == obj.optString("type") }
-                            ?: com.template.jh.model.RuleType.Global,
                     )
                 }
             } catch (_: Exception) { emptyList() }
@@ -386,7 +383,6 @@ class UserPreferencesRepository(private val context: Context) {
             obj.put("id", r.id)
             obj.put("name", r.name)
             obj.put("content", r.content)
-            obj.put("type", r.type.name)
             arr.put(obj)
         }
         return arr.toString()

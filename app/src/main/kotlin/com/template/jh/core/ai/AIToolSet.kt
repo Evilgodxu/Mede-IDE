@@ -11,9 +11,8 @@ import com.template.jh.core.memory.ConversationMemory
 import com.template.jh.core.storage.FileManager
 import com.template.jh.core.utils.FileLogger
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
+import org.jsoup.Jsoup
 
 class AIToolSet(
     private val context: Context,
@@ -185,8 +184,8 @@ class AIToolSet(
             "query" to p("string", "Natural language query (e.g. 'where is auth?')"),
             "targetDirectories" to p("string", "Comma-separated directories to search"),
         )
-        private fun buildRunCommandTool() = toolDef("runCommand", "Execute shell command (adb, git, gradle)", listOf("command"),
-            "command" to p("string", "Command to execute, e.g. 'git status'"),
+        private fun buildRunCommandTool() = toolDef("runCommand", "Execute shell command", listOf("command"),
+            "command" to p("string", "Command to execute, e.g. 'ls -la'"),
         )
         private fun buildSearchWebTool() = toolDef("searchWeb", "Search internet for current information", listOf("query"),
             "query" to p("string", "Concise search query"),
@@ -491,9 +490,9 @@ class AIToolSet(
         }
     }
 
-    @Tool(description = "Run a shell command in the project directory. Use for adb, git, gradle commands.")
+    @Tool(description = "Run a shell command in the project directory.")
     fun runCommand(
-        @ToolParam(description = "The command to execute, e.g. 'ls -la' or 'git status'") command: String,
+        @ToolParam(description = "The command to execute, e.g. 'ls -la'") command: String,
     ): String {
         Log.d("AIToolSet", "runCommand: $command")
         FileLogger.d("AIToolSet", "runCommand: $command")
@@ -541,7 +540,7 @@ class AIToolSet(
 
     /**
      * 解析命令行字符串，尊重引号分组。
-     * 支持双引号和单引号包裹的参数（如 git commit -m "my message"）。
+     * 支持双引号和单引号包裹的参数（如 app/build.gradle.kts）。
      */
     private fun parseCommandLine(input: String): List<String> {
         val args = mutableListOf<String>()
@@ -572,195 +571,32 @@ class AIToolSet(
         Log.d("AIToolSet", "searchWeb: query=$query")
         FileLogger.d("AIToolSet", "searchWeb: query=$query")
         return try {
-            val ddgResult = searchViaDuckDuckGo(query)
-            if (ddgResult.isNotBlank()) {
-                FileLogger.d("AIToolSet", "searchWeb: DuckDuckGo returned ${ddgResult.lines().size} lines")
-                return ddgResult
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val doc = Jsoup.connect("https://html.duckduckgo.com/html/?q=$encoded")
+                .userAgent("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                .timeout(15000)
+                .get()
+            val results = doc.select(".result").mapNotNull { el ->
+                val titleEl = el.selectFirst(".result__title a") ?: return@mapNotNull null
+                val title = titleEl.text().trim()
+                val snippet = el.selectFirst(".result__snippet")?.text()?.trim() ?: ""
+                val link = titleEl.attr("href")
+                if (title.isBlank()) null else Triple(title, snippet, link)
+            }.take(8)
+            if (results.isEmpty()) return err("No search results for: $query")
+            FileLogger.d("AIToolSet", "searchWeb: found ${results.size} results")
+            results.joinToString("\n---\n") { (title, snippet, link) ->
+                buildString {
+                    appendLine("**$title**")
+                    if (snippet.isNotBlank()) appendLine(snippet)
+                    if (link.isNotBlank()) appendLine(link)
+                }
             }
-            val searxResult = searchViaSearxNG(query)
-            if (searxResult.isNotBlank() && !searxResult.contains("失败") && !searxResult.contains("无结果")) {
-                FileLogger.d("AIToolSet", "searchWeb: SearXNG returned ${searxResult.lines().size} lines")
-                return searxResult
-            }
-            val bingResult = searchViaBing(query)
-            if (bingResult.isNotBlank() && !bingResult.contains("失败")) {
-                FileLogger.d("AIToolSet", "searchWeb: Bing returned ${bingResult.lines().size} lines")
-                return bingResult
-            }
-            err("No search results for: $query")
         } catch (e: Exception) {
             Log.e("AIToolSet", "searchWeb failed: ${e.message}", e)
             FileLogger.e("AIToolSet", "searchWeb failed: ${e.message}", e)
             err("${e.message}")
         }
-    }
-
-    // SearXNG 搜索 - 开源搜索引擎聚合器，稳定性更高
-    private fun searchViaSearxNG(query: String): String {
-        val encoded = URLEncoder.encode(query, "UTF-8")
-        // 多个公共 SearXNG 实例，按可靠性排序
-        val instances = listOf(
-            "https://search.sapti.me/search?q=$encoded&format=json&language=all",
-            "https://search.rhscz.eu/search?q=$encoded&format=json&language=all",
-            "https://searx.be/search?q=$encoded&format=json&language=all",
-            "https://search.bus-hit.me/search?q=$encoded&format=json&language=all",
-        )
-
-        for (url in instances) {
-            try {
-                val json = fetchUrl(url, timeoutMs = 10000)
-                val obj = org.json.JSONObject(json)
-                val results = obj.optJSONArray("results")
-
-                if (results != null && results.length() > 0) {
-                    val output = mutableListOf<String>()
-                    for (i in 0 until minOf(results.length(), 5)) {
-                        val item = results.optJSONObject(i) ?: continue
-                        val title = item.optString("title", "").trim()
-                        val content = item.optString("content", "").trim()
-                        val link = item.optString("url", "").trim()
-                        if (title.isNotBlank()) {
-                            output.add("• $title${if (content.isNotBlank()) "\n  $content" else ""}${if (link.isNotBlank()) "\n  $link" else ""}")
-                        }
-                    }
-                    if (output.isNotEmpty()) {
-                        return "Found ${results.length()} results:\n\n${output.joinToString("\n---\n")}"
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w("AIToolSet", "SearXNG $url failed: ${e.message}")
-                FileLogger.w("AIToolSet", "SearXNG $url failed: ${e.message}")
-                continue
-            }
-        }
-        FileLogger.w("AIToolSet", "searchViaSearxNG: all instances failed for query=$query")
-        return "SearXNG search failed or returned no results."
-    }
-
-    private fun searchViaBing(query: String): String {
-        val encoded = URLEncoder.encode(query, "UTF-8")
-        val url = "https://www.bing.com/search?q=$encoded&setmkt=en-US&setlang=en"
-        return try {
-            val html = fetchUrl(url, timeoutMs = 15000, extraHeaders = mapOf(
-                "Cookie" to "MUID=1; MUIDB=1",
-                "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            ))
-            val results = parseBingResults(html)
-            if (results.isNotEmpty()) {
-                "Found ${results.size} results:\n\n${results.joinToString("\n---\n") { "• ${it.first}\n  ${it.second}" }}"
-            } else {
-                "Bing search returned no results."
-            }
-        } catch (e: Exception) {
-            Log.w("AIToolSet", "Bing search failed: ${e.message}")
-            FileLogger.w("AIToolSet", "searchViaBing failed: ${e.message}")
-            "Bing search failed: ${e.message}"
-        }
-    }
-
-    private fun searchViaDuckDuckGo(query: String): String {
-        val encoded = URLEncoder.encode(query, "UTF-8")
-        return try {
-            val html = fetchUrl("https://html.duckduckgo.com/html/?q=$encoded", timeoutMs = 15000)
-            val titleRe = Regex("""class="result__title"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)</a>""", RegexOption.DOT_MATCHES_ALL)
-            val snippetRe = Regex("""class="result__snippet"[^>]*>([\s\S]*?)</""", RegexOption.DOT_MATCHES_ALL)
-            val stitles = titleRe.findAll(html).take(8).map {
-                it.groupValues[2].replace(Regex("<[^>]+>"), "").trim() to it.groupValues[1]
-            }.toList()
-            val snippets = snippetRe.findAll(html).take(8).map {
-                it.groupValues[1].replace(Regex("<[^>]+>"), "").trim()
-            }.toList()
-            if (stitles.isEmpty()) "" else
-            stitles.mapIndexed { i, (title, link) ->
-                "**$title**\n$link\n${snippets.getOrElse(i) { "" }}"
-            }.joinToString("\n\n")
-        } catch (e: Exception) {
-            Log.w("AIToolSet", "DuckDuckGo failed: ${e.message}")
-            FileLogger.w("AIToolSet", "DuckDuckGo failed: ${e.message}")
-            ""
-        }
-    }
-
-    private fun fetchUrl(urlString: String, timeoutMs: Int = 15000, extraHeaders: Map<String, String> = emptyMap()): String {
-        val url = URL(urlString)
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            connectTimeout = timeoutMs
-            readTimeout = timeoutMs
-            setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
-            setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-            setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en-US,en;q=0.8")
-            setRequestProperty("Accept-Encoding", "gzip, deflate")  // 移除 br，Android HttpURLConnection 不支持
-            setRequestProperty("DNT", "1")
-            setRequestProperty("Connection", "keep-alive")
-            extraHeaders.forEach { (k, v) -> setRequestProperty(k, v) }
-        }
-
-        val code = conn.responseCode
-        if (code != 200) {
-            conn.disconnect()
-            throw RuntimeException("HTTP $code")
-        }
-
-        val inputStream = if ("gzip" == conn.contentEncoding) {
-            java.util.zip.GZIPInputStream(conn.inputStream)
-        } else {
-            conn.inputStream
-        }
-
-        return inputStream.bufferedReader().use { it.readText() }.also { conn.disconnect() }
-    }
-
-    private fun parseBingResults(html: String): List<Pair<String, String>> {
-        val results = mutableListOf<Pair<String, String>>()
-
-        // Bing 搜索结果解析
-        val patterns = listOf(
-            // 新布局
-            Regex("""<a[^>]*target=\"_blank\"[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>.*?<p[^>]*>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL),
-            // 标准结果
-            Regex("""<li class=\"b_algo[^\"]*\"[^>]*>.*?<h2[^>]*>.*?<a[^>]*href=\"([^\"]+)\"[^>]*>(.*?)</a>.*?</h2>.*?<p[^>]*>(.*?)</p>""", RegexOption.DOT_MATCHES_ALL),
-            // 备选
-            Regex("""<a[^>]*href=\"([^\"]+)\"[^>]*h=\"[^\"]*\"[^>]*>(.*?)</a>.*?<span[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL),
-        )
-
-        for (pattern in patterns) {
-            for (m in pattern.findAll(html).take(5)) {
-                val link = m.groupValues[1].replace(Regex("<[^>]*>"), "").trim()
-                val title = m.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
-                val snippet = m.groupValues.getOrNull(3)?.replace(Regex("<[^>]*>"), "")?.trim() ?: ""
-                if (title.isNotBlank() && title.length < 200) {
-                    results.add(title to snippet)
-                }
-            }
-            if (results.isNotEmpty()) break
-        }
-        return results.take(5)
-    }
-
-    private fun parseDdgResults(html: String): List<Pair<String, String>> {
-        val results = mutableListOf<Pair<String, String>>()
-
-        val litePattern = Regex(
-            """class="result-link"[^>]*>\s*(.*?)\s*</a>.*?class="result-snippet"[^>]*>\s*(.*?)\s*</""",
-            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
-        )
-        for (m in litePattern.findAll(html).take(5)) {
-            val t = m.groupValues[1].replace(Regex("<[^>]*>"), "").trim()
-            val s = m.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
-            if (t.isNotBlank()) results.add(t to s)
-        }
-        if (results.isNotEmpty()) return results
-
-        val htmlPattern = Regex(
-            """class="result__a"[^>]*>\s*(.*?)\s*</a>.*?class="result__snippet"[^>]*>\s*(.*?)\s*</a>""",
-            setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
-        )
-        for (m in htmlPattern.findAll(html).take(5)) {
-            val t = m.groupValues[1].replace(Regex("<[^>]*>"), "").trim()
-            val s = m.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
-            if (t.isNotBlank()) results.add(t to s)
-        }
-        return results
     }
 
     @Tool(description = "Read build lint or compilation errors from the project. Runs gradle lint if needed. Returns file paths and line numbers when available.")

@@ -135,14 +135,12 @@
     <string name="chat_streaming">Generating…</string>
 
     <!-- Rules -->
-    <string name="rules_title">Rule Management</string>
+    <string name="rules_title">System Rules</string>
     <string name="rules_description">Create rules as context injected into conversations</string>
     <string name="rules_add">Add Rule</string>
     <string name="rules_edit">Edit Rule</string>
     <string name="rules_name_hint">Rule Name</string>
     <string name="rules_content_hint">Describe rule requirements…</string>
-    <string name="rules_type_global">Global Rule</string>
-    <string name="rules_type_project">Project Rule</string>
     <string name="rules_count_hint">%d rule(s) enabled, will be injected as context reference</string>
     <string name="rules_save">Save</string>
     <string name="rules_cancel">Cancel</string>

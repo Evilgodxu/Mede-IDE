@@ -11,7 +11,6 @@ import com.template.jh.model.chat.ModelActivity
 import com.template.jh.model.chat.ModelInfo
 import com.template.jh.model.chat.ModelParams
 import com.template.jh.model.chat.BackendType
-import com.template.jh.model.chat.ModelFormat
 
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
@@ -51,6 +50,11 @@ data class ChatUiState(
     val contextCompressedTokens: Int = 0,  // 本次对话累计压缩的 token 数
     val contextCompressedCount: Int = 0,   // 压缩次数
     val contextSummary: String = "",       // 云端 LLM 生成的上下文结构化摘要 JSON
+    // 记忆系统状态
+    val memoryKeyFactCount: Int = 0,       // Layer 1 关键事实条数
+    val memorySummaryCount: Int = 0,       // Layer 3 摘要段数
+    val memoryEntryCount: Int = 0,         // Layer 2 短期记忆条数
+    val memoryTotalTokens: Int = 0,        // 记忆系统 token 估算（已压缩存储，不占当前窗口）
     val attachedImageUris: List<Uri> = emptyList(),
     // 本地推理后端配置
     val backendType: BackendType = BackendType.CPU,
@@ -59,15 +63,4 @@ data class ChatUiState(
     val enableSpeculativeDecoding: Boolean = false,
     // 当前加载的模型是否支持多模态
     val isMultimodal: Boolean = false,
-    // 模型格式（LiteRTLM / GGUF）
-    val modelFormat: ModelFormat = ModelFormat.Unknown,
-    // GGUF 推理参数
-    val ggufNCtx: Int = 2048,
-    val ggufNThreads: Int = 4,
-    val ggufNBatch: Int = 512,
-    val ggufNGpuLayers: Int = 0,
-    val ggufUseMlock: Boolean = true,
-    val ggufCtxShift: Boolean = true,
-    val ggufProjectorPath: String = "",
-    val ggufExtraParams: Map<String, String> = emptyMap(),
 )

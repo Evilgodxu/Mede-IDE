@@ -145,6 +145,9 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
 
+    // HTML 解析（网络搜索）
+    implementation(libs.jsoup)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))

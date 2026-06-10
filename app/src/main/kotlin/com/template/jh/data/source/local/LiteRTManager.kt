@@ -75,15 +75,14 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
     // MTP (Multi-Turn Prediction / Speculative Decoding)
     @Volatile var enableSpeculativeDecoding: Boolean = false
 
+    /** 当前已加载模型的路径（用于参数变更后重新加载） */
+    val currentModelPath: String? get() = _state.value.modelPath.takeIf { it.isNotEmpty() }
+
     /** 当前加载的模型是否支持多模态 */
     @Volatile var isMultimodal: Boolean = false
 
     init {
         Engine.setNativeMinLogSeverity(LogSeverity.ERROR)
-        // 禁用工具名的 snake_case 转换，保持原始函数名
-        ExperimentalFlags.convertCamelToSnakeCaseInToolDescription = false
-        // MTP 标志
-        ExperimentalFlags.enableSpeculativeDecoding = enableSpeculativeDecoding
     }
 
     @Volatile private var downloadCancelled = false
@@ -239,22 +238,20 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         try {
             withContext(Dispatchers.IO) {
                 closeEngine()
-                // 在创建 Engine 前同步 MTP 标志
                 ExperimentalFlags.enableSpeculativeDecoding = enableSpeculativeDecoding
                 val liteBackend = backendType.toLiteRtBackend(npuLibraryDir)
-                // 检测是否为多模态模型，条件设置视觉参数
                 val multimodal = isMultimodalModel(file.name)
                 isMultimodal = multimodal
                 if (multimodal) {
                     ExperimentalFlags.visualTokenBudget = visualTokenBudget
-                } else {
-                    ExperimentalFlags.visualTokenBudget = 0
                 }
+                val contextWindow = modelParams.contextWindowTokens
                 val config = EngineConfig(
                     modelPath = modelPath,
                     backend = liteBackend,
                     visionBackend = if (multimodal) liteBackend else null,
-                    maxNumImages = if (multimodal) maxNumImages else 0,
+                    maxNumImages = if (multimodal) maxNumImages else null,
+                    maxNumTokens = contextWindow,
                     cacheDir = context.cacheDir.absolutePath,
                 )
                 val newEngine = Engine(config)
@@ -263,7 +260,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
                 isInitialized = true
             }
             _state.value = EngineState(status = EngineStatus.Ready, modelPath = modelPath, modelName = file.name, progress = 1f,
-                contextWindow = resolveContextWindow(file.name))
+                contextWindow = modelParams.contextWindowTokens)
         } catch (e: Exception) {
             Log.e("LiteRTManager", "loadModel failed", e)
             FileLogger.e("LiteRTManager", "loadModel failed: ${e.message}", e)
@@ -283,12 +280,12 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
 
     override fun close() { unloadModel() }
 
-    // 扫描模型文件（.litertlm + .gguf，递归+MediaStore双通道）
+    // 扫描模型文件（.litertlm，递归+MediaStore双通道）
     fun scanModels(customPaths: List<String> = emptyList()): List<ModelInfo> {
         val seen = mutableSetOf<String>()
         val models = mutableListOf<ModelInfo>()
 
-        val supportedExtensions = setOf("litertlm", "gguf")
+        val supportedExtensions = setOf("litertlm")
 
         fun addIfNew(file: File) {
             val abs = file.absolutePath
@@ -333,7 +330,6 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
             "/storage/emulated/0/Download",
             "/storage/emulated/0/Models",
             "/storage/emulated/0/litertlm",
-            "/storage/emulated/0/gguf",
         )
         scanPaths.addAll(fallbackPaths)
 
@@ -382,13 +378,8 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         }
     } catch (_: Exception) { false }
 
-    /** 根据模型文件名推断上下文窗口（token） */
-    private fun resolveContextWindow(modelName: String): Int {
-        val name = modelName.lowercase()
-        // 移动端保守设置 2K 上下文窗口
-        if (name.contains("gemma")) return 2048
-        return 2048
-    }
+    /** 根据模型文件名推断上下文窗口（token），已废弃，现使用 ModelParams.contextWindowTokens */
+    private fun resolveContextWindow(modelName: String): Int = 4096
 
     /** 判断模型文件名是否指向多模态（支持图像理解）模型 */
     fun isMultimodalModel(fileName: String): Boolean {

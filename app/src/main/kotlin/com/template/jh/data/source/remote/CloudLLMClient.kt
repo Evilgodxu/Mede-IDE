@@ -105,7 +105,10 @@ class CloudLLMClient(private val context: Context) {
                         obj.put("tool_call_id", msg.toolCallId ?: "call_${msg.id.take(8)}")
                         obj.put("content", msg.content)
                     }
-                    else -> continue
+                    ChatRole.System -> {
+                        obj.put("role", "system")
+                        obj.put("content", msg.content)
+                    }
                 }
                 put(obj)
             }

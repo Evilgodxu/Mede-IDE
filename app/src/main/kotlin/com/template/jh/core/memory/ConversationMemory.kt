@@ -15,6 +15,7 @@ import kotlin.math.min
 /**
  * 对话历史多层级记忆系统。
  *
+ * Layer 1 - 关键事实：从对话中提取的持久化关键信息（用户偏好、决策、约束），永不丢失
  * Layer 2 - 短期记忆：内存中保留最近 50 轮，自动提取摘要+关键词
  * Layer 3 - 摘要记忆：压缩持久化，按时间分段
  * Layer 4 - 语义索引：TF-IDF 向量索引，可跨全部历史搜索
@@ -47,7 +48,20 @@ class ConversationMemory(private val context: Context) {
         val entryCount: Int,
     )
 
+    /** 关键事实（Layer 1） */
+    data class KeyFact(
+        val id: String = UUID.randomUUID().toString().take(8),
+        val timestamp: Long = System.currentTimeMillis(),
+        val content: String,             // 事实内容
+        val source: String = "",         // 来源消息 ID
+        val type: String = "preference", // preference / decision / constraint / file / context
+    )
+
     // === 各层存储 ===
+
+    // Layer 1: 关键事实（持久化，永不自动删除，手动管理）
+    private val keyFacts = mutableListOf<KeyFact>()
+    private var keyFactsDirty = false
 
     // Layer 2: 短期记忆（内存）
     private val shortTerm = mutableListOf<Entry>()
@@ -71,6 +85,7 @@ class ConversationMemory(private val context: Context) {
     private val shortTermFile: File get() = File(memoryDir, "short_term.json")
     private val summaryFile: File get() = File(memoryDir, "summaries.json")
     private val evictedFile: File get() = File(memoryDir, "evicted.json")
+    private val keyFactsFile: File get() = File(memoryDir, "key_facts.json")
     private val indexDir: File get() = File(memoryDir, "vector_index")
 
     // === 配置 ===
@@ -78,6 +93,7 @@ class ConversationMemory(private val context: Context) {
         private const val TAG = "ConversationMemory"
         private const val SUMMARY_ENTRY_MIN = 5       // 每 5 条新数据建一个摘要段
         private const val MAX_SUMMARY_LEN = 300        // 每条摘要最大字符数
+        private const val MAX_KEY_FACTS = 50           // 最多保留关键事实数
     }
 
     // === 核心 API ===
@@ -101,6 +117,11 @@ class ConversationMemory(private val context: Context) {
             hasToolCall = content.contains("[工具调用:") || content.contains("\"tool_name\"") || content.contains("\"name\""),
             conversationId = conversationId,
         )
+
+        // Layer 1: 提取关键事实（仅 user/model 角色）
+        if (role == "user" || role == "model") {
+            extractKeyFacts(entry)
+        }
 
         // Layer 2: 短期
         shortTerm.add(entry)
@@ -217,6 +238,106 @@ class ConversationMemory(private val context: Context) {
     /** 获取当前对话的记忆上下文（兼容旧调用） */
     fun getMemoryContext(): String = getMemoryContext("")
 
+    /** 获取记忆系统统计信息 */
+    fun getStats(): MemoryStats = MemoryStats(
+        keyFactCount = keyFacts.size,
+        summaryCount = summaries.size,
+        entryCount = shortTerm.size,
+        evictedCount = evictedEntries.size,
+        indexedCount = vectorIndex.size,
+        estimatedTokens = estimateMemoryTokens(),
+    )
+
+    /** 估算记忆系统数据量 (token 数) */
+    private fun estimateMemoryTokens(): Int {
+        var total = 0
+        keyFacts.forEach { total += (it.content.length / 3.5f).toInt() + 5 }
+        summaries.forEach { total += (it.summary.length / 3.5f).toInt() + 10 }
+        shortTerm.forEach { total += (it.summary.length / 3.5f).toInt() + 10 }
+        return total.coerceAtLeast(0)
+    }
+
+    // === Layer 1: 关键事实 API ===
+
+    /** 获取关键事实列表 */
+    fun getKeyFacts(): List<KeyFact> = keyFacts.toList()
+
+    /** 获取关键事实上下文字符串（用于注入 system prompt） */
+    fun getKeyFactsContext(): String {
+        if (keyFacts.isEmpty()) return ""
+        val sb = StringBuilder()
+        sb.appendLine("## 关键上下文（从对话历史提取，永不丢失）")
+        // 按类型分组
+        val grouped = keyFacts.groupBy { it.type }
+        val typeLabels = mapOf(
+            "preference" to "用户偏好",
+            "decision" to "已做决策",
+            "constraint" to "约束条件",
+            "file" to "重要文件",
+            "context" to "上下文",
+        )
+        for ((type, label) in typeLabels) {
+            val facts = grouped[type] ?: continue
+            facts.forEach { f -> sb.appendLine("- [$label] ${f.content}") }
+        }
+        return sb.toString().trimEnd()
+    }
+
+    /** 手动添加关键事实 */
+    fun addKeyFact(content: String, type: String = "context", source: String = "") {
+        // 去重：相似内容不重复添加
+        val normalized = content.trim().lowercase()
+        if (keyFacts.any { it.content.trim().lowercase() == normalized }) return
+        keyFacts.add(KeyFact(content = content, type = type, source = source))
+        keyFactsDirty = true
+        // 超出上限时移除最旧的
+        if (keyFacts.size > MAX_KEY_FACTS) {
+            keyFacts.removeAt(0)
+        }
+    }
+
+    /** 移除关键事实 */
+    fun removeKeyFact(id: String) {
+        keyFacts.removeAll { it.id == id }
+        keyFactsDirty = true
+    }
+
+    /** 清除所有关键事实 */
+    fun clearKeyFacts() {
+        keyFacts.clear()
+        keyFactsDirty = true
+    }
+
+    /** 获取压缩上下文（Layer 1 关键事实 + Layer 3 摘要），供 compressMessages 使用 */
+    fun getCompressionContext(): String {
+        if (keyFacts.isEmpty() && summaries.isEmpty()) return ""
+        val sb = StringBuilder()
+        if (keyFacts.isNotEmpty()) sb.appendLine(getKeyFactsContext())
+        if (summaries.isNotEmpty()) {
+            sb.appendLine("## 历史摘要")
+            summaries.takeLast(3).forEach { s ->
+                sb.appendLine("[${formatTimestamp(s.periodStart)}] ${s.summary}")
+            }
+        }
+        return sb.toString().trimEnd()
+    }
+
+    /** 批量提取并保存消息中的关键事实（供 compressMessages 调用） */
+    suspend fun extractKeyFactsFromMessages(messages: List<ChatMessageAdapter>, conversationId: String = "") {
+        for (msg in messages) {
+            val entry = Entry(
+                role = msg.role,
+                content = msg.content,
+                summary = summarizeContent(msg.content),
+                conversationId = conversationId,
+            )
+            if (msg.role == "user" || msg.role == "model") {
+                extractKeyFacts(entry)
+            }
+        }
+        if (keyFactsDirty) save()
+    }
+
     /** 获取语义搜索结果的格式化文本（供工具返回） */
     fun searchFormatted(query: String, topK: Int = 5): String {
         val results = search(query, topK)
@@ -313,6 +434,23 @@ class ConversationMemory(private val context: Context) {
                 }
             }
 
+            // 加载关键事实（Layer 1）
+            if (keyFactsFile.exists()) {
+                val json = keyFactsFile.readText()
+                val arr = JSONArray(json)
+                keyFacts.clear()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    keyFacts.add(KeyFact(
+                        id = obj.optString("id"),
+                        timestamp = obj.optLong("timestamp"),
+                        content = obj.optString("content"),
+                        source = obj.optString("source", ""),
+                        type = obj.optString("type", "context"),
+                    ))
+                }
+            }
+
             // 加载语义索引；若索引为空但短期/缓存有数据则重建
             vectorIndex.load(indexDir)
             if (vectorIndex.size == 0 && (shortTerm.isNotEmpty() || evictedEntries.isNotEmpty())) {
@@ -331,8 +469,8 @@ class ConversationMemory(private val context: Context) {
                 Log.d(TAG, "vector index rebuilt from ${allEntries.size} entries (shortTerm=${shortTerm.size}, evicted=${evictedEntries.size})")
             }
 
-            Log.d(TAG, "loaded: ${shortTerm.size} shortTerm, ${evictedEntries.size} evicted, ${summaries.size} summaries, ${vectorIndex.size} indexed")
-            FileLogger.d(TAG, "loaded: ${shortTerm.size} shortTerm, ${evictedEntries.size} evicted, ${summaries.size} summaries, ${vectorIndex.size} indexed")
+            Log.d(TAG, "loaded: ${keyFacts.size} facts, ${shortTerm.size} shortTerm, ${evictedEntries.size} evicted, ${summaries.size} summaries, ${vectorIndex.size} indexed")
+            FileLogger.d(TAG, "loaded: ${keyFacts.size} facts, ${shortTerm.size} shortTerm, ${evictedEntries.size} evicted, ${summaries.size} summaries, ${vectorIndex.size} indexed")
         } catch (e: Exception) {
             Log.w(TAG, "load failed: ${e.message}")
             FileLogger.w(TAG, "load failed: ${e.message}")
@@ -398,8 +536,24 @@ class ConversationMemory(private val context: Context) {
             // 保存语义索引
             vectorIndex.save(indexDir)
 
-            Log.d(TAG, "saved: ${shortTerm.size} shortTerm, ${evictedEntries.size} evicted, ${vectorIndex.size} indexed")
-            FileLogger.d(TAG, "saved: ${shortTerm.size} shortTerm, ${evictedEntries.size} evicted, ${vectorIndex.size} indexed")
+            // 保存关键事实（Layer 1）
+            if (keyFactsDirty) {
+                val factArr = JSONArray()
+                keyFacts.forEach { f ->
+                    factArr.put(JSONObject().apply {
+                        put("id", f.id)
+                        put("timestamp", f.timestamp)
+                        put("content", f.content)
+                        put("source", f.source)
+                        put("type", f.type)
+                    })
+                }
+                keyFactsFile.writeText(factArr.toString(2))
+                keyFactsDirty = false
+            }
+
+            Log.d(TAG, "saved: ${keyFacts.size} facts, ${shortTerm.size} shortTerm, ${evictedEntries.size} evicted, ${vectorIndex.size} indexed")
+            FileLogger.d(TAG, "saved: ${keyFacts.size} facts, ${shortTerm.size} shortTerm, ${evictedEntries.size} evicted, ${vectorIndex.size} indexed")
         } catch (e: Exception) {
             Log.w(TAG, "save failed: ${e.message}")
         }
@@ -410,14 +564,72 @@ class ConversationMemory(private val context: Context) {
         shortTerm.clear()
         evictedEntries.clear()
         summaries.clear()
+        keyFacts.clear()
         vectorIndex.clear()
         summarizedEntryCount = 0
         summariesDirty = true
+        keyFactsDirty = true
         memoryDir.deleteRecursively()
         Log.d(TAG, "memory cleared, disk files removed")
     }
 
     // === 内部方法 ===
+
+    /** 从消息中提取关键事实（Layer 1），基于正则匹配重要语义模式 */
+    private fun extractKeyFacts(entry: Entry) {
+        val text = entry.content
+        val role = entry.role
+
+        // 用户偏好/约束模式
+        val patterns = listOf(
+            Regex("""(?:记住|以后|之后|未来|从现在开始|今后)(.{5,60}?)(?:[。！\.!\n]|$)""") to "preference",
+            Regex("""(?:我的名字是?|我是|我叫)(.{3,20}?)(?:[。！\.!\n,]|$)""") to "preference",
+            Regex("""(?:偏好|更喜欢|喜欢用|习惯用)(.{5,40}?)(?:[。！\.!\n,]|$)""") to "preference",
+            Regex("""(?:不要|不能|禁止|严禁|避免|拒绝)(.{5,60}?)(?:[。！\.!\n]|$)""") to "constraint",
+            Regex("""(?:要求|需要必须|务必|一定要|必须)(.{5,60}?)(?:[。！\.!\n]|$)""") to "constraint",
+            Regex("""(?:决定|确认|确定|采用|选择)(.{5,60}?)(?:方案|方式|方法|框架|库|技术)""") to "decision",
+            Regex("""(?:使用|基于|依赖|集成)(\w{2,30})""") to "decision",
+            Regex("""(?:项目名|应用名|App\s?名)(?:是|为|:)\s*(.{3,20}?)(?:[。！\.!\n,]|$)""") to "context",
+            Regex("""(?:Android|Kotlin|Compose|Material)(.{0,5})""") to "context",
+        )
+
+        for ((regex, type) in patterns) {
+            val matches = regex.findAll(text)
+            for (m in matches) {
+                val fact = m.value.trim().replace(Regex("""\s+"""), " ")
+                if (fact.length in 3..120) {
+                    // 去重检查
+                    val normalized = fact.lowercase()
+                    if (keyFacts.none { it.content.lowercase() == normalized }) {
+                        keyFacts.add(KeyFact(
+                            content = fact,
+                            type = type,
+                            source = entry.id,
+                        ))
+                        keyFactsDirty = true
+                    }
+                }
+            }
+        }
+
+        // 文件路径引用（用户或模型提到的项目文件）
+        if (entry.filePaths.isNotEmpty()) {
+            entry.filePaths.take(3).forEach { path ->
+                val fileName = path.substringAfterLast("/")
+                val fact = if (role == "user") "用户引用了文件: $fileName" else "操作了文件: $fileName"
+                val normalized = fact.lowercase()
+                if (keyFacts.none { it.content.lowercase() == normalized }) {
+                    keyFacts.add(KeyFact(content = fact, type = "file", source = entry.id))
+                    keyFactsDirty = true
+                }
+            }
+        }
+
+        // 超出上限时移除最旧的
+        while (keyFacts.size > MAX_KEY_FACTS) {
+            keyFacts.removeAt(0)
+        }
+    }
 
     /** 增量构建摘要：仅对未摘要的新条目构建 */
     private suspend fun buildSummary() {
@@ -529,6 +741,18 @@ class ConversationMemory(private val context: Context) {
         return (0 until arr.length()).map { arr.optString(it) }
     }
 }
+
+/**
+ * 记忆系统统计数据
+ */
+data class MemoryStats(
+    val keyFactCount: Int = 0,
+    val summaryCount: Int = 0,
+    val entryCount: Int = 0,
+    val evictedCount: Int = 0,
+    val indexedCount: Int = 0,
+    val estimatedTokens: Int = 0,
+)
 
 /**
  * 用于 addMessages 的消息适配。
