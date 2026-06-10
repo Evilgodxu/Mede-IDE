@@ -189,8 +189,15 @@ fun HomeScreen(
                     chatViewModel.setModifiedFilePaths(modifiedPaths)
                 }
                 "delete" -> {
-                    val idx = editorState.getTabIdxById(event.path)
-                    if (idx >= 0) editorState.forceCloseTab(idx)
+                    // 路径模糊匹配：AI 工具传相对路径，但标签页 id 存绝对路径
+                    val eventPath = event.path
+                    val tabIdx = editorState.tabs.indexOfFirst { tab ->
+                        tab.id == eventPath ||
+                        tab.id.endsWith("/$eventPath") ||
+                        eventPath.endsWith("/${tab.id.substringAfterLast('/')}") ||
+                        tab.id.substringAfterLast('/') == eventPath.substringAfterLast('/')
+                    }
+                    if (tabIdx >= 0) editorState.forceCloseTab(tabIdx)
                     chatViewModel.setModifiedFilePaths(
                         editorState.tabs
                             .filter { it.type == TabType.File && editorState.isFileModified(it.id) }
