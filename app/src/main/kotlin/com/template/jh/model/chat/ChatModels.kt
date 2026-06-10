@@ -16,6 +16,7 @@ data class ChatMessage(
     val isStreaming: Boolean = false,
     val timestamp: Long = System.currentTimeMillis(),
     val toolCallId: String? = null,     // 工具调用 ID，用于 API role:tool 匹配
+    val toolName: String? = null,       // 工具函数名（如 "readFile"），用于 Content.ToolResponse.name
     val imageUris: List<Uri> = emptyList(), // 附加图片 URI（用于聊天消息中显示缩略图）
     val channelContent: String? = null, // LiteRT-LM channels 中的思考内容
 )
@@ -93,9 +94,9 @@ data class DownloadState(
 data class ModelParams(
     val topK: Int = 10,
     val topP: Double = 0.95,
-    val temperature: Double = 0.8,
+    val temperature: Double = 0.2,
     val seed: Int = 0,
-    val contextWindowTokens: Int = 4096,         // EngineConfig.maxNumTokens = KV-cache 大小
+    val contextWindowTokens: Int = 32768,        // 默认 32K（可通过引擎状态/用户配置动态更新）
     val enableSpeculativeDecoding: Boolean = false, // MTP 推测解码
     val backendType: BackendType = BackendType.CPU, // 推理后端
 ) {
@@ -103,7 +104,7 @@ data class ModelParams(
         require(topK > 0) { "topK must be positive, got $topK" }
         require(topP in 0.0..1.0) { "topP must be 0~1, got $topP" }
         require(temperature >= 0) { "temperature must be >= 0, got $temperature" }
-        require(contextWindowTokens in 512..32768) { "contextWindowTokens must be 512~32768, got $contextWindowTokens" }
+        require(contextWindowTokens in 512..262144) { "contextWindowTokens must be 512~262144, got $contextWindowTokens" }
     }
 }
 

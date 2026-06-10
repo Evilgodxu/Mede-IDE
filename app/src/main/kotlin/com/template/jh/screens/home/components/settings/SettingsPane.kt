@@ -297,7 +297,7 @@ private fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text("MTP 推测解码", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-                            Text("需模型支持，应用后重新加载", style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("GPU/NPU 后端效果显著，应用后重新加载", style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Switch(checked = mtpEnabled, onCheckedChange = { mtpEnabled = it })
                     }

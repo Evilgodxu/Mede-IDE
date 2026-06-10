@@ -20,7 +20,7 @@ import kotlin.math.min
  * Layer 3 - 摘要记忆：压缩持久化，按时间分段
  * Layer 4 - 语义索引：TF-IDF 向量索引，可跨全部历史搜索
  *
- * 用于本地模型（4K 限制）绕过活动窗口限制，通过工具检索翻数十倍以上历史。
+ * 用于本地模型在窗口受限时绕过活动窗口限制，通过工具检索翻数十倍以上历史。
  */
 class ConversationMemory(private val context: Context) {
 

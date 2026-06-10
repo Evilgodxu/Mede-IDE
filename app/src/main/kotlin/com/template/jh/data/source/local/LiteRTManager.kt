@@ -77,7 +77,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
     @Volatile var maxNumImages: Int = 4
     @Volatile var visualTokenBudget: Int = 1120  // Gemma4 支持: 70, 140, 280, 560, 1120
 
-    // MTP (Multi-Turn Prediction / Speculative Decoding)
+    // MTP (Multi-Turn Prediction / Speculative Decoding) — GPU/NPU 后端效果显著
     @Volatile var enableSpeculativeDecoding: Boolean = false
 
     /** 当前已加载模型的路径（用于参数变更后重新加载） */
@@ -389,8 +389,8 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         }
     } catch (_: Exception) { false }
 
-    /** 根据模型文件名推断上下文窗口（token），已废弃，现使用 ModelParams.contextWindowTokens */
-    private fun resolveContextWindow(modelName: String): Int = 4096
+    /** 根据模型文件名推断上下文窗口（token）。已废弃 — 现使用 ModelParams.contextWindowTokens */
+    private fun resolveContextWindow(modelName: String): Int = 32768
 
     /** 判断模型文件名是否指向多模态（支持图像理解）模型 */
     fun isMultimodalModel(fileName: String): Boolean {

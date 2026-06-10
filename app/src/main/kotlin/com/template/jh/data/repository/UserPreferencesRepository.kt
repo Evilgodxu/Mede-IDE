@@ -390,7 +390,7 @@ class UserPreferencesRepository(private val context: Context) {
                         topP = obj.optDouble("topP", 0.95),
                         temperature = obj.optDouble("temperature", 0.8),
                         seed = obj.optInt("seed", 0),
-                        contextWindowTokens = obj.optInt("contextWindowTokens", 4096),
+                        contextWindowTokens = obj.optInt("contextWindowTokens", 32768),
                         enableSpeculativeDecoding = obj.optBoolean("enableSpeculativeDecoding", false),
                         backendType = BackendType.fromName(obj.optString("backendType", "CPU")),
                     )

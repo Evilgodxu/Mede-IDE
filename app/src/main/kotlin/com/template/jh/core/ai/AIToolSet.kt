@@ -14,11 +14,38 @@ import java.io.File
 import java.net.URLEncoder
 import org.jsoup.Jsoup
 
+/** 工具执行状态回调 — 由 ChatViewModel 注入，打破 automaticToolCalling 黑盒 */
+fun interface ToolExecutionCallback {
+    fun onToolStart(name: String, args: Map<String, String>)
+    fun onToolResult(name: String, args: Map<String, String>, result: String)
+}
+
 class AIToolSet(
     private val context: Context,
     private val fileManager: FileManager? = null,
     private val conversationMemory: ConversationMemory? = null,
 ) : ToolSet {
+
+    /** ChatViewModel 注入的回调，每次 @Tool 方法执行前后自动调用 */
+    @Volatile
+    var callback: ToolExecutionCallback? = null
+
+    /** 包裹 @Tool 方法：自动触发 onToolStart / onToolResult */
+    private inline fun <T> traceTool(name: String, block: () -> T): T {
+        callback?.onToolStart(name, emptyMap())
+        val result = block()
+        callback?.onToolResult(name, emptyMap(), result?.toString() ?: "")
+        return result
+    }
+
+    /** 带参数的包裹版本 */
+    private inline fun <T> traceTool(name: String, vararg params: Pair<String, Any?>, block: () -> T): T {
+        val args = params.associate { it.first to (it.second?.toString() ?: "") }
+        callback?.onToolStart(name, args)
+        val result = block()
+        callback?.onToolResult(name, args, result?.toString() ?: "")
+        return result
+    }
 
     // === 统一结果格式 ===
     private fun ok(msg: String) = "[OK] $msg"
@@ -53,15 +80,15 @@ class AIToolSet(
     @Tool(description = "List files and directories with [FILE]/[DIR] prefixes. Shows file sizes for files. Use absolute path (like /storage/emulated/0/...) or relative path. Leave empty to list project root.")
     fun listFiles(
         @ToolParam(description = "Subdirectory path. Use absolute path (e.g. /storage/emulated/0/MyProject) or relative path from project root. Leave empty to list project root.") subPath: String = "",
-    ): String {
+    ): String = traceTool("listFiles", "subPath" to subPath) {
         Log.d("AIToolSet", "listFiles: subPath=$subPath")
         FileLogger.d("AIToolSet", "listFiles: subPath=$subPath")
-        val fm = fileManager ?: return err("No project folder is open.")
+        val fm = fileManager ?: return@traceTool err("No project folder is open.")
         val relPath = resolvePathOrAbsolute(subPath)
         val nodes = fm.listFilesAsNodes(relPath)
-        if (nodes.isEmpty()) return ok("Empty directory: ${subPath.ifBlank { "/" }}")
+        if (nodes.isEmpty()) return@traceTool ok("Empty directory: ${subPath.ifBlank { "/" }}")
         val displayPath = if (relPath.isBlank()) "项目根目录/" else "$relPath/"
-        return buildString {
+        buildString {
             appendLine(ok("$displayPath (${nodes.size} items)"))
             nodes.forEach { node ->
                 if (node.isDirectory) {
@@ -213,7 +240,7 @@ class AIToolSet(
         @ToolParam(description = "File path relative to project root, e.g. 'app/src/main.kt' or 'build.gradle.kts'") path: String,
         @ToolParam(description = "Starting line number (1-based). Default 1.") offset: Int = 1,
         @ToolParam(description = "Maximum number of lines to read. Default 1000.") limit: Int = 1000,
-    ): String {
+    ): String = traceTool("readFile", "path" to path, "offset" to offset, "limit" to limit) {
         Log.d("AIToolSet", "readFile: path=$path offset=$offset limit=$limit")
         FileLogger.d("AIToolSet", "readFile: path=$path offset=$offset limit=$limit")
         val raw = readFileRaw(path)
@@ -257,7 +284,7 @@ class AIToolSet(
         @ToolParam(description = "File path relative to project root, e.g. 'src/App.kt'") path: String,
         @ToolParam(description = "The complete text content to write to the file") content: String,
         @ToolParam(description = "Set to true to overwrite existing file. Default false — refuses if file exists.") overwrite: Boolean = false,
-    ): String {
+    ): String = traceTool("writeFile", "path" to path, "content" to content, "overwrite" to overwrite) {
         Log.d("AIToolSet", "writeFile: path=$path contentLen=${content.length} overwrite=$overwrite")
         FileLogger.d("AIToolSet", "writeFile: path=$path contentLen=${content.length} overwrite=$overwrite")
         if (content.isEmpty()) {
@@ -304,7 +331,7 @@ class AIToolSet(
         @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
         @ToolParam(description = "The exact code block to find. Must be unique in the file. Include function signature or class definition for uniqueness.") old_string: String,
         @ToolParam(description = "The new code block to replace with.") new_string: String,
-    ): String {
+    ): String = traceTool("replaceInFile", "path" to path, "old_string" to old_string, "new_string" to new_string) {
         val fm = fileManager ?: run {
             FileLogger.w("AIToolSet", "replaceInFile: no project folder open")
             return err("No project folder is open.")
@@ -354,13 +381,13 @@ class AIToolSet(
     fun batchReplaceInFile(
         @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
         @ToolParam(description = "JSON array of edits: [{\"old_string\":\"exact code\",\"new_string\":\"replacement\"}, ...]. Each old_string must be unique in the file.") editsJson: String,
-    ): String {
+    ): String = traceTool("batchReplaceInFile", "path" to path, "editsJson" to editsJson) {
         val fm = fileManager ?: run {
             FileLogger.w("AIToolSet", "batchReplaceInFile: no project folder open")
-            return err("No project folder is open.")
+            return@traceTool err("No project folder is open.")
         }
         val resolvedPath = resolvePathOrAbsolute(path)
-        return try {
+        return@traceTool try {
             Log.d("AIToolSet", "batchReplaceInFile: path=$resolvedPath editsLen=${editsJson.length}")
             FileLogger.d("AIToolSet", "batchReplaceInFile: path=$resolvedPath editsLen=${editsJson.length}")
             val original = readFileRaw(resolvedPath)
@@ -415,7 +442,7 @@ class AIToolSet(
     @Tool(description = "Delete a file or directory in the project. Use with caution — this permanently removes files.")
     fun deleteFile(
         @ToolParam(description = "File or directory path relative to project root, e.g. 'src/OldFile.kt' or 'temp/'") path: String,
-    ): String {
+    ): String = traceTool("deleteFile", "path" to path) {
         val resolvedPath = resolvePathOrAbsolute(path)
         Log.d("AIToolSet", "deleteFile: path=$resolvedPath")
         FileLogger.d("AIToolSet", "deleteFile: path=$resolvedPath")
@@ -437,7 +464,7 @@ class AIToolSet(
     @Tool(description = "Batch delete multiple files or directories in one call. All paths resolved relative to project root. Use when you need to clean up several files at once.")
     fun batchDeleteFile(
         @ToolParam(description = "JSON array of file/directory paths relative to project root, e.g. '[\"src/temp.kt\",\"old/\"]'") pathsJson: String,
-    ): String {
+    ): String = traceTool("batchDeleteFile", "pathsJson" to pathsJson) {
         Log.d("AIToolSet", "batchDeleteFile: $pathsJson")
         FileLogger.d("AIToolSet", "batchDeleteFile: $pathsJson")
         val fm = fileManager ?: return err("No project folder is open.")
@@ -471,7 +498,7 @@ class AIToolSet(
     @Tool(description = "Create a new directory. Automatically creates parent directories as needed. For creating nested paths, provide the full path.")
     fun createDirectory(
         @ToolParam(description = "Directory path relative to project root, e.g. 'src/utils' or 'assets/images'") path: String,
-    ): String {
+    ): String = traceTool("createDirectory", "path" to path) {
         val resolvedPath = resolvePathOrAbsolute(path)
         Log.d("AIToolSet", "createDirectory: path=$resolvedPath")
         FileLogger.d("AIToolSet", "createDirectory: path=$resolvedPath")
