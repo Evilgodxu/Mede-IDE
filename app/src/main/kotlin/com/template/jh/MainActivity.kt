@@ -21,6 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.template.jh.data.repository.UserPreferencesRepository
 import com.template.jh.screens.home.HomeScreen
+import com.template.jh.screens.permission.LocalActivity
 import com.template.jh.screens.permission.PermissionGuideScreen
 import com.template.jh.ui.adaptive.ProvideWindowSizeClass
 import com.template.jh.ui.theme.MyApplicationTheme
@@ -57,8 +58,11 @@ class MainActivity : ComponentActivity() {
                 else -> isSystemInDarkTheme()
             }
 
-            // 显式提供 ActivityResultRegistryOwner（兼容 ProvideLocalizedContext 的 Context 替换）
-            CompositionLocalProvider(LocalActivityResultRegistryOwner provides this@MainActivity) {
+            // 显式提供 Activity / ActivityResultRegistryOwner（兼容 ProvideLocalizedContext 的 Context 替换）
+            CompositionLocalProvider(
+                LocalActivity provides this@MainActivity,
+                LocalActivityResultRegistryOwner provides this@MainActivity,
+            ) {
                 ProvideLocalizedContext(languageManager) {
                     ProvideWindowSizeClass {
                         MyApplicationTheme(darkTheme = darkTheme, dynamicColor = false) {

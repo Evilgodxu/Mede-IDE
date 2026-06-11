@@ -2,8 +2,6 @@ package com.template.jh.screens.permission
 
 import android.Manifest
 import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -71,6 +69,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -95,14 +94,9 @@ private const val WELCOME_PAGE_INDEX = INTRO_PAGES_COUNT
 private const val BASIC_PERMISSIONS_PAGE_INDEX = INTRO_PAGES_COUNT + 1
 private const val TOTAL_PAGES_COUNT = INTRO_PAGES_COUNT + 2
 
-// 从 ContextWrapper 链中解包出原始 Activity（兼容 ProvideLocalizedContext 等 Context 包装）
-private fun Context.findActivity(): Activity? {
-    var ctx = this
-    while (ctx is ContextWrapper) {
-        if (ctx is Activity) return ctx
-        ctx = ctx.baseContext
-    }
-    return ctx as? Activity
+// CompositionLocal 用于在 ProvideLocalizedContext 包装层之上透传原始 Activity
+val LocalActivity = staticCompositionLocalOf<Activity> {
+    error("LocalActivity not provided. Ensure CompositionLocalProvider wraps ProvideLocalizedContext.")
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -112,7 +106,7 @@ fun PermissionGuideScreen(
     onComplete: () -> Unit
 ) {
     val context = LocalContext.current
-    val activity = remember(context) { context.findActivity() }
+    val activity = LocalActivity.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
 
@@ -343,8 +337,8 @@ fun PermissionGuideScreen(
                                                         "package:${context.packageName}"
                                                     )
                                             }
-                                    activity?.let { viewModel.startPermissionMonitor(PermissionType.STORAGE, it) }
-                                    activity?.startActivity(intent)
+                                    activity.let { viewModel.startPermissionMonitor(PermissionType.STORAGE, it) }
+                                    activity.startActivity(intent)
                                 } catch (e: Exception) {
                                     try {
                                         val intent =
@@ -356,8 +350,8 @@ fun PermissionGuideScreen(
                                                         "package:${context.packageName}"
                                                     )
                                             }
-                                        activity?.let { viewModel.startPermissionMonitor(PermissionType.STORAGE, it) }
-                                        activity?.startActivity(intent)
+                                        viewModel.startPermissionMonitor(PermissionType.STORAGE, activity)
+                                        activity.startActivity(intent)
                                     } catch (e2: Exception) {
                                         try {
                                             val intent =
@@ -365,8 +359,8 @@ fun PermissionGuideScreen(
                                                     Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                                     Uri.parse("package:${context.packageName}")
                                                 )
-                                            activity?.let { viewModel.startPermissionMonitor(PermissionType.STORAGE, it) }
-                                            activity?.startActivity(intent)
+                                            viewModel.startPermissionMonitor(PermissionType.STORAGE, activity)
+                                            activity.startActivity(intent)
                                         } catch (e3: Exception) {
                                             Toast.makeText(
                                                 context,
@@ -400,8 +394,8 @@ fun PermissionGuideScreen(
                                                         context.packageName
                                                 )
                                         }
-                                activity?.let { viewModel.startPermissionMonitor(PermissionType.BATTERY_OPTIMIZATION, it) }
-                                activity?.startActivity(intent)
+                                activity.let { viewModel.startPermissionMonitor(PermissionType.BATTERY_OPTIMIZATION, it) }
+                                activity.startActivity(intent)
                             } catch (e: Exception) {
                                 // 如果直接请求失败，尝试打开电池优化设置页面
                                 try {
@@ -409,8 +403,8 @@ fun PermissionGuideScreen(
                                         Intent(
                                             Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
                                         )
-                                    activity?.let { viewModel.startPermissionMonitor(PermissionType.BATTERY_OPTIMIZATION, it) }
-                                    activity?.startActivity(intent)
+                                    viewModel.startPermissionMonitor(PermissionType.BATTERY_OPTIMIZATION, activity)
+                                    activity.startActivity(intent)
                                     Toast.makeText(
                                         context,
                                         "请在列表中找到应用并设置为\"不优化\"",
@@ -425,8 +419,8 @@ fun PermissionGuideScreen(
                                                 Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                                 Uri.parse("package:" + context.packageName)
                                             )
-                                        activity?.let { viewModel.startPermissionMonitor(PermissionType.BATTERY_OPTIMIZATION, it) }
-                                        activity?.startActivity(intent)
+                                        viewModel.startPermissionMonitor(PermissionType.BATTERY_OPTIMIZATION, activity)
+                                        activity.startActivity(intent)
                                         Toast.makeText(
                                             context,
                                             "请在应用详情中找到电池选项并设置为\"无限制\"",
