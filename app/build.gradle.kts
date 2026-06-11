@@ -151,6 +151,9 @@ dependencies {
     // Markdown 渲染（匹配 Gallery 官方）
     implementation("org.commonmark:commonmark:0.21.0")
 
+    // Zip4j — 带密码加密的 ZIP 压缩
+    implementation("net.lingala.zip4j:zip4j:2.11.5")
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))

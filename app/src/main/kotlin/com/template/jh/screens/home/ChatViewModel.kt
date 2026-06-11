@@ -155,14 +155,13 @@ class ChatViewModel(
         skills = sysPromptSkills,
         deepThink = sysPromptDeepThink,
         cloudModelEnabled = _state.value.cloudModelEnabled,
+        aiToolSet = aiToolSet,
     )
 
     private fun buildEditorContext(): String = contextManager.buildEditorContext(
         activeFilePath = _state.value.activeFilePath,
         projectRootName = _state.value.projectRootName,
         openedFilePaths = _state.value.openedFilePaths,
-        modifiedFilePaths = _state.value.modifiedFilePaths,
-        cursorLine = _state.value.cursorLine,
         fileManager = fileManager,
         aiToolSet = aiToolSet,
     )

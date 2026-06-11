@@ -103,3 +103,9 @@
 -keepattributes Signature
 -keepattributes *Annotation*
 -dontwarn com.google.gson.**
+
+# ============================================================
+# Zip4j — 加密/压缩反射类
+# ============================================================
+-keep class net.lingala.zip4j.** { *; }
+-dontwarn net.lingala.zip4j.**

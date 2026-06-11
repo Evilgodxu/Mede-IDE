@@ -158,6 +158,64 @@ class EditorScreenState(
     fun handleTextChange(path: String, newTextFieldValue: TextFieldValue) {
         editorContent[path] = newTextFieldValue
     }
+
+    // === Diff & Merge ===
+
+    /** 打开 Diff 视图：对比两个文件的文本差异 */
+    fun openDiffView(oldPath: String, newPath: String) {
+        val oldContent = readFileFromSource(oldPath)
+        val newContent = readFileFromSource(newPath)
+        val diffContent = buildDiffOutput(oldPath, oldContent, newPath, newContent)
+        val diffPath = "__diff__${oldPath.substringAfterLast('/')}__${newPath.substringAfterLast('/')}"
+        editorContent[diffPath] = TextFieldValue(diffContent)
+        originalContents[diffPath] = diffContent
+        openTab(TabItem(diffPath, "Diff: ${displayNameFromPath(oldPath)}", TabType.Preview))
+    }
+
+    private fun buildDiffOutput(oldPath: String, oldText: String, newPath: String, newText: String): String {
+        val oldLines = oldText.lines()
+        val newLines = newText.lines()
+        val sb = StringBuilder()
+        sb.appendLine("=== Diff: ${oldPath.substringAfterLast('/')} → ${newPath.substringAfterLast('/')} ===")
+        sb.appendLine()
+        val maxLen = maxOf(oldLines.size, newLines.size)
+        for (i in 0 until maxLen) {
+            val oldLine = oldLines.getOrNull(i)
+            val newLine = newLines.getOrNull(i)
+            when {
+                oldLine == null -> sb.appendLine("+ $newLine")
+                newLine == null -> sb.appendLine("- $oldLine")
+                oldLine != newLine -> {
+                    sb.appendLine("- $oldLine")
+                    sb.appendLine("+ $newLine")
+                }
+                else -> sb.appendLine("  $oldLine")
+            }
+        }
+        return sb.toString()
+    }
+
+    /** 合并：将 newPath 文件内容追加到 oldPath 文件末尾 */
+    fun mergeFiles(oldPath: String, newPath: String) {
+        val oldContent = readFileFromSource(oldPath)
+        val newContent = readFileFromSource(newPath)
+        val merged = buildString {
+            appendLine(oldContent.trimEnd())
+            appendLine()
+            appendLine("// === Merged from: ${newPath.substringAfterLast('/')} ===")
+            appendLine()
+            appendLine(newContent.trimStart())
+        }
+        editorContent[oldPath] = TextFieldValue(merged)
+        originalContents[oldPath] = merged
+        // 标记为已修改
+        val idx = getTabIdxById(oldPath)
+        if (idx < 0) {
+            openFileTab(oldPath)
+        } else {
+            activeTabIndex = idx
+        }
+    }
 }
 
 @Composable

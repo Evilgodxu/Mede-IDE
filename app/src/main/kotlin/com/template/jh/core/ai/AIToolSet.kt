@@ -53,13 +53,28 @@ class AIToolSet(
     private fun isOk(result: String) = result.startsWith("[OK]")
     private fun isErr(result: String) = result.startsWith("[ERROR]")
 
-    // SAF 项目根 URI（用户通过文件夹选择器打开的目录）
-    // 优先使用外部传入的 fileManager，否则使用 internal projectUri
+    // SAF 项目根 URI（用户通过长按文件夹下拉列表设置的 workspace）
     @Volatile var projectUri: Uri? = null
         set(value) {
             field = value
             value?.let { fileManager?.setProjectUri(it) }
         }
+
+    /** 沙箱守卫：项目未打开则拒绝操作 */
+    private fun ensureProjectOpen(): Boolean {
+        val fm = fileManager ?: return false
+        return fm.projectUri != null
+    }
+
+    /** 沙箱拦截入口 — 项目未打开时返回错误消息，否则返回 null（通过） */
+    private fun requireProject(action: String): String? {
+        if (!ensureProjectOpen()) {
+            val msg = "沙箱保护：未打开项目。请先长按文件夹选择项目目录（workspace），再执行 $action 操作。"
+            FileLogger.w("AIToolSet", "Sandbox blocked $action: no project open")
+            return err(msg)
+        }
+        return null
+    }
 
     /** 将路径转为相对路径：接收绝对路径或相对路径，统一转为相对路径 */
     private fun resolvePath(path: String): String {
@@ -122,6 +137,27 @@ class AIToolSet(
         // 自动截断阈值：超过此行数且未明确指定 limit 时，仅显示前 N 行
         private const val MAX_AUTO_LINES = 200
         private const val TRUNCATE_WARNING_LINES = 500
+
+        /** 构建工具信息的纯文本描述（注入系统提示词）。内容与 @Tool 注解保持一致。 */
+        fun buildToolInfoText(): String = buildString {
+            appendLine("## 可用工具")
+            appendLine()
+            appendLine("readFile(path, offset?, limit?) — 读取文件原始内容（无行号前缀），可直接复制用于 replaceInFile。offset 从 1 开始，limit 默认 1000。超过 500 行的文件自动仅显示前 200 行并提示用 grep 定位。")
+            appendLine("writeFile(path, content, overwrite?) — 创建新文件。overwrite 默认 false：文件已存在则拒绝并提示用 replaceInFile 修改。")
+            appendLine("replaceInFile(path, old_string, new_string, lineStart?, lineEnd?) — 替换文件中精确匹配的代码块。old_string 必须唯一，需包含足够上下文（函数签名、类名）。lineStart/lineEnd 1-based 限搜索范围，传 0 搜全文件。")
+            appendLine("batchReplaceInFile(path, editsJson) — 单次调用替换多处非重叠代码块。editsJson 为 JSON 数组 [{\"old_string\":\"...\",\"new_string\":\"...\"}]，所有匹配基于原始文件（非顺序应用），编辑不能重叠/嵌套。单个编辑用 replaceInFile。")
+            appendLine("deleteFile(path) — 永久删除文件或目录，谨慎使用。")
+            appendLine("createDirectory(path) — 创建目录，自动创建父级。嵌套路径直接传完整路径。")
+            appendLine("listFiles(subPath?) — 列出目录内容，以 [FILE]/[DIR] 前缀标识，显示文件大小。路径支持绝对或相对，留空列表项目根目录。")
+            appendLine("grep(pattern, extension?, glob?, ignoreCase?, contextLines?) — 正则搜索文件内容，返回匹配文件/行号/上下文。pattern 如 'fun\\\\s+\\\\w+' 查找函数定义。ignoreCase 默认 true，contextLines 默认 2。")
+            appendLine("glob(pattern, maxResults?) — 按文件名 glob 模式查找，如 '*.kt'、'**/*.xml'、'Main*'。递归搜索，maxResults 默认 100。")
+            appendLine("searchCodebase(query, targetDirectories?) — 语义相似度搜索代码库。用于探索不熟悉代码、按行为找实现。不知道确切术语时优先用此工具而非 grep。")
+            appendLine("runCommand(command) — 执行 Shell 命令。支持引号包裹参数，超时 30 秒，输出上限 5000 字符。")
+            appendLine("searchWeb(query) — 联网搜索最新信息，返回标题/摘要/链接（最多 8 条）。")
+            appendLine("readLints() — 读取构建/lint/编译错误，含文件路径和行号。自动运行 gradle lint。")
+            appendLine("searchConversationMemory(query) — 语义搜索历史对话，如 '我们改过哪些文件'、'上次怎么修的那个 bug'。")
+            appendLine("getRecentConversationMemory(count?) — 获取最近对话摘要，count 默认 5，上限 20。")
+        }
 
         /** 构建 OpenAI 兼容的 tools 定义 JSON */
         fun buildOpenAIToolsJson(): String {
@@ -284,15 +320,13 @@ class AIToolSet(
     ): String = traceTool("writeFile", "path" to path, "content" to content, "overwrite" to overwrite) {
         Log.d("AIToolSet", "writeFile: path=$path contentLen=${content.length} overwrite=$overwrite")
         FileLogger.d("AIToolSet", "writeFile: path=$path contentLen=${content.length} overwrite=$overwrite")
+        requireProject("写入文件")?.let { return it }
         if (content.isEmpty()) {
             val msg = "Write refused — content is empty."
             FileLogger.w("AIToolSet", "writeFile rejected: empty content")
             return err(msg)
         }
-        val fm = fileManager ?: run {
-            FileLogger.w("AIToolSet", "writeFile: no project folder open")
-            return err("No project folder is open.")
-        }
+        val fm = fileManager!!  // requireProject 已保证非 null
         val resolvedPath = resolvePathOrAbsolute(path)
 
         if (!overwrite && fm.exists(resolvedPath)) {
@@ -331,10 +365,8 @@ class AIToolSet(
         @ToolParam(description = "Limit search to lines starting from this line (1-based). 0 = search entire file.") lineStart: Int = 0,
         @ToolParam(description = "Limit search to lines up to this line (1-based). 0 = search entire file.") lineEnd: Int = 0,
     ): String = traceTool("replaceInFile", "path" to path, "old_string" to old_string, "new_string" to new_string, "lineStart" to lineStart, "lineEnd" to lineEnd) {
-        val fm = fileManager ?: run {
-            FileLogger.w("AIToolSet", "replaceInFile: no project folder open")
-            return err("No project folder is open.")
-        }
+        requireProject("编辑文件")?.let { return it }
+        val fm = fileManager!!
         val resolvedPath = resolvePathOrAbsolute(path)
         return try {
             Log.d("AIToolSet", "replaceInFile: path=$resolvedPath oldLen=${old_string.length} newLen=${new_string.length} lineStart=$lineStart lineEnd=$lineEnd")
@@ -397,10 +429,8 @@ class AIToolSet(
         @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
         @ToolParam(description = "JSON array of edits: [{\"old_string\":\"exact code\",\"new_string\":\"replacement\"}, ...]. Each old_string must be unique in the file.") editsJson: String,
     ): String = traceTool("batchReplaceInFile", "path" to path, "editsJson" to editsJson) {
-        val fm = fileManager ?: run {
-            FileLogger.w("AIToolSet", "batchReplaceInFile: no project folder open")
-            return@traceTool err("No project folder is open.")
-        }
+        requireProject("批量编辑")?.let { return@traceTool it }
+        val fm = fileManager!!
         val resolvedPath = resolvePathOrAbsolute(path)
         return@traceTool try {
             Log.d("AIToolSet", "batchReplaceInFile: path=$resolvedPath editsLen=${editsJson.length}")
@@ -458,13 +488,11 @@ class AIToolSet(
     fun deleteFile(
         @ToolParam(description = "File or directory path relative to project root, e.g. 'src/OldFile.kt' or 'temp/'") path: String,
     ): String = traceTool("deleteFile", "path" to path) {
+        requireProject("删除文件")?.let { return it }
+        val fm = fileManager!!
         val resolvedPath = resolvePathOrAbsolute(path)
         Log.d("AIToolSet", "deleteFile: path=$resolvedPath")
         FileLogger.d("AIToolSet", "deleteFile: path=$resolvedPath")
-        val fm = fileManager ?: run {
-            FileLogger.w("AIToolSet", "deleteFile: no project folder open")
-            return err("No project folder is open.")
-        }
         val result = fm.deleteFile(resolvedPath)
         return if (result.startsWith("Failed") || result.startsWith("No project")) {
             FileLogger.w("AIToolSet", "deleteFile failed: $result")
@@ -481,13 +509,11 @@ class AIToolSet(
     fun createDirectory(
         @ToolParam(description = "Directory path relative to project root, e.g. 'src/utils' or 'assets/images'") path: String,
     ): String = traceTool("createDirectory", "path" to path) {
+        requireProject("创建目录")?.let { return it }
+        val fm = fileManager!!
         val resolvedPath = resolvePathOrAbsolute(path)
         Log.d("AIToolSet", "createDirectory: path=$resolvedPath")
         FileLogger.d("AIToolSet", "createDirectory: path=$resolvedPath")
-        val fm = fileManager ?: run {
-            FileLogger.w("AIToolSet", "createDirectory: no project folder open")
-            return err("No project folder is open.")
-        }
         val result = fm.createDirectory(resolvedPath)
         return if (result.startsWith("Failed") || result.startsWith("No project")) {
             FileLogger.w("AIToolSet", "createDirectory failed: $result")
@@ -505,6 +531,7 @@ class AIToolSet(
     ): String {
         Log.d("AIToolSet", "runCommand: $command")
         FileLogger.d("AIToolSet", "runCommand: $command")
+        requireProject("执行命令")?.let { return it }
         return try {
             val dir = resolveProjectDir()
             val parts = parseCommandLine(command)

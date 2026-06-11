@@ -315,6 +315,71 @@ class HomeViewModel(
         }
     }
 
+    fun copyFile(srcPath: String, dstDirPath: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val base = fileManager.projectDirPath.ifEmpty { fileManager.storageRootPath }
+                val srcFile = java.io.File(base, srcPath)
+                val dstDir = java.io.File(base, dstDirPath)
+                val dstFile = java.io.File(dstDir, srcFile.name)
+                if (!dstDir.exists()) dstDir.mkdirs()
+                srcFile.copyRecursively(dstFile, overwrite = true)
+                FileOperationEvents.notify(dstFile.path.removePrefix(base).trimStart('/'), "create")
+                refreshRootFiles()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun moveFile(srcPath: String, dstDirPath: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val base = fileManager.projectDirPath.ifEmpty { fileManager.storageRootPath }
+                val srcFile = java.io.File(base, srcPath)
+                val dstDir = java.io.File(base, dstDirPath)
+                val dstFile = java.io.File(dstDir, srcFile.name)
+                if (!dstDir.exists()) dstDir.mkdirs()
+                srcFile.renameTo(dstFile)
+                FileOperationEvents.notify(srcPath, "delete")
+                FileOperationEvents.notify(dstFile.path.removePrefix(base).trimStart('/'), "create")
+                refreshRootFiles()
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun compressFiles(
+        paths: List<String>,
+        archiveName: String,
+        format: String,
+        level: Int,
+        password: String?,
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val base = fileManager.projectDirPath.ifEmpty { fileManager.storageRootPath }
+                val targetFile = java.io.File(base, archiveName)
+                if (format == "zip") {
+                    val zipFile = net.lingala.zip4j.ZipFile(targetFile)
+                    val parameters = net.lingala.zip4j.model.ZipParameters()
+                    parameters.compressionLevel = net.lingala.zip4j.model.enums.CompressionLevel.values()[level.coerceIn(0, 9)]
+                    if (!password.isNullOrBlank()) {
+                        zipFile.setPassword(password.toCharArray())
+                        parameters.encryptionMethod = net.lingala.zip4j.model.enums.EncryptionMethod.ZIP_STANDARD
+                    }
+                    for (path in paths) {
+                        val file = java.io.File(base, path)
+                        if (file.isDirectory) {
+                            zipFile.addFolder(file, parameters)
+                        } else {
+                            zipFile.addFile(file, parameters)
+                        }
+                    }
+                    FileOperationEvents.notify(archiveName, "create")
+                }
+                refreshRootFiles()
+            } catch (_: Exception) {}
+        }
+    }
+
     private fun refreshRootFiles() {
         val nodes = fileManager.listFilesAsNodes("")
         _files.value = nodes.map { toFileItem(it) }

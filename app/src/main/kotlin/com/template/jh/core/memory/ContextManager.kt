@@ -33,26 +33,32 @@ class ContextManager(
         skills: List<SkillItem>,
         deepThink: Boolean,
         cloudModelEnabled: Boolean,
+        aiToolSet: AIToolSet? = null,
     ): String {
         sysPromptCache?.let { return it }
         val sb = StringBuilder()
         sb.append(
             """
-You are an AI coding assistant. Reply in 简体中文.
+You are an AI coding assistant running on-device via LiteRT-LM. Reply in 简体中文.
+
+## 身份定位
+- 你是配编程协作者（pair programmer），不是问答机器人
+- 主动推断用户意图，模糊指令直接执行不追问；技术上不确定就做最合理假设，继续向前
 
 ## 执行准则
-- 指令即执行，不问"是否要/你想怎样"；模糊指令推断后直接执行
-- 最小修改范围：不改无关代码，编辑已有文件优先
-- 工具错误：分析原因 → 修正参数 → 重试
+- 最小修改范围：编辑已有文件优先（用 replaceInFile / batchReplaceInFile）
+- 禁止直接输出代码到对话框，代码修改必须通过工具执行
+- 禁止整文件重写，优先点对点精确编辑
 
 ## 输出规范
-- 无废话最小长度：不问候/不感谢/不道歉/不总结，仅输出必要信息
-
-## 工具调用
-- 框架自动处理，仅 User 消息为实际请求。
+- 最小有效长度：不问候/不感谢/不道歉/不总结，仅输出必要信息
+- 格式优先：列表 > 代码块 > 键值对 > 段落；禁止重复同一条信息
 
 """.trimIndent()
         )
+        // 工具信息
+        sb.appendLine()
+        sb.appendLine(AIToolSet.buildToolInfoText())
         sb.appendLine()
         if (userName.isNotBlank()) sb.append("\n用户: $userName")
         _sysPromptCache = sb.toString()
@@ -68,42 +74,40 @@ You are an AI coding assistant. Reply in 简体中文.
         activeFilePath: String,
         projectRootName: String,
         openedFilePaths: List<String>,
-        modifiedFilePaths: List<String>,
-        cursorLine: Int,
         fileManager: FileManager,
         aiToolSet: AIToolSet,
     ): String {
         val ctx = StringBuilder()
-        ctx.appendLine("[当前编辑器上下文]")
-        if (activeFilePath.isNotBlank()) {
-            ctx.appendLine("活动文件: $activeFilePath")
+        ctx.appendLine("[实时感知]")
+
+        // 系统时间
+        val now = java.time.LocalDateTime.now()
+        ctx.appendLine("时间: ${now.year}-${"%02d".format(now.monthValue)}-${"%02d".format(now.dayOfMonth)} ${"%02d".format(now.hour)}:${"%02d".format(now.minute)}")
+
+        // 项目路径
+        val absoluteRoot = aiToolSet.getProjectRootPath()
+        if (absoluteRoot.isNotBlank()) {
+            ctx.appendLine("项目: $absoluteRoot")
         }
-        if (projectRootName.isNotBlank()) {
-            val absoluteRoot = aiToolSet.getProjectRootPath()
-            ctx.appendLine("项目: $projectRootName")
-            if (absoluteRoot.isNotBlank()) {
-                ctx.appendLine("项目绝对路径: $absoluteRoot")
-            }
-            val tree = fileManager.buildFileTreeString(maxDepth = 2, maxItems = 20)
-            if (tree.isNotBlank()) {
-                ctx.appendLine("工作区结构:")
-                tree.lines().forEach { ctx.appendLine("  $it") }
-            }
+
+        // 活动标签（音频/视频/图片/代码/文本等正在查看或编辑的内容）
+        val active = activeFilePath.takeIf { it.isNotBlank() }
+        if (active != null) {
+            ctx.appendLine("活动标签: $active")
         }
+
+        // 已打开文件
         if (openedFilePaths.isNotEmpty()) {
-            ctx.appendLine("已打开文件:")
+            ctx.appendLine("已打开:")
             openedFilePaths.take(10).forEach { path ->
-                val dirty = if (path in modifiedFilePaths) " [已修改]" else ""
-                val active = if (path == activeFilePath) " ← 活动" else ""
-                ctx.appendLine("  - $path$dirty$active")
+                ctx.appendLine("  $path")
             }
             if (openedFilePaths.size > 10) {
-                ctx.appendLine("  ... 及其他 ${openedFilePaths.size - 10} 个文件")
+                ctx.appendLine("  ... 及 ${openedFilePaths.size - 10} 个")
             }
-        } else {
-            ctx.appendLine("（未打开任何文件 — 可使用 listFiles 查看项目文件结构再定位目标）")
         }
-        if (ctx.length < 30) return ""
+
+        if (ctx.length < 40) return ""
         return ctx.toString()
     }
 

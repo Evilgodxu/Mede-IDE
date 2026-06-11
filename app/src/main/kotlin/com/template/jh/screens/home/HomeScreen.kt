@@ -155,6 +155,19 @@ fun HomeScreen(
     LaunchedEffect(Unit) {
         FileOperationEvents.events.collect { event ->
             when (event.operation) {
+                "create" -> {
+                    // 工具创建文件后自动打开并切换到对应标签页
+                    val eventPath = event.path
+                    val absolutePath = if (eventPath.startsWith("/")) eventPath
+                        else "${fileManager.projectDirPath.trimEnd('/')}/${eventPath.trimStart('/')}"
+                    if (java.io.File(absolutePath).isFile) {
+                        editorState.openFileTab(absolutePath)
+                    }
+                    val modifiedPaths = editorState.tabs
+                        .filter { it.type == TabType.File && editorState.isFileModified(it.id) }
+                        .map { it.id }
+                    chatViewModel.setModifiedFilePaths(modifiedPaths)
+                }
                 "modify", "overwrite" -> {
                     // 匹配 editorContent 中的 key：支持绝对/相对路径不一致
                     val eventPath = event.path
@@ -603,6 +616,21 @@ private fun LeftPanelContent(
                 },
                 onCreate = { relativePath, name, isDir ->
                     viewModel.createFile(relativePath, name, isDir)
+                },
+                onCopy = { srcPath, dstDirPath ->
+                    viewModel.copyFile(srcPath, dstDirPath)
+                },
+                onMove = { srcPath, dstDirPath ->
+                    viewModel.moveFile(srcPath, dstDirPath)
+                },
+                onCompress = { paths, archiveName, format, level, password ->
+                    viewModel.compressFiles(paths, archiveName, format, level, password)
+                },
+                onDiff = { oldPath, newPath ->
+                    editorState.openDiffView(oldPath, newPath)
+                },
+                onMerge = { oldPath, newPath ->
+                    editorState.mergeFiles(oldPath, newPath)
                 },
                 onOpenAsProject = { filePath ->
                     viewModel.openAsProjectDirectory(filePath)
