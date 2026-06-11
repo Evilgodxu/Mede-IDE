@@ -81,6 +81,7 @@ fun HomeScreen(
     var cursorLineContent by remember { mutableStateOf("") }
     var previewModeTabs by remember { mutableStateOf(setOf<String>()) }
     var isResourceSecondPaneExpanded by remember { mutableStateOf(false) }
+    val terminalTabTitle = stringResource(R.string.menu_terminal)
 
     val fileManager = org.koin.java.KoinJavaComponent.get<FileManager>(FileManager::class.java)
     val editorState = rememberEditorScreenState(chatViewModel, fileManager)
@@ -362,7 +363,6 @@ fun HomeScreen(
                 onSwitchCloudProfile = { chatViewModel.switchCloudProfile(it) },
                 onCloseFolder = closeFolder,
                 onOpenFile = { fileOpenLauncher.launch(arrayOf("*/*")) },
-                onOpenFolder = onOpenFolder,
                 recentFiles = recentFiles,
                 recentFolders = recentFolders,
                 onOpenRecentFile = { path ->
@@ -382,6 +382,11 @@ fun HomeScreen(
                 onOpenRecentFolder = { path -> viewModel.openAsProjectDirectory(path) },
                 onSaveAll = { editorState.tabs.filter { it.type == TabType.File }.forEach { editorState.saveFile(it.id) } },
                 projectDirPath = homeState.projectDirPath,
+                isTerminalTabOpen = editorState.isTerminalTabOpen,
+                onToggleTerminal = {
+                    if (editorState.isTerminalTabOpen) editorState.closeTerminalTab()
+                    else editorState.openTerminalTab(terminalTabTitle)
+                },
                 audioPlaybackState = audioPlaybackState,
                 scannedAudioTracks = scannedAudioTracks,
                 onScanMusic = {
@@ -468,13 +473,9 @@ fun HomeScreen(
             isLeftPanelExpanded = isResourceSecondPaneExpanded,
             centerContent = {
                 MainContentArea(
-                    onOpenFolder = onOpenFolder,
                     chatViewModel = chatViewModel,
                     audioPlaybackState = audioPlaybackState,
                     videoPlaybackState = videoPlaybackState,
-                    openedFolderName = homeState.openedFolderName,
-                    recentFolderName = null,
-                    onOpenRecentFolder = onOpenFolder,
                     tabs = editorState.tabs,
                     activeTabIndex = editorState.activeTabIndex,
                     onSelectTab = { idx ->
@@ -513,6 +514,7 @@ fun HomeScreen(
                     },
                     onSaveAllTabs = { editorState.tabs.filter { it.type == TabType.File }.forEach { editorState.saveFile(it.id) } },
                     previewModeTabs = previewModeTabs,
+                    projectDirPath = homeState.projectDirPath,
                     onTogglePreviewMode = { path ->
                         previewModeTabs = if (path in previewModeTabs) previewModeTabs - path else previewModeTabs + path
                     },

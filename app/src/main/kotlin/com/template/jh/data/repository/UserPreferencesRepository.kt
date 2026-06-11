@@ -13,6 +13,7 @@ import com.template.jh.model.Rule
 import com.template.jh.model.SkillItem
 import com.template.jh.model.chat.BackendType
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
@@ -56,6 +57,7 @@ class UserPreferencesRepository(private val context: Context) {
         val ENABLE_SPECULATIVE_DECODING = booleanPreferencesKey("enable_speculative_decoding")
         // 模型参数持久化（topK/topP/temperature/seed/contextWindow）
         val MODEL_PARAMS_JSON = stringPreferencesKey("model_params_json")
+        val PERMISSION_GUIDE_SHOWN = booleanPreferencesKey("permission_guide_shown")
     }
 
     val themeMode: Flow<String> = context.dataStore.data
@@ -422,5 +424,14 @@ class UserPreferencesRepository(private val context: Context) {
             arr.put(obj)
         }
         return arr.toString()
+    }
+
+    // 权限引导是否已显示
+    suspend fun isPermissionGuideShown(): Boolean {
+        return context.dataStore.data.map { it[PreferencesKeys.PERMISSION_GUIDE_SHOWN] ?: false }.first()
+    }
+
+    suspend fun setPermissionGuideShown(shown: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.PERMISSION_GUIDE_SHOWN] = shown }
     }
 }

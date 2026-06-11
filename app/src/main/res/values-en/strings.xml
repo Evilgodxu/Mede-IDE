@@ -49,7 +49,7 @@
     <string name="global_search_replace_hint">Replace</string>
 
     <!-- Settings -->
-    <string name="settings_title">Settings</string>
+
     <string name="settings_theme_title">Theme</string>
     <string name="settings_language_title">Language</string>
 
@@ -65,10 +65,12 @@
 
     <!-- Settings Categories -->
     <string name="settings_category_general">General</string>
+    <string name="settings_category_environment">Environment</string>
     <string name="settings_category_mcp">MCP</string>
     <string name="settings_category_skill">Skill</string>
-    <string name="settings_category_model">Model</string>
-    <string name="settings_category_conversation">Conversation</string>
+    <string name="settings_category_local_model">Local Model</string>
+    <string name="settings_category_cloud_model">Cloud Model</string>
+
     <string name="settings_category_rules">Rules</string>
     <string name="settings_tab_name">IDE Settings</string>
 

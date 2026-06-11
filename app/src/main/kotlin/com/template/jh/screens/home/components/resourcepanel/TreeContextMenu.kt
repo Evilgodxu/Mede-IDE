@@ -116,11 +116,9 @@ fun TreeContextMenu(
     onViewInfo: (() -> Unit)? = null,
     onCompress: (() -> Unit)? = null,
     onOpenAsProject: (() -> Unit)? = null,
-    currentProjectPath: String = "",
 ) {
     val context = LocalContext.current
-    val hasProjectSet = currentProjectPath.isNotBlank()
-    val showOpenAsProject = onOpenAsProject != null && node.isDirectory && !hasProjectSet
+    val showOpenAsProject = onOpenAsProject != null && node.isDirectory
     val isMultiSelect = selectedCount > 1
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val hasCopyOrMove = onCopyToLeft != null || onCopyToRight != null ||
@@ -134,9 +132,14 @@ fun TreeContextMenu(
             .heightIn(max = (screenHeightDp * 0.75f).dp)
             .padding(vertical = 4.dp),
     ) {
-        // 滚动容器
+        // 滚动容器 - 使用weight或固定高度避免无限高度约束
         val scrollState = rememberScrollState()
-        Column(modifier = Modifier.verticalScroll(scrollState)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = (screenHeightDp * 0.7f).dp)
+                .verticalScroll(scrollState)
+        ) {
             // Group 1: 打开 + 添加到对话
             if (!node.isDirectory && !isMultiSelect) {
                 MenuRow(

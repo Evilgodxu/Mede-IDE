@@ -3,7 +3,6 @@ package com.template.jh.screens.home.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,17 +11,14 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Image
@@ -30,10 +26,8 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -52,7 +46,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.template.jh.R
@@ -65,19 +58,16 @@ import com.template.jh.screens.home.components.preview.ImagePreview
 import com.template.jh.screens.home.components.viewer.ArchiveViewer
 import com.template.jh.screens.home.components.viewer.VideoPlayer
 import com.template.jh.screens.home.components.settings.SettingsPane
+import com.template.jh.screens.home.components.terminal.TerminalPanel
 import com.template.jh.screens.home.components.viewer.WebPreview
 import com.template.jh.screens.home.components.viewer.VideoPlaybackState
 
 // 中间主内容区
 @Composable
 fun MainContentArea(
-    onOpenFolder: () -> Unit = {},
     chatViewModel: ChatViewModel? = null,
     audioPlaybackState: AudioPlaybackState? = null,
     videoPlaybackState: VideoPlaybackState? = null,
-    openedFolderName: String? = null,
-    recentFolderName: String? = null,
-    onOpenRecentFolder: () -> Unit = {},
     tabs: List<TabItem> = emptyList(),
     activeTabIndex: Int = -1,
     onSelectTab: (Int) -> Unit = {},
@@ -89,6 +79,7 @@ fun MainContentArea(
     onSaveCurrent: () -> Unit = {},
     isFileModified: (String) -> Boolean = { false },
     previewModeTabs: Set<String> = emptySet(),
+    projectDirPath: String = "",
     onTogglePreviewMode: (String) -> Unit = {},
     getEditorContent: (String) -> androidx.compose.ui.text.input.TextFieldValue = { androidx.compose.ui.text.input.TextFieldValue("") },
     onPreviewContentChange: (String, androidx.compose.ui.text.input.TextFieldValue) -> Unit = { _, _ -> },
@@ -145,10 +136,11 @@ fun MainContentArea(
             )
         }
 
+        // 主内容区
         Box(
             modifier = Modifier
-                .weight(1f)
                 .fillMaxWidth()
+                .weight(1f)
         ) {
             if (activeTabIndex in tabs.indices) {
                 val activeTab = tabs[activeTabIndex]
@@ -199,17 +191,15 @@ fun MainContentArea(
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
+                    TabType.Terminal -> {
+                        TerminalPanel(
+                            initialDirectory = projectDirPath,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
-            } else if (openedFolderName == null) {
-                // 欢迎页（仅未打开文件夹时）
-                WelcomeContent(
-                    onOpenFolder = onOpenFolder,
-                    recentFolderName = recentFolderName,
-                    onOpenRecentFolder = onOpenRecentFolder,
-                )
             }
         }
-
     }
 }
 
@@ -264,6 +254,7 @@ private fun EditorTabBar(
                             TabType.Video -> Icons.Default.Videocam
                             TabType.Archive -> Icons.Default.FolderZip
                             TabType.Preview -> Icons.Default.Language
+                            TabType.Terminal -> Icons.Default.Terminal
                         },
                         contentDescription = null,
                         modifier = Modifier
@@ -364,77 +355,4 @@ private fun EditorTabBar(
     }
 }
 
-// 欢迎页内容
-@Composable
-private fun WelcomeContent(
-    onOpenFolder: () -> Unit,
-    recentFolderName: String? = null,
-    onOpenRecentFolder: () -> Unit = {},
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(32.dp)
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        // 授权入口已移至顶部工具栏"文件"下拉菜单，此处仅显示最近记录
-        Text(
-            text = "通过顶部「文件 → 授权文件管理」打开项目",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
 
-        if (recentFolderName != null) {
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = "最近",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            RecentProjectCard(name = recentFolderName, path = recentFolderName, onClick = onOpenRecentFolder)
-        }
-    }
-}
-
-@Composable
-private fun RecentProjectCard(name: String, path: String, onClick: () -> Unit = {}) {
-    Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Cloud,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = path,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-    }
-}

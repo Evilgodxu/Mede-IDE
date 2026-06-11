@@ -61,29 +61,28 @@
     <string name="global_search_search_hint">搜索</string>
     <string name="global_search_replace_hint">替换</string>
 
-    <!-- 设置页 -->
-    <string name="settings_title">设置</string>
-    <string name="settings_theme_title">主题设置</string>
-    <string name="settings_language_title">语言设置</string>
-
     <!-- 主题选项 -->
+    <string name="settings_theme_title">主题设置</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_light">始终浅色</string>
     <string name="theme_dark">始终深色</string>
 
     <!-- 语言选项 -->
+    <string name="settings_language_title">语言设置</string>
     <string name="language_system">跟随系统</string>
     <string name="language_chinese">简体中文</string>
     <string name="language_english">English</string>
 
     <!-- 设置分类 -->
-    <string name="settings_category_general">通用</string>
-    <string name="settings_category_mcp">MCP</string>
-    <string name="settings_category_skill">Skill</string>
-    <string name="settings_category_model">模型</string>
-    <string name="settings_category_conversation">对话</string>
-    <string name="settings_category_rules">规则</string>
     <string name="settings_tab_name">IDE设置</string>
+    <string name="settings_category_general">通用设置</string>
+    <string name="settings_category_environment">环境配置</string>
+    <string name="settings_category_mcp">MCP配置</string>
+    <string name="settings_category_skill">Skill配置</string>
+    <string name="settings_category_local_model">本地模型</string>
+    <string name="settings_category_cloud_model">云端模型</string>
+    <string name="settings_category_rules">规则配置</string>
+
 
     <!-- Tab 操作 -->
     <string name="tab_close_all">不保存关闭</string>
@@ -108,6 +107,7 @@
 
     <!-- 设置面板 -->
     <string name="loading">加载中…</string>
+    <string name="settings_category_environment_desc">终端环境变量配置</string>
     <string name="settings_category_mcp_desc">MCP 服务器配置</string>
     <string name="settings_category_skill_desc">AI 技能管理</string>
     <string name="settings_category_model_desc">模型选择与配置</string>

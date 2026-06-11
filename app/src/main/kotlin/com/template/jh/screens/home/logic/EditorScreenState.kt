@@ -25,6 +25,7 @@ class EditorScreenState(
     val tabs = mutableStateListOf<TabItem>()
     var activeTabIndex by mutableIntStateOf(-1)
     val settingsTabId = "__settings__"
+    val terminalTabId = "__terminal__"
 
     val editorContent = mutableStateMapOf<String, TextFieldValue>()
     val originalContents = mutableStateMapOf<String, String>()
@@ -91,6 +92,24 @@ class EditorScreenState(
             }
         }
     }
+
+    fun openTerminalTab(title: String) {
+        openTab(TabItem(terminalTabId, title, TabType.Terminal))
+    }
+
+    fun closeTerminalTab() {
+        val idx = tabs.indexOfFirst { it.id == terminalTabId }
+        if (idx >= 0) {
+            tabs.removeAt(idx)
+            activeTabIndex = when {
+                tabs.isEmpty() -> -1
+                activeTabIndex >= tabs.size -> tabs.size - 1
+                else -> activeTabIndex.coerceIn(0, tabs.size - 1)
+            }
+        }
+    }
+
+    val isTerminalTabOpen: Boolean get() = tabs.any { it.id == terminalTabId }
 
     fun closeTab(idx: Int): Boolean {
         val tab = tabs.getOrNull(idx) ?: return false

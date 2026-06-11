@@ -56,13 +56,15 @@ fun MainTopBar(
     onSwitchCloudProfile: (String) -> Unit = {},
     onCloseFolder: () -> Unit = {},
     onOpenFile: () -> Unit = {},
-    onOpenFolder: () -> Unit = {},
     recentFiles: List<RecentEntry> = emptyList(),
     recentFolders: List<RecentEntry> = emptyList(),
     onOpenRecentFile: (String) -> Unit = {},
     onOpenRecentFolder: (String) -> Unit = {},
     onSaveAll: () -> Unit = {},
     projectDirPath: String = "",
+    // 终端
+    isTerminalTabOpen: Boolean = false,
+    onToggleTerminal: () -> Unit = {},
     // 音频播放
     audioPlaybackState: AudioPlaybackState? = null,
     scannedAudioTracks: List<AudioTrack> = emptyList(),
@@ -119,14 +121,6 @@ fun MainTopBar(
                                     fileMenuExpanded = false
                                     try { onOpenFile() }
                                     catch (e: Exception) { Log.e("MainTopBar", "open file failed", e) }
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.file_menu_open_folder_btn)) },
-                                onClick = {
-                                    fileMenuExpanded = false
-                                    try { onOpenFolder() }
-                                    catch (e: Exception) { Log.e("MainTopBar", "open folder failed", e) }
                                 }
                             )
                             HorizontalDivider()
@@ -189,13 +183,17 @@ fun MainTopBar(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
 
-                    // 终端（待实现）
-                    Text(
-                        text = stringResource(R.string.menu_terminal),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
+                    // 终端按钮
+                    Box {
+                        Text(
+                            text = stringResource(R.string.menu_terminal),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (isTerminalTabOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier
+                                .clickable { onToggleTerminal() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
 
                     Text(
                         text = "丨",

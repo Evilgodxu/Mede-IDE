@@ -209,10 +209,12 @@ fun ResourcePanel(
     }
 
     LaunchedEffect(files, openedFolderName) {
-        if (openedFolderName != null && leftPane.value == null) {
-            leftPane.value = Pane("", openedFolderName, files)
-            pushLeftHistory(leftPane.value!!)
-        }
+        leftPane.value = Pane("", openedFolderName ?: "", files)
+        rightPane.value = null
+        leftHistory.clear()
+        rightHistory.clear()
+        leftHistory.add(leftPane.value!!)
+        leftHistoryIdx = 0
     }
 
     LaunchedEffect(files) {
@@ -1030,7 +1032,6 @@ private fun FileListPaneContent(
                         } else {
                             { onInteracted(); onOpenAsProject?.invoke(node.relativePath) }
                         },
-                        currentProjectPath = projectDirPath,
                     )
                 }
             }
