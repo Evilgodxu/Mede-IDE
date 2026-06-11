@@ -552,8 +552,8 @@ class ChatViewModel(
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 throw e
             } catch (e: Exception) {
-                Log.e("ChatViewModel", "sendMessage failed", e)
-                FileLogger.e("ChatViewModel", "sendMessage failed: ${e.message}", e)
+                Log.e("ChatViewModel", "发送消息失败", e)
+                FileLogger.e("ChatViewModel", "发送消息失败: ${e.message}", e)
                 updateModelMessage(modelMsgId, "\n\n[错误: ${e.message}]", false)
                 finalizeModelMessage(modelMsgId)
             }
@@ -601,8 +601,8 @@ class ChatViewModel(
                     _state.update { it.copy(inputText = result) }
                 }
             } catch (e: Exception) {
-                Log.e("ChatViewModel", "optimizeInput error", e)
-                FileLogger.e("ChatViewModel", "optimizeInput error: ${e.message}", e)
+                Log.e("ChatViewModel", "优化输入失败", e)
+                FileLogger.e("ChatViewModel", "优化输入失败: ${e.message}", e)
             } finally {
                 _state.update { it.copy(isOptimizing = false) }
             }
@@ -653,7 +653,7 @@ class ChatViewModel(
     ) {
         val conv = activeConversation
         if (conv == null) {
-            Log.e("ChatViewModel", "processLocalMessage: activeConversation is null")
+            Log.e("ChatViewModel", "本地对话失败: 活跃会话为空")
             updateModelMessage(msgId, "\n\n[错误: 模型会话未就绪]", false)
             finalizeModelMessage(msgId)
             _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
@@ -748,7 +748,7 @@ class ChatViewModel(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
-            FileLogger.e("ChatViewModel", "processLocalMessage failed: ${e.message}", e)
+            FileLogger.e("ChatViewModel", "本地对话处理失败: ${e.message}", e)
             updateModelMessage(currentMsgId, "\n\n[错误: ${e.message}]", false)
         } finally {
             finalizeModelMessage(currentMsgId, channelContent = channelContent)
@@ -796,8 +796,9 @@ class ChatViewModel(
                 if (msg.content.isNotBlank() || msg.role == ChatRole.Model) historyMessages.add(msg)
             }
         }
+        val compressed = compressMessages(historyMessages.toList())
         historyMessages.clear()
-        historyMessages.addAll(compressMessages(historyMessages))
+        historyMessages.addAll(compressed)
         val editorCtx = buildEditorContext()
         if (editorCtx.isNotBlank()) {
             historyMessages.add(ChatMessage(role = ChatRole.System, content = editorCtx))
@@ -854,8 +855,8 @@ class ChatViewModel(
                     errMsg.contains("too many tokens", ignoreCase = true) ||
                     errMsg.contains("maximum prompt length", ignoreCase = true)
                 if (isContextError && historyMessages.size > 3) {
-                    Log.w("ChatViewModel", "context length exceeded, force compressing history")
-                    FileLogger.w("ChatViewModel", "context length exceeded, force compressing history")
+                    Log.w("ChatViewModel", "上下文长度超限，强制压缩历史")
+                    FileLogger.w("ChatViewModel", "上下文长度超限，强制压缩历史")
                     val forcedThreshold = (getContextWindow() * 0.5).toInt()
                     historyMessages.clear()
                     historyMessages.addAll(compressMessages(historyMessages, forcedThreshold))
@@ -869,8 +870,8 @@ class ChatViewModel(
                     cloudRounds--
                     continue
                 }
-                Log.e("ChatViewModel", "cloudSendMessage failed", e)
-                FileLogger.e("ChatViewModel", "cloudSendMessage failed: ${errMsg}", e)
+                Log.e("ChatViewModel", "发送到云端失败", e)
+                FileLogger.e("ChatViewModel", "发送到云端失败: ${errMsg}", e)
                 recordUsage(LlmCallRecord(
                     modelName = cfg.modelName,
                     provider = "cloud",
@@ -1081,7 +1082,9 @@ class ChatViewModel(
         } else s.conversations
         _state.update {
             it.copy(messages = emptyList(), inputText = "", isLoading = false,
-                conversations = updatedConversations, activeConversationId = null)
+                conversations = updatedConversations, activeConversationId = null,
+                isContextCompressed = false, contextCompressedTokens = 0, contextCompressedCount = 0,
+                contextSummary = "")
         }
         viewModelScope.launch(Dispatchers.IO) {
             closeConversation()

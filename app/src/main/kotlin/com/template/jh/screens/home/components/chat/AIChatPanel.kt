@@ -105,6 +105,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -347,7 +348,7 @@ private fun ChatTopBar(
             // 历史按钮 + 下拉
             Box {
                 IconButton(onClick = onHistoryClick, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.History, stringResource(R.string.ai_history), Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
-                DropdownMenu(expanded = isHistoryOpen, onDismissRequest = onDismissHistory, modifier = Modifier.widthIn(min = 200.dp)) {
+                DropdownMenu(expanded = isHistoryOpen, onDismissRequest = onDismissHistory, modifier = Modifier.widthIn(min = 200.dp).heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.75f).dp)) {
                     if (conversations.isEmpty()) {
                         DropdownMenuItem(
                             text = { Text("暂无历史对话", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) },
@@ -737,6 +738,7 @@ private fun ChatInputBar(
                 DropdownMenu(
                     expanded = showOptimizeModeMenu,
                     onDismissRequest = { showOptimizeModeMenu = false },
+                    modifier = Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.75f).dp)
                 ) {
                     com.template.jh.core.ai.InputOptimizer.Mode.entries.forEach { mode ->
                         DropdownMenuItem(

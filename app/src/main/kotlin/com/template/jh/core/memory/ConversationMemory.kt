@@ -100,7 +100,7 @@ class ConversationMemory(private val context: Context) {
         // Layer 2: 短期
         shortTerm.add(entry)
 
-        Log.d(TAG, "addEntry: role=$role id=${entry.id} cat=${entry.category} kw=${entry.keywords.size}")
+        Log.d(TAG, "添加条目: role=$role id=${entry.id} cat=${entry.category} kw=${entry.keywords.size}")
     }
 
     /** 从对话消息批量添加（每轮调用一次） */
@@ -146,13 +146,11 @@ class ConversationMemory(private val context: Context) {
         val sb = StringBuilder()
         sb.appendLine("【对话历史记忆】")
 
-        // Layer 2: 最近几条摘要（优先当前对话）
+        // Layer 2: 最近几条摘要（严格按对话隔离，避免历史对话注入当前对话）
         val recentEntries = if (conversationId.isNotBlank()) {
-            val current = shortTerm.filter { it.conversationId == conversationId }.takeLast(3)
-            val others = shortTerm.filter { it.conversationId != conversationId }.takeLast(3 - current.size)
-            (current + others)
+            shortTerm.filter { it.conversationId == conversationId }.takeLast(3)
         } else {
-            shortTerm.takeLast(3)
+            emptyList()
         }
         if (recentEntries.isNotEmpty()) {
             sb.appendLine("--- 近期对话回顾 ---")
@@ -320,11 +318,11 @@ class ConversationMemory(private val context: Context) {
                 }
             }
 
-            Log.d(TAG, "loaded: ${keyFacts.size} facts, ${shortTerm.size} shortTerm")
-            FileLogger.d(TAG, "loaded: ${keyFacts.size} facts, ${shortTerm.size} shortTerm")
+            Log.d(TAG, "加载完成: ${keyFacts.size} 条关键事实, ${shortTerm.size} 条短期记忆")
+            FileLogger.d(TAG, "加载完成: ${keyFacts.size} 条关键事实, ${shortTerm.size} 条短期记忆")
         } catch (e: Exception) {
-            Log.w(TAG, "load failed: ${e.message}")
-            FileLogger.w(TAG, "load failed: ${e.message}")
+            Log.w(TAG, "加载失败: ${e.message}")
+            FileLogger.w(TAG, "加载失败: ${e.message}")
         }
     }
 
@@ -358,10 +356,10 @@ class ConversationMemory(private val context: Context) {
             memoryFile.writeText(root.toString(2))
             keyFactsDirty = false
 
-            Log.d(TAG, "saved: ${keyFacts.size} facts, ${shortTerm.size} shortTerm")
-            FileLogger.d(TAG, "saved: ${keyFacts.size} facts, ${shortTerm.size} shortTerm")
+            Log.d(TAG, "保存完成: ${keyFacts.size} 条关键事实, ${shortTerm.size} 条短期记忆")
+            FileLogger.d(TAG, "保存完成: ${keyFacts.size} 条关键事实, ${shortTerm.size} 条短期记忆")
         } catch (e: Exception) {
-            Log.w(TAG, "save failed: ${e.message}")
+            Log.w(TAG, "保存失败: ${e.message}")
         }
     }
 
@@ -371,7 +369,7 @@ class ConversationMemory(private val context: Context) {
         keyFacts.clear()
         keyFactsDirty = true
         memoryDir.deleteRecursively()
-        Log.d(TAG, "memory cleared, disk files removed")
+        Log.d(TAG, "记忆已清除, 磁盘文件已删除")
     }
 
     // === 内部方法 ===

@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -562,6 +563,7 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
 
     // 添加/编辑对话框
     if (showEditDialog) {
+        val cloudDialogMaxHeight = with(LocalConfiguration.current) { (screenHeightDp.dp * 0.75f).coerceAtLeast(200.dp) }
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showEditDialog = false },
             title = { 
@@ -572,7 +574,12 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                 }) 
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = cloudDialogMaxHeight)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     // 步骤0: 选择厂商
                     if (editStep == 0 && editingProfile == null) {
                         vendorPresets.forEach { vendor ->
@@ -640,9 +647,11 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                                     IconButton(onClick = { showModelDropdown = true }) {
                                         Icon(Icons.Default.ArrowDropDown, "选择模型", tint = MaterialTheme.colorScheme.primary)
                                     }
+                                    val screenHeightDp = LocalConfiguration.current.screenHeightDp
                                     DropdownMenu(
                                         expanded = showModelDropdown,
-                                        onDismissRequest = { showModelDropdown = false }
+                                        onDismissRequest = { showModelDropdown = false },
+                                        modifier = Modifier.heightIn(max = (screenHeightDp * 0.75f).dp)
                                     ) {
                                         availableModels.forEach { model ->
                                             DropdownMenuItem(
@@ -712,8 +721,8 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                                         } catch (e: Exception) {
                                             isTesting = false
                                             testResult = "测试失败: ${e.message}"
-                                            Log.e("CloudModelCard", "Test connection error", e)
-                                            FileLogger.e("CloudModelCard", "testConnection error: ${e.message}", e)
+                                            Log.e("CloudModelCard", "测试连接失败", e)
+                                            FileLogger.e("CloudModelCard", "测试连接失败: ${e.message}", e)
                                         }
                                     }
                                 },
@@ -743,8 +752,8 @@ private fun CloudModelCard(chatViewModel: ChatViewModel, chatState: com.template
                                         } catch (e: Exception) {
                                             isFetchingModels = false
                                             availableModels = emptyList()
-                                            Log.e("CloudModelCard", "Fetch models error", e)
-                                            FileLogger.e("CloudModelCard", "fetchModels error: ${e.message}", e)
+                                            Log.e("CloudModelCard", "获取模型列表失败", e)
+                                            FileLogger.e("CloudModelCard", "获取模型列表失败: ${e.message}", e)
                                         }
                                     }
                                 },
@@ -952,11 +961,17 @@ private fun RulesSettingsContent(
 
     // 添加/编辑对话框
     if (showAddDialog) {
+        val ruleDialogMaxHeight = with(LocalConfiguration.current) { (screenHeightDp.dp * 0.75f).coerceAtLeast(200.dp) }
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showAddDialog = false },
             title = { Text(if (editingRuleId != null) "编辑规则" else "添加规则") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = ruleDialogMaxHeight)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     OutlinedTextField(
                         value = editName,
                         onValueChange = { editName = it },
@@ -1664,11 +1679,17 @@ private fun McpSettingsContent(
     }
 
     if (showDialog) {
+        val mcpDialogMaxHeight = with(LocalConfiguration.current) { (screenHeightDp.dp * 0.75f).coerceAtLeast(200.dp) }
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showDialog = false },
             title = { Text(if (editingId != null) "编辑 MCP 服务器" else "添加 MCP 服务器") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = mcpDialogMaxHeight)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text("粘贴 JSON 配置", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedTextField(
                         value = jsonInput,

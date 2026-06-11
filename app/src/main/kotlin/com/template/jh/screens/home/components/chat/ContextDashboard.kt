@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -50,7 +51,7 @@ fun ContextDashboard(
     var activeLayer by remember { mutableIntStateOf(0) } // 0=概览, 1=Token详情, 2=记忆详情, 3=时间线
 
     val dialogMaxHeight = with(androidx.compose.ui.platform.LocalConfiguration.current) {
-        (screenHeightDp.dp * 0.85f).coerceAtLeast(300.dp)
+        (screenHeightDp.dp * 0.75f).coerceAtLeast(300.dp)
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -128,7 +129,7 @@ private fun TabBar(active: Int, onSelect: (Int) -> Unit) {
         "记忆" to Icons.Default.Memory,
         "时间线" to Icons.Default.Timeline,
     )
-    ScrollableTabRow(
+    PrimaryScrollableTabRow(
         selectedTabIndex = active,
         modifier = Modifier.fillMaxWidth(),
         containerColor = MaterialTheme.colorScheme.surface,
@@ -242,7 +243,7 @@ private fun OverviewLayer(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        MetricCard("消息", "${snapshot.messageCount}", Icons.Default.Chat, Color(0xFF4CAF50),
+        MetricCard("消息", "${snapshot.messageCount}", Icons.AutoMirrored.Filled.Chat, Color(0xFF4CAF50),
             Modifier.weight(1f))
         MetricCard("工具", "${snapshot.toolCallCount}", Icons.Default.Build, Color(0xFFFF9800),
             Modifier.weight(1f))

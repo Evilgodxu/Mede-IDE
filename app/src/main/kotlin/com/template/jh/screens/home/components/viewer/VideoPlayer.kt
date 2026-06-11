@@ -44,7 +44,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import kotlinx.coroutines.delay
 import java.io.File
 
@@ -297,6 +300,17 @@ private fun FullscreenOverlay(
     onToggleControls: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val view = LocalView.current
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val window = (view.context as? android.app.Activity)?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        controller?.hide(WindowInsetsCompat.Type.systemBars())
+        controller?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        onDispose {
+            controller?.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(
@@ -365,14 +379,16 @@ private fun FullscreenOverlay(
             // 点击切换控制层
             Box(Modifier.fillMaxSize().clickable { onToggleControls() })
 
-            // 底部控制栏（与主播放器相同布局）
+            // 底部居中控制栏
             if (controlsVisible) {
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .background(Color(0x99000000)),
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    // 进度滑块
                     if (state.isPrepared && state.duration > 0) {
                         Slider(
                             value = (state.currentPosition / state.duration).coerceIn(0f, 1f),
@@ -389,46 +405,49 @@ private fun FullscreenOverlay(
                             ),
                         )
                     }
+                    // 时间
+                    Text(
+                        "${formatDuration(state.currentPosition.toInt())} / ${formatDuration(state.duration.toInt())}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFCCCCCC),
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
+                    // 控制按钮行（居中）
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
                     ) {
                         IconButton(onClick = {
                             val pos = ((state.currentPosition - 15000).toInt()).coerceAtLeast(0)
                             state.mediaPlayer?.seekTo(pos)
                             state.currentPosition = pos.toFloat()
-                        }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.SkipPrevious, null, Modifier.size(22.dp), tint = Color.White)
+                        }, modifier = Modifier.size(44.dp)) {
+                            Icon(Icons.Default.SkipPrevious, null, Modifier.size(28.dp), tint = Color.White)
                         }
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(8.dp))
                         IconButton(onClick = {
                             state.mediaPlayer?.let {
                                 if (it.isPlaying) { it.pause(); state.isPlaying = false }
                                 else { it.start(); state.isPlaying = true }
                             }
-                        }, modifier = Modifier.size(44.dp)) {
+                        }, modifier = Modifier.size(56.dp)) {
                             Icon(
                                 if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                null, Modifier.size(28.dp), tint = Color.White,
+                                null, Modifier.size(36.dp), tint = Color.White,
                             )
                         }
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(8.dp))
                         IconButton(onClick = {
                             val pos = ((state.currentPosition + 15000).toInt()).coerceAtMost(state.duration.toInt())
                             state.mediaPlayer?.seekTo(pos)
                             state.currentPosition = pos.toFloat()
-                        }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.SkipNext, null, Modifier.size(22.dp), tint = Color.White)
+                        }, modifier = Modifier.size(44.dp)) {
+                            Icon(Icons.Default.SkipNext, null, Modifier.size(28.dp), tint = Color.White)
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            "${formatDuration(state.currentPosition.toInt())} / ${formatDuration(state.duration.toInt())}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFFCCCCCC),
-                        )
-                        Spacer(Modifier.weight(1f))
-                        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.FullscreenExit, null, Modifier.size(22.dp), tint = Color.White)
+                        Spacer(Modifier.width(16.dp))
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(44.dp)) {
+                            Icon(Icons.Default.FullscreenExit, null, Modifier.size(28.dp), tint = Color.White)
                         }
                     }
                 }

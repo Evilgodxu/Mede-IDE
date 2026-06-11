@@ -69,7 +69,7 @@ object FileLogger {
             sb.append(primary.readText())
             sb.toString()
         } catch (e: Exception) {
-            Log.e(TAG, "readAll failed", e)
+            Log.e(TAG, "读取全部日志失败", e)
             ""
         }
     }
@@ -77,6 +77,7 @@ object FileLogger {
     /** 获取日志文件目录路径 */
     fun getLogDir(): String = logDir?.absolutePath ?: ""
 
+    @Synchronized
     private fun write(level: Char, tag: String, msg: String, tr: Throwable?) {
         val dir = logDir ?: return
         val file = File(dir, LOG_NAME)
@@ -96,7 +97,7 @@ object FileLogger {
             }
             file.appendText(entry)
         } catch (e: Exception) {
-            Log.e(TAG, "write failed", e)
+            Log.e(TAG, "写入日志失败", e)
         }
     }
 

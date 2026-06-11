@@ -84,6 +84,8 @@ fun ResourcePanel(
     onMerge: (oldPath: String, newPath: String) -> Unit = { _, _ -> },
     onOpenAsProject: ((String) -> Unit)? = null,
     projectDirPath: String = "",
+    isSecondPaneExpanded: Boolean = false,
+    onSecondPaneExpandedChange: (Boolean) -> Unit = {},
 ) {
     data class Pane(
         val path: String,
@@ -114,9 +116,6 @@ fun ResourcePanel(
 
     // 上一个交互的列（0=左，1=右）—— 决定底部工具栏作用于哪一列
     var lastInteractedPane by remember { mutableStateOf(0) }
-
-    // 第二列展开状态
-    var isSecondPaneExpanded by remember { mutableStateOf(false) }
 
     // 对话框状态
     var renameTarget by remember { mutableStateOf<ResourceNode?>(null) }
@@ -335,9 +334,18 @@ fun ResourcePanel(
                 // 展开/收起第二列
                 IconButton(
                     onClick = {
-                        isSecondPaneExpanded = !isSecondPaneExpanded
-                        if (!isSecondPaneExpanded) {
+                        val next = !isSecondPaneExpanded
+                        onSecondPaneExpandedChange(next)
+                        if (!next) {
                             rightPane.value = null
+                        } else if (rightPane.value == null) {
+                            val lp = leftPane.value
+                            if (lp != null) {
+                                onListChildren(lp.path) { children ->
+                                    rightPane.value = Pane(lp.path, lp.displayName, children)
+                                    pushRightHistory(rightPane.value!!)
+                                }
+                            }
                         }
                     },
                     modifier = Modifier.size(32.dp),
@@ -724,7 +732,7 @@ fun ResourcePanel(
                     IconButton(
                         onClick = {
                             onListChildren("") { children ->
-                                val newPane = Pane("", openedFolderName ?: "", children)
+                                val newPane = Pane("", openedFolderName, children)
                                 if (lastInteractedPane == 0) {
                                     leftPane.value = newPane
                                     pushLeftHistory(newPane)
@@ -841,7 +849,7 @@ private fun FileListPaneContent(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .combinedClickable(onClick = { onInteracted(); onNavigateUp!!() })
+                                .combinedClickable(onClick = { onInteracted(); onNavigateUp() })
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -988,10 +996,10 @@ private fun FileListPaneContent(
                                 onDelete(node.relativePath)
                             }
                         },
-                        onCopyToLeft = onCopyToLeft?.let { { onInteracted(); it(path) } },
-                        onCopyToRight = onCopyToRight?.let { { onInteracted(); it(path) } },
-                        onMoveToLeft = onMoveToLeft?.let { { onInteracted(); it(path) } },
-                        onMoveToRight = onMoveToRight?.let { { onInteracted(); it(path) } },
+                        onCopyToLeft = onCopyToLeft?.let { cb -> { onInteracted(); cb(path) } },
+                        onCopyToRight = onCopyToRight?.let { cb -> { onInteracted(); cb(path) } },
+                        onMoveToLeft = onMoveToLeft?.let { cb -> { onInteracted(); cb(path) } },
+                        onMoveToRight = onMoveToRight?.let { cb -> { onInteracted(); cb(path) } },
                         onExtractToLeft = onExtractToLeft?.let { { paths -> onInteracted(); it(paths) } },
                         onExtractToRight = onExtractToRight?.let { { paths -> onInteracted(); it(paths) } },
                         onCopyName = {
@@ -1024,6 +1032,7 @@ private fun FileListPaneContent(
             }
         }
     }
+}
 }
 
 private fun formatFileSize(bytes: Long): String = when {

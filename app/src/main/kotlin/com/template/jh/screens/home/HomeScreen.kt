@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -26,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.TextFieldValue
@@ -75,48 +80,22 @@ fun HomeScreen(
     var cursorLine by remember { mutableIntStateOf(0) }
     var cursorLineContent by remember { mutableStateOf("") }
     var previewModeTabs by remember { mutableStateOf(setOf<String>()) }
+    var isResourceSecondPaneExpanded by remember { mutableStateOf(false) }
 
     val fileManager = org.koin.java.KoinJavaComponent.get<FileManager>(FileManager::class.java)
     val editorState = rememberEditorScreenState(chatViewModel, fileManager)
     val audioPlaybackState = remember { com.template.jh.screens.home.components.audio.AudioPlaybackState() }
     val videoPlaybackState = remember { com.template.jh.screens.home.components.viewer.VideoPlaybackState() }
 
-    // 权限请求状态：后台轮询检测，授权后自动从设置页返回应用
-    var permissionPolling by remember { mutableStateOf(false) }
-
-    // 启动时检测已有权限：自动打开存储目录，无需用户额外点击
+    // 每次启动时检测权限，已有权限则自动打开存储目录
     LaunchedEffect(Unit) {
-        if (Environment.isExternalStorageManager() && homeState.openedFolderName == null) {
+        if (Environment.isExternalStorageManager()) {
             viewModel.openDirectStorage()
             viewModel.recordRecentFolder("/storage/emulated/0", "存储根目录")
             chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
             selectedTab = SidebarTab.Explorer
         }
     }
-
-    // 轮询等待授权：后台持续检测，一旦通过立即打开存储根目录并自动返回应用
-    LaunchedEffect(permissionPolling) {
-        if (!permissionPolling) return@LaunchedEffect
-        while (true) {
-            if (Environment.isExternalStorageManager()) {
-                viewModel.openDirectStorage()
-                viewModel.recordRecentFolder("/storage/emulated/0", "存储根目录")
-                chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
-                selectedTab = SidebarTab.Explorer
-                permissionPolling = false
-                // 自动从系统设置页返回应用
-                val bringIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
-                    flags = android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-                }
-                bringIntent?.let { context.startActivity(it) }
-                break
-            }
-            kotlinx.coroutines.delay(500)
-        }
-    }
-
-
-    // 首次启动不做任何权限操作，等用户点"授权文件管理"按钮
 
     // Tab 持久化
     editorState.onSaveTabs = {
@@ -245,7 +224,7 @@ fun HomeScreen(
         }
     }
 
-    /** 授权文件管理按钮：有权限直接打开，无权限跳系统设置并后台轮询自动返回 */
+    /** 授权文件管理按钮：有权限直接打开，无权限跳系统设置 */
     val onOpenFolder: () -> Unit = {
         if (Environment.isExternalStorageManager()) {
             viewModel.openDirectStorage()
@@ -253,13 +232,28 @@ fun HomeScreen(
             chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
             selectedTab = SidebarTab.Explorer
         } else {
-            val intent = android.content.Intent(
-                android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
-            ).apply {
-                data = android.net.Uri.parse("package:${context.packageName}")
+            try {
+                val intent = android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
+                ).apply {
+                    data = android.net.Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(intent)
+            } catch (_: android.content.ActivityNotFoundException) {
+                // 部分设备不支持包名定向，降级到通用权限列表页
+                try {
+                    val fallback = android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
+                    ).apply {
+                        data = android.net.Uri.parse("package:${context.packageName}")
+                    }
+                    context.startActivity(fallback)
+                } catch (e: Exception) {
+                    android.util.Log.e("HomeScreen", "降级权限意图也失败", e)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("HomeScreen", "打开系统权限设置失败", e)
             }
-            context.startActivity(intent)
-            permissionPolling = true
         }
     }
 
@@ -415,6 +409,8 @@ fun HomeScreen(
                     viewModel = viewModel,
                     chatViewModel = chatViewModel,
                     editorState = editorState,
+                    isResourceSecondPaneExpanded = isResourceSecondPaneExpanded,
+                    onResourceSecondPaneExpandedChange = { isResourceSecondPaneExpanded = it },
                     onFileClick = { fileItem ->
                         // 文本文件使用 filePath（相对/绝对均可，EditorScreenState 会处理)
                         // 非文本文件需要绝对路径或 content:// URI
@@ -469,6 +465,7 @@ fun HomeScreen(
                 )
             },
             isLeftPanelVisible = selectedTab != null,
+            isLeftPanelExpanded = isResourceSecondPaneExpanded,
             centerContent = {
                 MainContentArea(
                     onOpenFolder = onOpenFolder,
@@ -566,11 +563,21 @@ fun HomeScreen(
         )
     }
 
+    val dialogMaxHeight = with(LocalConfiguration.current) { (screenHeightDp.dp * 0.75f).coerceAtLeast(200.dp) }
+
     if (showNewFileDialog) {
         AlertDialog(
             onDismissRequest = { showNewFileDialog = false },
             title = { Text(stringResource(R.string.dialog_new_file_title)) },
-            text = { OutlinedTextField(value = newFileName, onValueChange = { newFileName = it }, placeholder = { Text(stringResource(R.string.dialog_new_file_name_hint)) }, singleLine = true) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = dialogMaxHeight)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    OutlinedTextField(value = newFileName, onValueChange = { newFileName = it }, placeholder = { Text(stringResource(R.string.dialog_new_file_name_hint)) }, singleLine = true)
+                }
+            },
             confirmButton = { TextButton(onClick = { val name = newFileName.trim(); if (name.isNotEmpty()) { viewModel.createFile("", name, false); selectedTab = SidebarTab.Explorer; showNewFileDialog = false } }) { Text(stringResource(R.string.dialog_confirm)) } },
             dismissButton = { TextButton(onClick = { showNewFileDialog = false }) { Text(stringResource(R.string.chat_cancel)) } },
         )
@@ -579,7 +586,15 @@ fun HomeScreen(
         AlertDialog(
             onDismissRequest = { showNewFolderDialog = false },
             title = { Text(stringResource(R.string.dialog_new_folder_title)) },
-            text = { OutlinedTextField(value = newFolderName, onValueChange = { newFolderName = it }, placeholder = { Text(stringResource(R.string.dialog_new_folder_name_hint)) }, singleLine = true) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = dialogMaxHeight)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    OutlinedTextField(value = newFolderName, onValueChange = { newFolderName = it }, placeholder = { Text(stringResource(R.string.dialog_new_folder_name_hint)) }, singleLine = true)
+                }
+            },
             confirmButton = { TextButton(onClick = { val name = newFolderName.trim(); if (name.isNotEmpty()) { viewModel.createFile("", name, true); selectedTab = SidebarTab.Explorer; showNewFolderDialog = false } }) { Text(stringResource(R.string.dialog_save)) } },
             dismissButton = { TextButton(onClick = { showNewFolderDialog = false }) { Text(stringResource(R.string.chat_cancel)) } },
         )
@@ -594,6 +609,8 @@ private fun LeftPanelContent(
     viewModel: HomeViewModel,
     chatViewModel: ChatViewModel,
     editorState: EditorScreenState,
+    isResourceSecondPaneExpanded: Boolean = false,
+    onResourceSecondPaneExpandedChange: (Boolean) -> Unit = {},
     onFileClick: (FileItem) -> Unit = {},
     onAddToConversation: (FileItem) -> Unit = {},
     onOpenFileTab: (String) -> Unit = {},
@@ -636,6 +653,8 @@ private fun LeftPanelContent(
                     viewModel.openAsProjectDirectory(filePath)
                 },
                 projectDirPath = homeState.projectDirPath,
+                isSecondPaneExpanded = isResourceSecondPaneExpanded,
+                onSecondPaneExpandedChange = onResourceSecondPaneExpandedChange,
             )
         }
         SidebarTab.Search -> {

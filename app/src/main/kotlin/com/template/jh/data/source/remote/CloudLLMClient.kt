@@ -151,7 +151,7 @@ class CloudLLMClient(private val context: Context) {
 
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                val errorBody = response.body.string() ?: response.message
+                val errorBody = response.body.string()
                 throw RuntimeException("API error ${response.code}: $errorBody")
             }
             response.body.let { body ->
@@ -235,7 +235,7 @@ class CloudLLMClient(private val context: Context) {
             val response = client.newCall(request).execute()
             val code = response.code
             val msg = if (code == 200) "ok" else {
-                "error $code: ${response.body.string()?.take(200) ?: response.message}"
+                "error $code: ${response.body.string().take(200)}"
             }
             response.close()
             msg
@@ -256,7 +256,7 @@ class CloudLLMClient(private val context: Context) {
                 .build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) { response.close(); return@withContext emptyList() }
-            val bodyStr = response.body.string() ?: return@withContext emptyList()
+            val bodyStr = response.body.string()
             val json = JSONObject(bodyStr)
             val data = json.optJSONArray("data") ?: return@withContext emptyList()
             val models = mutableListOf<String>()

@@ -112,7 +112,7 @@ fun AudioControl(
             DropdownMenu(
                 expanded = musicMenuExpanded,
                 onDismissRequest = { musicMenuExpanded = false },
-                modifier = Modifier.widthIn(min = 200.dp, max = 300.dp).heightIn(max = 320.dp)
+                modifier = Modifier.widthIn(min = 200.dp, max = 300.dp).heightIn(max = dropdownMaxHeight)
             ) {
                 if (scannedAudioTracks.isEmpty()) {
                     DropdownMenuItem(

@@ -1,6 +1,7 @@
 package com.template.jh.screens.home.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
@@ -23,10 +25,17 @@ fun ThreeColumnLayout(
     sidebar: @Composable () -> Unit,
     leftPanel: @Composable () -> Unit,
     isLeftPanelVisible: Boolean,
+    isLeftPanelExpanded: Boolean = false,
     centerContent: @Composable () -> Unit,
     rightPanel: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val leftPanelWidth by animateDpAsState(
+        targetValue = if (isLeftPanelExpanded) 360.dp else 180.dp,
+        animationSpec = tween(durationMillis = 200),
+        label = "leftPanelWidth"
+    )
+
     Row(
         modifier = modifier
             .fillMaxSize()
@@ -47,7 +56,7 @@ fun ThreeColumnLayout(
         ) {
             Column(
                 modifier = Modifier
-                    .width(180.dp)
+                    .width(leftPanelWidth)
                     .fillMaxHeight()
             ) {
                 leftPanel()
