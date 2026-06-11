@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.template.jh.core.utils.TermuxShell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -103,7 +104,7 @@ fun TerminalPanel(
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                "Mede 终端",
+                "Android 终端",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -259,19 +260,24 @@ private fun TerminalOutputLineItem(line: TerminalOutputLine) {
 }
 
 /**
- * 执行shell命令
+ * 执行shell命令（优先使用 Termux，不可用时回退系统 shell）
  */
 private fun executeShellCommand(command: String, workingDir: String): String {
-    return try {
-        val process = ProcessBuilder("sh", "-c", command)
-            .directory(java.io.File(workingDir))
-            .redirectErrorStream(true)
-            .start()
-
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        process.waitFor()
-        output
-    } catch (e: Exception) {
-        "Error: ${e.message}"
+    return if (TermuxShell.isAvailable) {
+        val fullCmd = "cd \"$workingDir\" && $command"
+        TermuxShell.execOrNull(fullCmd) ?: TermuxShell.exec(fullCmd).second
+    } else {
+        try {
+            val process = ProcessBuilder("sh", "-c", command)
+                .directory(java.io.File(workingDir))
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor()
+            output
+        } catch (e: Exception) {
+            "Error: ${e.message}"
+        }
     }
 }
+

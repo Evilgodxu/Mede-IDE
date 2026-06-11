@@ -1,6 +1,9 @@
 package com.template.jh.screens.permission
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -26,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -59,6 +63,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -72,11 +77,16 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.template.jh.data.permission.PermissionType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -85,6 +95,16 @@ private const val WELCOME_PAGE_INDEX = INTRO_PAGES_COUNT
 private const val BASIC_PERMISSIONS_PAGE_INDEX = INTRO_PAGES_COUNT + 1
 private const val TOTAL_PAGES_COUNT = INTRO_PAGES_COUNT + 2
 
+// 从 ContextWrapper 链中解包出原始 Activity（兼容 ProvideLocalizedContext 等 Context 包装）
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return ctx as? Activity
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PermissionGuideScreen(
@@ -92,6 +112,8 @@ fun PermissionGuideScreen(
     onComplete: () -> Unit
 ) {
     val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
 
     val uiState by viewModel.uiState.collectAsState()
@@ -99,7 +121,25 @@ fun PermissionGuideScreen(
 
     var showPermissionWarning by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) { viewModel.checkPermissions(context) }
+    LaunchedEffect(Unit) {
+        viewModel.initMonitor(context)
+        viewModel.checkPermissions(context)
+    }
+
+    // 生命周期监听：从系统设置返回时停止权限监控并刷新状态
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.stopPermissionMonitor()
+                viewModel.checkPermissions(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.stopPermissionMonitor()
+        }
+    }
 
     // 存储权限请求启动器 (适用于Android 10及以下版本)
     val storagePermissionLauncher =
@@ -134,6 +174,7 @@ fun PermissionGuideScreen(
     }
 
     if (showPermissionWarning) {
+        val dialogMaxHeight = with(LocalConfiguration.current) { (screenHeightDp.dp * 0.75f).coerceAtLeast(200.dp) }
         AlertDialog(
             onDismissRequest = { showPermissionWarning = false },
             icon = {
@@ -150,10 +191,16 @@ fun PermissionGuideScreen(
                 )
             },
             text = {
-                Text(
-                    text = "缺少必要权限可能会影响应用功能。建议授予所有权限以获得最佳体验。",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = dialogMaxHeight)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = "缺少必要权限可能会影响应用功能。建议授予所有权限以获得最佳体验。",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
             },
             confirmButton = {
                 Button(
@@ -296,21 +343,38 @@ fun PermissionGuideScreen(
                                                         "package:${context.packageName}"
                                                     )
                                             }
-                                    context.startActivity(intent)
+                                    activity?.let { viewModel.startPermissionMonitor(PermissionType.STORAGE, it) }
+                                    activity?.startActivity(intent)
                                 } catch (e: Exception) {
                                     try {
                                         val intent =
                                             Intent(
                                                 Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
-                                            )
-                                        context.startActivity(intent)
+                                            ).apply {
+                                                data =
+                                                    Uri.parse(
+                                                        "package:${context.packageName}"
+                                                    )
+                                            }
+                                        activity?.let { viewModel.startPermissionMonitor(PermissionType.STORAGE, it) }
+                                        activity?.startActivity(intent)
                                     } catch (e2: Exception) {
-                                        Toast.makeText(
-                                            context,
-                                            "无法打开存储权限设置",
-                                            Toast.LENGTH_SHORT
-                                        )
-                                            .show()
+                                        try {
+                                            val intent =
+                                                Intent(
+                                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                    Uri.parse("package:${context.packageName}")
+                                                )
+                                            activity?.let { viewModel.startPermissionMonitor(PermissionType.STORAGE, it) }
+                                            activity?.startActivity(intent)
+                                        } catch (e3: Exception) {
+                                            Toast.makeText(
+                                                context,
+                                                "无法打开存储权限设置",
+                                                Toast.LENGTH_SHORT
+                                            )
+                                                .show()
+                                        }
                                     }
                                 }
                             } else {
@@ -336,7 +400,8 @@ fun PermissionGuideScreen(
                                                         context.packageName
                                                 )
                                         }
-                                context.startActivity(intent)
+                                activity?.let { viewModel.startPermissionMonitor(PermissionType.BATTERY_OPTIMIZATION, it) }
+                                activity?.startActivity(intent)
                             } catch (e: Exception) {
                                 // 如果直接请求失败，尝试打开电池优化设置页面
                                 try {
@@ -344,7 +409,8 @@ fun PermissionGuideScreen(
                                         Intent(
                                             Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
                                         )
-                                    context.startActivity(intent)
+                                    activity?.let { viewModel.startPermissionMonitor(PermissionType.BATTERY_OPTIMIZATION, it) }
+                                    activity?.startActivity(intent)
                                     Toast.makeText(
                                         context,
                                         "请在列表中找到应用并设置为\"不优化\"",
@@ -359,7 +425,8 @@ fun PermissionGuideScreen(
                                                 Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                                                 Uri.parse("package:" + context.packageName)
                                             )
-                                        context.startActivity(intent)
+                                        activity?.let { viewModel.startPermissionMonitor(PermissionType.BATTERY_OPTIMIZATION, it) }
+                                        activity?.startActivity(intent)
                                         Toast.makeText(
                                             context,
                                             "请在应用详情中找到电池选项并设置为\"无限制\"",

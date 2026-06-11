@@ -1,6 +1,12 @@
 package com.template.jh.screens.home.components.settings
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -8,12 +14,15 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.template.jh.core.utils.TermuxShell
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,16 +52,19 @@ fun EnvironmentSettingsContent() {
     var isChecking by remember { mutableStateOf(false) }
     var installMessage by remember { mutableStateOf<String?>(null) }
 
+    // Termux 可用性
+    val termuxAvailable = TermuxShell.isAvailable
+
     fun checkEnvironment() {
         scope.launch(Dispatchers.IO) {
             isChecking = true
             try {
-                isNodeInstalled = checkCommand("node")
-                isPnpmInstalled = checkCommand("pnpm")
-                isPythonInstalled = checkCommand("python") || checkCommand("python3")
-                isPipInstalled = checkCommand("pip") || checkCommand("pip3")
-                isOpenJdk17Installed = checkJavaVersion(17)
-                isGradleInstalled = checkCommand("gradle")
+                isNodeInstalled = TermuxShell.hasCommand("node")
+                isPnpmInstalled = TermuxShell.hasCommand("pnpm")
+                isPythonInstalled = TermuxShell.hasCommand("python") || TermuxShell.hasCommand("python3")
+                isPipInstalled = TermuxShell.hasCommand("pip") || TermuxShell.hasCommand("pip3")
+                isOpenJdk17Installed = TermuxShell.hasJavaVersion(17)
+                isGradleInstalled = TermuxShell.hasCommand("gradle")
             } finally {
                 isChecking = false
             }
@@ -65,11 +77,7 @@ fun EnvironmentSettingsContent() {
             installMessage = "安装中..."
             try {
                 for (cmd in commands) {
-                    val process = ProcessBuilder("sh", "-c", cmd)
-                        .redirectErrorStream(true)
-                        .start()
-                    val output = process.inputStream.bufferedReader().use { it.readText() }
-                    val exitCode = process.waitFor()
+                    val (exitCode, output) = TermuxShell.exec(cmd)
                     if (exitCode != 0) {
                         withContext(Dispatchers.Main) {
                             installMessage = "安装失败: $cmd\n$output"
@@ -100,10 +108,56 @@ fun EnvironmentSettingsContent() {
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 安装消息提示
-        installMessage?.let { msg ->
+        // Termux 未安装提示
+        if (!termuxAvailable) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Warning,
+                        null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            "未检测到 Termux",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        Text(
+                            "请安装 Termux 以使用开发环境自动配置功能",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+            }
+        }
+
+        // 安装消息提示
+        val context = LocalContext.current
+        installMessage?.let { msg ->
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("安装日志", msg))
+                            Toast.makeText(context, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                        }
+                    ),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
             ) {
                 Text(
@@ -126,6 +180,7 @@ fun EnvironmentSettingsContent() {
             onToggle = { showNodeJsDetail = !showNodeJsDetail },
             isInstalling = isInstallingNodeJs,
             showInstall = !nodeJsReady,
+            installEnabled = termuxAvailable,
             onInstall = {
                 isInstallingNodeJs = true
                 showNodeJsDetail = true
@@ -151,6 +206,7 @@ fun EnvironmentSettingsContent() {
             onToggle = { showPythonDetail = !showPythonDetail },
             isInstalling = isInstallingPython,
             showInstall = !pythonReady,
+            installEnabled = termuxAvailable,
             onInstall = {
                 isInstallingPython = true
                 showPythonDetail = true
@@ -176,6 +232,7 @@ fun EnvironmentSettingsContent() {
             onToggle = { showJavaDetail = !showJavaDetail },
             isInstalling = isInstallingJava,
             showInstall = !javaReady,
+            installEnabled = termuxAvailable,
             onInstall = {
                 isInstallingJava = true
                 showJavaDetail = true
@@ -221,6 +278,7 @@ private fun EnvGroupCard(
     onToggle: () -> Unit,
     isInstalling: Boolean = false,
     showInstall: Boolean = false,
+    installEnabled: Boolean = true,
     onInstall: () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit
 ) {
@@ -284,7 +342,7 @@ private fun EnvGroupCard(
                         Button(
                             onClick = onInstall,
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = !isInstalling,
+                            enabled = installEnabled && !isInstalling,
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             if (isInstalling) {
@@ -314,13 +372,11 @@ private fun EnvCheckItem(name: String, description: String, isInstalled: Boolean
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Checkbox(
-            checked = isInstalled,
-            onCheckedChange = null,
-            colors = CheckboxDefaults.colors(
-                checkedColor = MaterialTheme.colorScheme.tertiary,
-                checkmarkColor = MaterialTheme.colorScheme.onTertiary
-            )
+        Icon(
+            imageVector = if (isInstalled) Icons.Default.CheckCircle else Icons.Default.Info,
+            contentDescription = null,
+            tint = if (isInstalled) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
         )
         Spacer(Modifier.width(8.dp))
         Column {
@@ -337,30 +393,5 @@ private fun EnvCheckItem(name: String, description: String, isInstalled: Boolean
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-    }
-}
-
-private fun checkCommand(cmd: String): Boolean {
-    return try {
-        val process = ProcessBuilder("sh", "-c", "command -v $cmd")
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
-        process.waitFor() == 0 && output.isNotEmpty()
-    } catch (_: Exception) {
-        false
-    }
-}
-
-private fun checkJavaVersion(version: Int): Boolean {
-    return try {
-        val process = ProcessBuilder("sh", "-c", "java -version 2>&1 | head -1")
-            .redirectErrorStream(true)
-            .start()
-        val output = process.inputStream.bufferedReader().use { it.readText() }
-        process.waitFor()
-        output.contains("\"$version.") || output.contains("openjdk $version")
-    } catch (_: Exception) {
-        false
     }
 }

@@ -137,7 +137,7 @@ fun TreeContextMenu(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = (screenHeightDp * 0.7f).dp)
+                .heightIn(max = (screenHeightDp * 0.75f).dp)
                 .verticalScroll(scrollState)
         ) {
             // Group 1: 打开 + 添加到对话
