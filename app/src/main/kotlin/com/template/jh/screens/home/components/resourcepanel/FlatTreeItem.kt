@@ -44,7 +44,7 @@ fun FlatTreeItem(
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
-                onLongClick = { showContextMenu = true; onLongClick() },
+                onLongClick = { showContextMenu = true; onLongClick(); Unit },
             )
             .padding(start = (node.depth * 16).dp)
             .padding(vertical = 2.dp)

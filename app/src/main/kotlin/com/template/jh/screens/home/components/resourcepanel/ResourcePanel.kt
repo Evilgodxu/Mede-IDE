@@ -921,8 +921,8 @@ private fun FileListPaneContent(
                                 )
                             }
                             .combinedClickable(
-                                onClick = { onInteracted(); onFileClick(file) },
-                                onLongClick = { onInteracted(); showMenu = true },
+                                onClick = { onInteracted(); onFileClick(file); Unit },
+                                onLongClick = { onInteracted(); showMenu = true; Unit },
                             )
                             .background(bgColor)
                             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1003,15 +1003,19 @@ private fun FileListPaneContent(
                         onExtractToLeft = onExtractToLeft?.let { { paths -> onInteracted(); it(paths) } },
                         onExtractToRight = onExtractToRight?.let { { paths -> onInteracted(); it(paths) } },
                         onCopyName = {
-                            val clip = android.content.ClipData.newPlainText("fileName", node.name)
-                            (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                                .setPrimaryClip(clip)
+                            try {
+                                val clip = android.content.ClipData.newPlainText("fileName", node.name)
+                                (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                                    .setPrimaryClip(clip)
+                            } catch (_: Exception) {}
                         },
                         onCopyPath = {
-                            val fullPath = node.filePath.ifEmpty { node.relativePath }
-                            val clip = android.content.ClipData.newPlainText("path", fullPath)
-                            (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                                .setPrimaryClip(clip)
+                            try {
+                                val fullPath = node.filePath.ifEmpty { node.relativePath }
+                                val clip = android.content.ClipData.newPlainText("path", fullPath)
+                                (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                                    .setPrimaryClip(clip)
+                            } catch (_: Exception) {}
                         },
                         onViewInfo = { onInteracted(); onViewInfo(file) },
                         onCompress = {

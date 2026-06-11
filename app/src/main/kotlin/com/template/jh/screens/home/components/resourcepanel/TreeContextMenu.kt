@@ -140,11 +140,11 @@ fun TreeContextMenu(
             // Group 1: 打开 + 添加到对话
             if (!node.isDirectory && !isMultiSelect) {
                 MenuRow(
-                    left = { MenuCell("打开文件", Icons.AutoMirrored.Filled.OpenInNew, { onDismiss(); onOpenFile() }) },
-                    right = { MenuCell(stringResource(R.string.add_to_conversation), Icons.Default.Add, { onDismiss(); onAddToConversation() }) },
+                    left = { MenuCell("打开文件", Icons.AutoMirrored.Filled.OpenInNew, { onDismiss(); onOpenFile(); Unit }) },
+                    right = { MenuCell(stringResource(R.string.add_to_conversation), Icons.Default.Add, { onDismiss(); onAddToConversation(); Unit }) },
                 )
             } else {
-                MenuCell(stringResource(R.string.add_to_conversation), Icons.Default.Add, { onDismiss(); onAddToConversation() })
+                MenuCell(stringResource(R.string.add_to_conversation), Icons.Default.Add, { onDismiss(); onAddToConversation(); Unit })
             }
             HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp))
 
@@ -152,31 +152,31 @@ fun TreeContextMenu(
             if (!isMultiSelect) {
                 if (onCopyToLeft != null && onCopyToRight != null) {
                     MenuRow(
-                        left = { MenuCell("复制到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onCopyToLeft() }) },
-                        right = { MenuCell("复制到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onCopyToRight() }) },
+                        left = { MenuCell("复制到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onCopyToLeft(); Unit }) },
+                        right = { MenuCell("复制到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onCopyToRight(); Unit }) },
                     )
                 } else {
-                    onCopyToLeft?.let { MenuCell("复制到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); it() }) }
-                    onCopyToRight?.let { MenuCell("复制到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); it() }) }
+                    onCopyToLeft?.let { MenuCell("复制到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); it(); Unit }) }
+                    onCopyToRight?.let { MenuCell("复制到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); it(); Unit }) }
                 }
                 if (onMoveToLeft != null && onMoveToRight != null) {
                     MenuRow(
-                        left = { MenuCell("移动到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onMoveToLeft() }) },
-                        right = { MenuCell("移动到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onMoveToRight() }) },
+                        left = { MenuCell("移动到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onMoveToLeft(); Unit }) },
+                        right = { MenuCell("移动到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onMoveToRight(); Unit }) },
                     )
                 } else {
-                    onMoveToLeft?.let { MenuCell("移动到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); it() }) }
-                    onMoveToRight?.let { MenuCell("移动到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); it() }) }
+                    onMoveToLeft?.let { MenuCell("移动到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); it(); Unit }) }
+                    onMoveToRight?.let { MenuCell("移动到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); it(); Unit }) }
                 }
                 if (archivePath != null) {
                     if (onExtractToLeft != null && onExtractToRight != null) {
                         MenuRow(
-                            left = { MenuCell("解压到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onExtractToLeft(selectedPaths) }) },
-                            right = { MenuCell("解压到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onExtractToRight(selectedPaths) }) },
+                            left = { MenuCell("解压到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onExtractToLeft(selectedPaths); Unit }) },
+                            right = { MenuCell("解压到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onExtractToRight(selectedPaths); Unit }) },
                         )
                     } else {
-                        onExtractToLeft?.let { MenuCell("解压到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); it(selectedPaths) }) }
-                        onExtractToRight?.let { MenuCell("解压到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); it(selectedPaths) }) }
+                        onExtractToLeft?.let { MenuCell("解压到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); it(selectedPaths); Unit }) }
+                        onExtractToRight?.let { MenuCell("解压到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); it(selectedPaths); Unit }) }
                     }
                 }
                 if (hasCopyOrMove) {
@@ -187,18 +187,18 @@ fun TreeContextMenu(
             // Group 3: 目录操作
             if (node.isDirectory && !isMultiSelect) {
                 if (showOpenAsProject) {
-                    MenuCell("以工作目录打开", Icons.Default.FolderOpen, { onDismiss(); onOpenAsProject() })
+                    MenuCell("以工作目录打开", Icons.Default.FolderOpen, { onDismiss(); onOpenAsProject(); Unit })
                 }
                 val createFileFn = onCreateFile
                 val createDirFn = onCreateDirectory
                 if (createFileFn != null && createDirFn != null) {
                     MenuRow(
-                        left = { MenuCell("新建文件", Icons.Default.Add, { onDismiss(); createFileFn() }) },
-                        right = { MenuCell("新建目录", Icons.Default.Folder, { onDismiss(); createDirFn() }) },
+                        left = { MenuCell("新建文件", Icons.Default.Add, { onDismiss(); createFileFn(); Unit }) },
+                        right = { MenuCell("新建目录", Icons.Default.Folder, { onDismiss(); createDirFn(); Unit }) },
                     )
                 } else {
-                    createFileFn?.let { MenuCell("新建文件", Icons.Default.Add, { onDismiss(); it() }) }
-                    createDirFn?.let { MenuCell("新建目录", Icons.Default.Folder, { onDismiss(); it() }) }
+                    createFileFn?.let { MenuCell("新建文件", Icons.Default.Add, { onDismiss(); it(); Unit }) }
+                    createDirFn?.let { MenuCell("新建目录", Icons.Default.Folder, { onDismiss(); it(); Unit }) }
                 }
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp))
             }
@@ -206,25 +206,25 @@ fun TreeContextMenu(
             // Group 4: 重命名 + 压缩
             if (!isMultiSelect && onCompress != null) {
                 MenuRow(
-                    left = { MenuCell("重命名", Icons.Default.DriveFileRenameOutline, { onDismiss(); onRename() }) },
-                    right = { MenuCell(if (isMultiSelect) "压缩 $selectedCount 项" else "压缩", Icons.Default.Archive, { onDismiss(); onCompress() }) },
+                    left = { MenuCell("重命名", Icons.Default.DriveFileRenameOutline, { onDismiss(); onRename(); Unit }) },
+                    right = { MenuCell(if (isMultiSelect) "压缩 $selectedCount 项" else "压缩", Icons.Default.Archive, { onDismiss(); onCompress(); Unit }) },
                 )
             } else {
                 if (!isMultiSelect) {
-                    MenuCell("重命名", Icons.Default.DriveFileRenameOutline, { onDismiss(); onRename() })
+                    MenuCell("重命名", Icons.Default.DriveFileRenameOutline, { onDismiss(); onRename(); Unit })
                 }
-                onCompress?.let { MenuCell(if (isMultiSelect) "压缩 $selectedCount 项" else "压缩", Icons.Default.Archive, { onDismiss(); it() }) }
+                onCompress?.let { MenuCell(if (isMultiSelect) "压缩 $selectedCount 项" else "压缩", Icons.Default.Archive, { onDismiss(); it(); Unit }) }
             }
 
             // Group 5: 复制名称 + 复制路径
             MenuRow(
-                left = { MenuCell("复制名称", Icons.Default.ContentCopy, { onDismiss(); onCopyName() }) },
-                right = { MenuCell("复制路径", Icons.Default.ContentCopy, { onDismiss(); onCopyPath() }) },
+                left = { MenuCell("复制名称", Icons.Default.ContentCopy, { onDismiss(); onCopyName(); Unit }) },
+                right = { MenuCell("复制路径", Icons.Default.ContentCopy, { onDismiss(); onCopyPath(); Unit }) },
             )
 
             // Group 6: 查看信息
             if (onViewInfo != null && !isMultiSelect) {
-                MenuCell("查看信息", Icons.Default.Info, { onDismiss(); onViewInfo() })
+                MenuCell("查看信息", Icons.Default.Info, { onDismiss(); onViewInfo(); Unit })
             }
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp))
@@ -233,7 +233,7 @@ fun TreeContextMenu(
             MenuCell(
                 text = if (isMultiSelect) "删除 $selectedCount 项" else "删除",
                 icon = Icons.Default.Delete,
-                onClick = { onDismiss(); onDelete() },
+                onClick = { onDismiss(); onDelete(); Unit },
                 tint = MaterialTheme.colorScheme.error,
             )
         }
