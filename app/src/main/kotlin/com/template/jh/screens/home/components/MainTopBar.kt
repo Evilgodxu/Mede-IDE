@@ -107,7 +107,8 @@ fun MainTopBar(
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_close_folder)) },
                                 onClick = {
-                                    try { fileMenuExpanded = false; onCloseFolder() }
+                                    fileMenuExpanded = false
+                                    try { onCloseFolder() }
                                     catch (e: Exception) { Log.e("MainTopBar", "close folder failed", e) }
                                 }
                             )
@@ -115,14 +116,16 @@ fun MainTopBar(
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_open_file)) },
                                 onClick = {
-                                    try { fileMenuExpanded = false; onOpenFile() }
+                                    fileMenuExpanded = false
+                                    try { onOpenFile() }
                                     catch (e: Exception) { Log.e("MainTopBar", "open file failed", e) }
                                 }
                             )
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_open_folder_btn)) },
                                 onClick = {
-                                    try { fileMenuExpanded = false; onOpenFolder() }
+                                    fileMenuExpanded = false
+                                    try { onOpenFolder() }
                                     catch (e: Exception) { Log.e("MainTopBar", "open folder failed", e) }
                                 }
                             )
@@ -130,7 +133,8 @@ fun MainTopBar(
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.file_menu_save_all)) },
                                 onClick = {
-                                    try { fileMenuExpanded = false; onSaveAll() }
+                                    fileMenuExpanded = false
+                                    try { onSaveAll() }
                                     catch (e: Exception) { Log.e("MainTopBar", "save all failed", e) }
                                 }
                             )
