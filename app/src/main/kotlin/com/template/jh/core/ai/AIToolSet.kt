@@ -92,9 +92,9 @@ class AIToolSet(
         return resolvePath(path)
     }
 
-    @Tool(description = "List files and directories with [FILE]/[DIR] prefixes. Shows file sizes for files. Use absolute path (like /storage/emulated/0/...) or relative path. Leave empty to list project root.")
+    @Tool(description = "列出目录内容，显示[FILE]/[DIR]前缀和文件大小。路径支持绝对或相对，留空表示项目根目录。")
     fun listFiles(
-        @ToolParam(description = "Subdirectory path. Use absolute path (e.g. /storage/emulated/0/MyProject) or relative path from project root. Leave empty to list project root.") subPath: String = "",
+        @ToolParam(description = "目录路径，支持绝对路径或相对项目根目录，留空表示根目录") subPath: String = "",
     ): String = traceTool("listFiles", "subPath" to subPath) {
         Log.d("AIToolSet", "列出文件: subPath=$subPath")
         FileLogger.d("AIToolSet", "列出文件: subPath=$subPath")
@@ -142,21 +142,21 @@ class AIToolSet(
         fun buildToolInfoText(): String = buildString {
             appendLine("## 可用工具")
             appendLine()
-            appendLine("readFile(path, offset?, limit?) — 读取文件原始内容（无行号前缀），可直接复制用于 replaceInFile。offset 从 1 开始，limit 默认 1000。超过 500 行的文件自动仅显示前 200 行并提示用 grep 定位。")
-            appendLine("writeFile(path, content, overwrite?) — 创建新文件。overwrite 默认 false：文件已存在则拒绝并提示用 replaceInFile 修改。")
-            appendLine("replaceInFile(path, old_string, new_string, lineStart?, lineEnd?) — 替换文件中精确匹配的代码块。old_string 必须唯一，需包含足够上下文（函数签名、类名）。lineStart/lineEnd 1-based 限搜索范围，传 0 搜全文件。")
-            appendLine("batchReplaceInFile(path, editsJson) — 单次调用替换多处非重叠代码块。editsJson 为 JSON 数组 [{\"old_string\":\"...\",\"new_string\":\"...\"}]，所有匹配基于原始文件（非顺序应用），编辑不能重叠/嵌套。单个编辑用 replaceInFile。")
-            appendLine("deleteFile(path) — 永久删除文件或目录，谨慎使用。")
-            appendLine("createDirectory(path) — 创建目录，自动创建父级。嵌套路径直接传完整路径。")
-            appendLine("listFiles(subPath?) — 列出目录内容，以 [FILE]/[DIR] 前缀标识，显示文件大小。路径支持绝对或相对，留空列表项目根目录。")
-            appendLine("grep(pattern, extension?, glob?, ignoreCase?, contextLines?) — 正则搜索文件内容，返回匹配文件/行号/上下文。pattern 如 'fun\\\\s+\\\\w+' 查找函数定义。ignoreCase 默认 true，contextLines 默认 2。")
-            appendLine("glob(pattern, maxResults?) — 按文件名 glob 模式查找，如 '*.kt'、'**/*.xml'、'Main*'。递归搜索，maxResults 默认 100。")
-            appendLine("searchCodebase(query, targetDirectories?) — 语义相似度搜索代码库。用于探索不熟悉代码、按行为找实现。不知道确切术语时优先用此工具而非 grep。")
-            appendLine("runCommand(command) — 执行 Shell 命令。支持引号包裹参数，超时 30 秒，输出上限 5000 字符。")
-            appendLine("searchWeb(query) — 联网搜索最新信息，返回标题/摘要/链接（最多 8 条）。")
-            appendLine("readLints() — 读取构建/lint/编译错误，含文件路径和行号。自动运行 gradle lint。")
-            appendLine("searchConversationMemory(query) — 语义搜索历史对话，如 '我们改过哪些文件'、'上次怎么修的那个 bug'。")
-            appendLine("getRecentConversationMemory(count?) — 获取最近对话摘要，count 默认 5，上限 20。")
+            appendLine("readFile(path, offset?, limit?) — 读取文件内容，返回纯文本无行号前缀。offset 从 1 开始，limit 默认 1000。超 500 行自动截断为前 200 行。")
+            appendLine("writeFile(path, content, overwrite?) — 创建新文件。overwrite=false(默认)时若文件已存在则报错并提示用 replaceInFile；overwrite=true 则覆盖。")
+            appendLine("replaceInFile(path, old_string, new_string, lineStart?, lineEnd?) — 精确替换代码块。old_string 必须在搜索范围内唯一；可用 lineStart/lineEnd(1-based) 缩小范围，传 0 搜全文。")
+            appendLine("batchReplaceInFile(path, editsJson) — 批量编辑，一次替换多处不重叠代码。edits 基于原始文件同时匹配（非顺序应用），编辑不能重叠。单次编辑请用 replaceInFile。")
+            appendLine("deleteFile(path) — 删除文件或目录。谨慎使用，删除后无法恢复。")
+            appendLine("createDirectory(path) — 创建目录，自动创建所有父目录。支持多级路径如 'src/utils/helpers'")
+            appendLine("listFiles(subPath?) — 列出目录内容，显示 [FILE]/[DIR] 前缀和文件大小。路径支持绝对或相对，留空表示项目根目录。")
+            appendLine("grep(pattern, extension?, glob?, ignoreCase?, contextLines?) — 正则搜索文件内容，返回匹配文件、行号和上下文行。适合查找函数定义、变量使用等。")
+            appendLine("glob(pattern, maxResults?) — 按文件名 glob 模式搜索，如 '*.kt'、'Main*'。递归搜索项目根目录。适合知道文件名但不知完整路径时。")
+            appendLine("searchCodebase(query, targetDirectories?) — 语义搜索代码库，按含义查找相关代码。适合探索陌生代码或用自然语言描述找实现。比 grep 更适合模糊查询。")
+            appendLine("runCommand(command) — 执行 shell 命令，在当前项目目录下运行。超时 30 秒，输出上限 5000 字符。")
+            appendLine("searchWeb(query) — 联网搜索最新信息。获取实时数据或超出知识范围的内容。")
+            appendLine("readLints() — 读取构建/lint/编译错误，返回文件路径和行号。无缓存时自动运行 gradle lint。")
+            appendLine("searchConversationMemory(query) — 语义搜索对话历史。需要回忆之前讨论内容时使用，如 '我们改过哪些文件'、'上次怎么修的 bug'。")
+            appendLine("getRecentConversationMemory(count?) — 获取最近对话摘要，用于回顾最近几次交流内容。count 默认 5，上限 20。")
         }
 
         /** 构建 OpenAI 兼容的 tools 定义 JSON */
@@ -183,14 +183,14 @@ class AIToolSet(
         // ... memory tool definitions
         private fun buildSearchConversationMemoryTool() = toolDef(
             "searchConversationMemory",
-            "Search past conversation history by semantic meaning. Use this when you need to recall what was discussed earlier (e.g. 'what files did we modify?', 'what error did we fix?', 'what was the user's requirement?'). Searches all memory layers including short-term, summaries, and vector index.",
+            "语义搜索对话历史。需要回忆之前讨论内容时使用，如'我们改过哪些文件'、'上次怎么修的bug'。搜索所有记忆层包括短期记忆、摘要和向量索引。",
             listOf("query"),
-            "query" to p("string", "What to search for, e.g. 'file structure decision' or 'error fix'"),
+            "query" to p("string", "搜索内容，如'文件结构'或'错误修复'"),
         )
         private fun buildGetRecentConversationMemoryTool() = toolDef(
             "getRecentConversationMemory",
-            "Get summaries of the most recent conversation turns. Useful for recalling the context of the last few exchanges without needing a full search. Default returns last 5 entries.",
-            props = arrayOf("count" to p("integer", "Number of recent entries to return (default 5, max 20)")),
+            "获取最近对话摘要。用于回顾最近几次交流内容。默认返回最近5条。",
+            props = arrayOf("count" to p("integer", "最近条目数，默认5，最大20")),
         )
 
         private fun p(type: String, desc: String): org.json.JSONObject = org.json.JSONObject().apply {
@@ -207,57 +207,57 @@ class AIToolSet(
                 })
             })
         }
-        private fun buildReadFileTool() = toolDef("readFile", "Read file content with pagination", listOf("path"),
-            "path" to p("string", "File path — absolute (e.g. /storage/emulated/0/...) or relative to project root"),
-            "offset" to p("integer", "Starting line (1-based, default 1)"),
-            "limit" to p("integer", "Max lines (default 1000)"),
+        private fun buildReadFileTool() = toolDef("readFile", "读取文件内容，返回纯文本无行号前缀。支持分页：offset从1开始，limit默认1000。超500行自动截断为前200行。", listOf("path"),
+            "path" to p("string", "文件路径 — 绝对路径或相对项目根目录"),
+            "offset" to p("integer", "起始行号，从1开始计数，默认1"),
+            "limit" to p("integer", "最大读取行数，默认1000"),
         )
-        private fun buildWriteFileTool() = toolDef("writeFile", "Create file. Set overwrite=true to overwrite existing. Default refuses overwrite.", listOf("path", "content"),
-            "path" to p("string", "File path — absolute or relative to project root"),
-            "content" to p("string", "Complete file content"),
-            "overwrite" to p("boolean", "Overwrite existing file? Default false"),
+        private fun buildWriteFileTool() = toolDef("writeFile", "创建新文件。overwrite=false(默认)时若文件已存在则报错并提示用replaceInFile修改；overwrite=true则覆盖。", listOf("path", "content"),
+            "path" to p("string", "文件路径 — 绝对路径或相对项目根目录"),
+            "content" to p("string", "要写入的完整文本内容"),
+            "overwrite" to p("boolean", "是否覆盖已有文件，默认false"),
         )
-        private fun buildReplaceInFileTool() = toolDef("replaceInFile", "Edit file by replacing exact code block. Optional line range (lineStart/lineEnd) limits search scope.", listOf("path", "old_string", "new_string"),
-            "path" to p("string", "File path — absolute or relative to project root"),
-            "old_string" to p("string", "Exact code block to find (unique in file or line range)"),
-            "new_string" to p("string", "Replacement code block"),
-            "lineStart" to p("integer", "Limit search to lines from this line (1-based). 0 = whole file."),
-            "lineEnd" to p("integer", "Limit search to lines up to this line (1-based). 0 = whole file."),
+        private fun buildReplaceInFileTool() = toolDef("replaceInFile", "精确替换代码块。old_string必须在搜索范围内唯一；可用lineStart/lineEnd(1-based)缩小范围，传0搜全文。", listOf("path", "old_string", "new_string"),
+            "path" to p("string", "文件路径 — 绝对路径或相对项目根目录"),
+            "old_string" to p("string", "要查找的精确代码块，在搜索范围内必须唯一匹配"),
+            "new_string" to p("string", "替换后的新代码块"),
+            "lineStart" to p("integer", "搜索起始行(1-based)，0表示从文件开头"),
+            "lineEnd" to p("integer", "搜索结束行(1-based)，0表示到文件结尾"),
         )
-        private fun buildBatchReplaceInFileTool() = toolDef("batchReplaceInFile", "Edit file at multiple non-overlapping locations", listOf("path", "edits"),
-            "path" to p("string", "File path — absolute or relative to project root"),
-            "edits" to p("string", "JSON array: [{\"old_string\":\"...\",\"new_string\":\"...\"}]"),
+        private fun buildBatchReplaceInFileTool() = toolDef("batchReplaceInFile", "批量编辑，一次替换多处不重叠代码。edits基于原始文件同时匹配（非顺序应用），编辑不能重叠。单次编辑请用replaceInFile。", listOf("path", "edits"),
+            "path" to p("string", "文件路径 — 绝对路径或相对项目根目录"),
+            "edits" to p("string", "JSON数组：[{\"old_string\":\"原代码\",\"new_string\":\"新代码\"}]"),
         )
-        private fun buildDeleteFileTool() = toolDef("deleteFile", "Delete file or directory (permanent)", listOf("path"),
-            "path" to p("string", "File/directory path — absolute or relative to project root"),
+        private fun buildDeleteFileTool() = toolDef("deleteFile", "删除文件或目录。谨慎使用，删除后无法恢复。", listOf("path"),
+            "path" to p("string", "文件/目录路径 — 绝对路径或相对项目根目录"),
         )
-        private fun buildCreateDirectoryTool() = toolDef("createDirectory", "Create directory (auto-creates parents)", listOf("path"),
-            "path" to p("string", "Directory path — absolute or relative to project root"),
+        private fun buildCreateDirectoryTool() = toolDef("createDirectory", "创建目录，自动创建所有父目录。支持多级路径如'src/utils/helpers'", listOf("path"),
+            "path" to p("string", "目录路径 — 绝对路径或相对项目根目录"),
         )
-        private fun buildListFilesTool() = toolDef("listFiles", "List directory contents with file sizes",
-            props = arrayOf("subPath" to p("string", "Subdirectory path — absolute (e.g. /storage/emulated/0/...) or empty for root")),
+        private fun buildListFilesTool() = toolDef("listFiles", "列出目录内容，显示[FILE]/[DIR]前缀和文件大小。路径支持绝对或相对，留空表示项目根目录。",
+            props = arrayOf("subPath" to p("string", "目录路径，支持绝对路径或相对项目根目录，留空表示根目录")),
         )
-        private fun buildGrepTool() = toolDef("grep", "Search file contents by regex", listOf("pattern"),
-            "pattern" to p("string", "Regex pattern"),
-            "extension" to p("string", "File extension filter (e.g. 'kt')"),
-            "glob" to p("string", "Glob pattern filter (e.g. '*.kt')"),
-            "ignoreCase" to p("boolean", "Case insensitive (default true)"),
-            "contextLines" to p("integer", "Context lines before/after match (default 2)"),
+        private fun buildGrepTool() = toolDef("grep", "正则搜索文件内容，返回匹配文件、行号和上下文行。适合查找函数定义、变量使用等。", listOf("pattern"),
+            "pattern" to p("string", "正则表达式，如'fun\\s+\\w+'查找函数定义"),
+            "extension" to p("string", "文件扩展名过滤，如'kt'只查Kotlin，留空查所有"),
+            "glob" to p("string", "Glob模式过滤，如'*.kt'或'src/**/*.java'"),
+            "ignoreCase" to p("boolean", "忽略大小写，默认true"),
+            "contextLines" to p("integer", "匹配前后上下文行数，默认2"),
         )
-        private fun buildSearchCodebaseTool() = toolDef("searchCodebase", "Semantic code search by meaning", listOf("query"),
-            "query" to p("string", "Natural language query (e.g. 'where is auth?')"),
-            "targetDirectories" to p("string", "Comma-separated directories to search"),
+        private fun buildSearchCodebaseTool() = toolDef("searchCodebase", "语义搜索代码库，按含义查找相关代码。适合探索陌生代码或用自然语言描述找实现。比grep更适合模糊查询。", listOf("query"),
+            "query" to p("string", "自然语言描述，如'用户认证在哪'或'错误处理怎么工作'"),
+            "targetDirectories" to p("string", "限定搜索目录，相对项目根目录，留空搜索整个项目"),
         )
-        private fun buildRunCommandTool() = toolDef("runCommand", "Execute shell command", listOf("command"),
-            "command" to p("string", "Command to execute, e.g. 'ls -la'"),
+        private fun buildRunCommandTool() = toolDef("runCommand", "执行shell命令，在当前项目目录下运行。超时30秒，输出上限5000字符。", listOf("command"),
+            "command" to p("string", "要执行的命令，如'ls -la'或'./gradlew build'"),
         )
-        private fun buildSearchWebTool() = toolDef("searchWeb", "Search internet for current information", listOf("query"),
-            "query" to p("string", "Concise search query"),
+        private fun buildSearchWebTool() = toolDef("searchWeb", "联网搜索最新信息。获取实时数据或超出知识范围的内容。", listOf("query"),
+            "query" to p("string", "搜索关键词，简洁明确"),
         )
-        private fun buildReadLintsTool() = toolDef("readLints", "Read build/lint/compilation errors with file locations")
-        private fun buildGlobTool() = toolDef("glob", "Find files by name pattern (glob syntax)", listOf("pattern"),
-            "pattern" to p("string", "Glob pattern, e.g. '*.kt', '**/*.xml', 'Main*'"),
-            "maxResults" to p("integer", "Max results (default 100)"),
+        private fun buildReadLintsTool() = toolDef("readLints", "读取构建/lint/编译错误，返回文件路径和行号。无缓存时自动运行gradle lint。")
+        private fun buildGlobTool() = toolDef("glob", "按文件名glob模式搜索，如'*.kt'、'Main*'。递归搜索项目根目录。适合知道文件名但不知完整路径时。", listOf("pattern"),
+            "pattern" to p("string", "Glob模式，如'*.kt'所有Kotlin文件，'Main*'Main开头文件，'**/*.xml'所有XML"),
+            "maxResults" to p("integer", "最大返回结果数，默认100"),
         )
     }
 
@@ -268,11 +268,11 @@ class AIToolSet(
             .trimEnd('\n')
     }
 
-    @Tool(description = "Read content of any text file in the project. Returns exact file content without line numbers — you can copy code directly for use in replaceInFile. Supports pagination: use offset to start from a specific line, limit to set max lines (default 1000). Large files over 500 lines auto-show first 200 lines with a warning — use grep to search relevant sections first.")
+    @Tool(description = "读取文本文件内容，返回纯文本无行号前缀。支持分页：offset从1开始，limit默认1000。超500行自动截断为前200行。")
     fun readFile(
-        @ToolParam(description = "File path relative to project root, e.g. 'app/src/main.kt' or 'build.gradle.kts'") path: String,
-        @ToolParam(description = "Starting line number (1-based). Default 1.") offset: Int = 1,
-        @ToolParam(description = "Maximum number of lines to read. Default 1000.") limit: Int = 1000,
+        @ToolParam(description = "文件路径，相对项目根目录，如'app/src/main.kt'") path: String,
+        @ToolParam(description = "起始行号，从1开始计数，默认1") offset: Int = 1,
+        @ToolParam(description = "最大读取行数，默认1000") limit: Int = 1000,
     ): String = traceTool("readFile", "path" to path, "offset" to offset, "limit" to limit) {
         Log.d("AIToolSet", "读取文件: path=$path offset=$offset limit=$limit")
         FileLogger.d("AIToolSet", "读取文件: path=$path offset=$offset limit=$limit")
@@ -312,11 +312,11 @@ class AIToolSet(
         return msg
     }
 
-    @Tool(description = "Create a NEW file. Set overwrite=true to overwrite existing file. When overwrite=false (default) and file exists, returns error with instructions to use replaceInFile instead.")
+    @Tool(description = "创建新文件。overwrite=false(默认)时若文件已存在则报错并提示用replaceInFile修改；overwrite=true则覆盖。")
     fun writeFile(
-        @ToolParam(description = "File path relative to project root, e.g. 'src/App.kt'") path: String,
-        @ToolParam(description = "The complete text content to write to the file") content: String,
-        @ToolParam(description = "Set to true to overwrite existing file. Default false — refuses if file exists.") overwrite: Boolean = false,
+        @ToolParam(description = "文件路径，相对项目根目录，如'src/App.kt'") path: String,
+        @ToolParam(description = "要写入的完整文本内容") content: String,
+        @ToolParam(description = "是否覆盖已有文件，默认false") overwrite: Boolean = false,
     ): String = traceTool("writeFile", "path" to path, "content" to content, "overwrite" to overwrite) {
         Log.d("AIToolSet", "写入文件: path=$path contentLen=${content.length} overwrite=$overwrite")
         FileLogger.d("AIToolSet", "写入文件: path=$path contentLen=${content.length} overwrite=$overwrite")
@@ -357,13 +357,13 @@ class AIToolSet(
 
     // 代码编辑工具 - 类似 SearchReplace，只修改指定内容
     // 这是唯一推荐的编辑方式：提供 old_string（要查找的代码块）和 new_string（新代码块）
-    @Tool(description = "Edit an existing file by replacing a specific code block. Provide the exact code to find (old_string) and the replacement (new_string). The old_string must be unique in the file - include enough context (function signature, class name, etc.) to ensure uniqueness. Optionally limit search to a line range (lineStart/lineEnd, 1-based). Returns OK with a summary of what was replaced.")
+    @Tool(description = "编辑文件，精确替换代码块。old_string必须在搜索范围内唯一；可用lineStart/lineEnd(1-based)缩小范围，传0搜全文。")
     fun replaceInFile(
-        @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
-        @ToolParam(description = "The exact code block to find. Must be unique in the file. Include function signature or class definition for uniqueness.") old_string: String,
-        @ToolParam(description = "The new code block to replace with.") new_string: String,
-        @ToolParam(description = "Limit search to lines starting from this line (1-based). 0 = search entire file.") lineStart: Int = 0,
-        @ToolParam(description = "Limit search to lines up to this line (1-based). 0 = search entire file.") lineEnd: Int = 0,
+        @ToolParam(description = "文件路径，相对项目根目录，如'src/MainActivity.kt'") path: String,
+        @ToolParam(description = "要查找的精确代码块，在搜索范围内必须唯一匹配") old_string: String,
+        @ToolParam(description = "替换后的新代码块") new_string: String,
+        @ToolParam(description = "搜索起始行(1-based)，0表示从文件开头") lineStart: Int = 0,
+        @ToolParam(description = "搜索结束行(1-based)，0表示到文件结尾") lineEnd: Int = 0,
     ): String = traceTool("replaceInFile", "path" to path, "old_string" to old_string, "new_string" to new_string, "lineStart" to lineStart, "lineEnd" to lineEnd) {
         requireProject("编辑文件")?.let { return it }
         val fm = fileManager!!
@@ -424,10 +424,10 @@ class AIToolSet(
     }
 
     // 批量编辑 — 一次调用替换多处不重叠的内容
-    @Tool(description = "Edit an existing file at multiple non-overlapping locations in one call. Provide an array of edits, each with old_string and new_string. All edits are matched against the ORIGINAL file (not sequentially applied). Edits must not overlap or nest. For a single edit, use replaceInFile instead.")
+    @Tool(description = "批量编辑，一次替换多处不重叠代码。edits基于原始文件同时匹配（非顺序应用），编辑不能重叠。单次编辑请用replaceInFile。")
     fun batchReplaceInFile(
-        @ToolParam(description = "File path relative to project root, e.g. 'src/MainActivity.kt'") path: String,
-        @ToolParam(description = "JSON array of edits: [{\"old_string\":\"exact code\",\"new_string\":\"replacement\"}, ...]. Each old_string must be unique in the file.") editsJson: String,
+        @ToolParam(description = "文件路径，相对项目根目录，如'src/MainActivity.kt'") path: String,
+        @ToolParam(description = "JSON数组：[{\"old_string\":\"原代码\",\"new_string\":\"新代码\"}]") editsJson: String,
     ): String = traceTool("batchReplaceInFile", "path" to path, "editsJson" to editsJson) {
         requireProject("批量编辑")?.let { return@traceTool it }
         val fm = fileManager!!
@@ -484,9 +484,9 @@ class AIToolSet(
         }
     }
 
-    @Tool(description = "Delete a file or directory in the project. Use with caution — this permanently removes files.")
+    @Tool(description = "删除文件或目录。谨慎使用，删除后无法恢复。")
     fun deleteFile(
-        @ToolParam(description = "File or directory path relative to project root, e.g. 'src/OldFile.kt' or 'temp/'") path: String,
+        @ToolParam(description = "文件或目录路径，相对项目根目录，如'src/OldFile.kt'或'temp/'") path: String,
     ): String = traceTool("deleteFile", "path" to path) {
         requireProject("删除文件")?.let { return it }
         val fm = fileManager!!
@@ -505,9 +505,9 @@ class AIToolSet(
     }
 
 
-    @Tool(description = "Create a new directory. Automatically creates parent directories as needed. For creating nested paths, provide the full path.")
+    @Tool(description = "创建目录，自动创建所有父目录。支持多级路径如'src/utils/helpers'")
     fun createDirectory(
-        @ToolParam(description = "Directory path relative to project root, e.g. 'src/utils' or 'assets/images'") path: String,
+        @ToolParam(description = "目录路径，相对项目根目录，如'src/utils'") path: String,
     ): String = traceTool("createDirectory", "path" to path) {
         requireProject("创建目录")?.let { return it }
         val fm = fileManager!!
@@ -525,9 +525,9 @@ class AIToolSet(
         }
     }
 
-    @Tool(description = "Run a shell command in the project directory.")
+    @Tool(description = "执行shell命令，在当前项目目录下运行。超时30秒，输出上限5000字符。")
     fun runCommand(
-        @ToolParam(description = "The command to execute, e.g. 'ls -la'") command: String,
+        @ToolParam(description = "要执行的命令，如'ls -la'或'./gradlew build'") command: String,
     ): String {
         Log.d("AIToolSet", "执行命令: $command")
         FileLogger.d("AIToolSet", "执行命令: $command")
@@ -599,9 +599,9 @@ class AIToolSet(
         return args
     }
 
-    @Tool(description = "Search the internet for current information. Use when you need up-to-date data or cannot answer from knowledge.")
+    @Tool(description = "联网搜索最新信息。获取实时数据或超出知识范围的内容。")
     fun searchWeb(
-        @ToolParam(description = "Search query keywords, concise and specific") query: String,
+        @ToolParam(description = "搜索关键词，简洁明确") query: String,
     ): String {
         if (query.isBlank()) return err("Search query is empty.")
         Log.d("AIToolSet", "搜索网络: query=$query")
@@ -635,7 +635,7 @@ class AIToolSet(
         }
     }
 
-    @Tool(description = "Read build lint or compilation errors from the project. Runs gradle lint if needed. Returns file paths and line numbers when available.")
+    @Tool(description = "读取构建/lint/编译错误，返回文件路径和行号。无缓存时自动运行gradle lint。")
     fun readLints(): String {
         Log.d("AIToolSet", "读取代码检查")
         FileLogger.d("AIToolSet", "读取代码检查")
@@ -717,13 +717,13 @@ class AIToolSet(
 
     private fun isWindows(): Boolean = System.getProperty("os.name")?.lowercase()?.contains("win") == true
 
-    @Tool(description = "Search file contents using regex pattern. Returns matching files with line numbers and context. Use for finding code patterns, function definitions, imports, etc.")
+    @Tool(description = "正则搜索文件内容，返回匹配文件、行号和上下文行。适合查找函数定义、变量使用等。")
     fun grep(
-        @ToolParam(description = "Regex pattern to search for, e.g. 'fun\\s+\\w+' to find function definitions") pattern: String,
-        @ToolParam(description = "File extension filter, e.g. 'kt' for Kotlin files only. Leave empty for all text files.") extension: String = "",
-        @ToolParam(description = "Glob pattern to filter files, e.g. '*.kt' or 'src/**/*.java'") glob: String = "",
-        @ToolParam(description = "Case insensitive search, default true") ignoreCase: Boolean = true,
-        @ToolParam(description = "Number of context lines to show before/after matches, default 2") contextLines: Int = 2,
+        @ToolParam(description = "正则表达式，如'fun\\s+\\w+'查找函数定义") pattern: String,
+        @ToolParam(description = "文件扩展名过滤，如'kt'只查Kotlin，留空查所有") extension: String = "",
+        @ToolParam(description = "Glob模式过滤，如'*.kt'或'src/**/*.java'") glob: String = "",
+        @ToolParam(description = "忽略大小写，默认true") ignoreCase: Boolean = true,
+        @ToolParam(description = "匹配前后上下文行数，默认2") contextLines: Int = 2,
     ): String {
         Log.d("AIToolSet", "搜索文件内容: pattern=$pattern ext=$extension glob=$glob ignoreCase=$ignoreCase context=$contextLines")
         FileLogger.d("AIToolSet", "搜索文件内容: pattern=$pattern ext=$extension glob=$glob ignoreCase=$ignoreCase context=$contextLines")
@@ -738,10 +738,10 @@ class AIToolSet(
         }
     }
 
-    @Tool(description = "Search codebase by meaning using semantic similarity. Converts query into a search vector and finds related code across the project. Use for exploring unfamiliar code or finding implementations by behavior (e.g. 'where is user authentication?' or 'how does error handling work?'). Prefer over grep when you don't know exact terms.")
+    @Tool(description = "语义搜索代码库，按含义查找相关代码。适合探索陌生代码或用自然语言描述找实现。比grep更适合模糊查询。")
     fun searchCodebase(
-        @ToolParam(description = "Natural language query describing what you're looking for, e.g. 'Where is user authentication implemented?' or 'How does error handling work?'") query: String,
-        @ToolParam(description = "Specific directories to search within, relative to project root. Leave empty to search entire project.") targetDirectories: String = "",
+        @ToolParam(description = "自然语言描述，如'用户认证在哪'或'错误处理怎么工作'") query: String,
+        @ToolParam(description = "限定搜索目录，相对项目根目录，留空搜索整个项目") targetDirectories: String = "",
     ): String {
         Log.d("AIToolSet", "搜索代码: query=$query dirs=$targetDirectories")
         FileLogger.d("AIToolSet", "搜索代码: query=$query dirs=$targetDirectories")
@@ -757,10 +757,10 @@ class AIToolSet(
     }
 
     // === 文件名搜索（Glob） ===
-    @Tool(description = "Find files by name pattern using glob syntax (e.g. '*.kt', '**/*.xml', 'Main*'). Searches recursively from project root. Use this when you know the file name or extension but not the full path. For regex-based content search, use grep instead.")
+    @Tool(description = "按文件名glob模式搜索，如'*.kt'、'Main*'。递归搜索项目根目录。适合知道文件名但不知完整路径时。")
     fun glob(
-        @ToolParam(description = "Glob pattern to match file names. Examples: '*.kt' finds all Kotlin files, '**/*.xml' finds all XML files, 'Main*' finds files starting with 'Main', '**/build/**' finds all files in build directories.") pattern: String,
-        @ToolParam(description = "Maximum number of results to return. Default 100.") maxResults: Int = 100,
+        @ToolParam(description = "Glob模式，如'*.kt'所有Kotlin文件，'Main*'Main开头文件，'**/*.xml'所有XML") pattern: String,
+        @ToolParam(description = "最大返回结果数，默认100") maxResults: Int = 100,
     ): String {
         Log.d("AIToolSet", "模糊搜索文件: pattern=$pattern max=$maxResults")
         FileLogger.d("AIToolSet", "模糊搜索文件: pattern=$pattern max=$maxResults")
@@ -816,18 +816,18 @@ class AIToolSet(
 
     // === 对话历史记忆工具（仅本地模型可见） ===
 
-    @Tool(description = "Search past conversation history by semantic meaning. Use when you need to recall what was discussed earlier in the conversation.")
+    @Tool(description = "语义搜索对话历史。需要回忆之前讨论内容时使用，如'我们改过哪些文件'、'上次怎么修的bug'。")
     fun searchConversationMemory(
-        @ToolParam(description = "What to search for, e.g. 'file structure' or 'error fix'") query: String,
+        @ToolParam(description = "搜索内容，如'文件结构'或'错误修复'") query: String,
     ): String {
         val mem = conversationMemory ?: return "对话记忆系统未加载。"
         Log.d("AIToolSet", "搜索会话记忆: query=$query")
         return mem.searchFormatted(query)
     }
 
-    @Tool(description = "Get summaries of the most recent conversation turns.")
+    @Tool(description = "获取最近对话摘要。用于回顾最近几次交流内容。")
     fun getRecentConversationMemory(
-        @ToolParam(description = "Number of recent entries (default 5, max 20)") count: Int = 5,
+        @ToolParam(description = "最近条目数，默认5，最大20") count: Int = 5,
     ): String {
         val mem = conversationMemory ?: return "对话记忆系统未加载。"
         Log.d("AIToolSet", "获取最近会话记忆: count=$count")
