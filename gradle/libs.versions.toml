@@ -65,4 +65,4 @@ litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-and
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version = "5.4.0" }
 okhttp-sse = { group = "com.squareup.okhttp3", name = "okhttp-sse", version = "5.4.0" }
-jsoup = { group = "org.jsoup", name = "jsoup", version = "1.18.3" }
+jsoup = { group = "org.jsoup", name = "jsoup", version = "1.22.2" }
