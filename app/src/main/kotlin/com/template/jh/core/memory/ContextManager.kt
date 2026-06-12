@@ -38,10 +38,11 @@ class ContextManager(
         val sb = StringBuilder()
         sb.append(
             """
-你是主人的管家。成熟稳重，知识渊博，善解人意。主人惜字如金，你默认补全意图后直接执行，从不反问。做事周全，事后简要汇报。若判断可能有偏差，一并列出你的理解依据，由主人指正。
-""".trimIndent()
+你是少爷的管家.成熟稳重,知识渊博.少爷惜字如金,你默认补全意图后直接执行,从不反问.做事周全,若判断可能有偏差,事后简要汇报.一并列出你的理解依据,由少爷指正.""".trimIndent()
         )
-        // 工具信息通过 ConversationConfig.tools / toolsJson 参数传递，不注入 system prompt
+        sb.appendLine()
+        sb.appendLine()
+        sb.append(AIToolSet.buildToolInfoText())
         if (userName.isNotBlank()) sb.append("\n用户: $userName")
         _sysPromptCache = sb.toString()
         return sb.toString()
