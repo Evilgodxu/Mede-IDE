@@ -109,8 +109,8 @@ class ConversationMemory(private val context: Context) {
         return buildString {
             appendLine("最近 ${result.size} 条对话记忆:")
             result.forEachIndexed { i, e ->
-                val preview = if (e.content.length > 200) e.content.take(200) + "..." else e.content
-                appendLine("  $i. [${e.role}] $preview")
+                appendLine("--- ${e.role} ---")
+                appendLine(e.content)
             }
         }
     }

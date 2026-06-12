@@ -37,6 +37,7 @@ import com.template.jh.model.SkillItem
 import com.template.jh.model.chat.AttachedFile
 import com.template.jh.model.chat.ChatMessage
 import com.template.jh.model.chat.ChatRole
+import com.template.jh.model.chat.ToolCallInfo
 import com.template.jh.model.chat.CloudModelConfig
 import com.template.jh.model.chat.CloudModelProfile
 import com.template.jh.model.chat.ConversationEntry
@@ -662,6 +663,8 @@ class ChatViewModel(
         }
         activeConversation = null
         convSysPromptVersion = sysPromptVersion
+        @OptIn(com.google.ai.edge.litertlm.ExperimentalApi::class)
+        com.google.ai.edge.litertlm.ExperimentalFlags.filterChannelContentFromKvCache = sysPromptDeepThink
         val conv = liteRTManager.createConversation(
             ConversationConfig(
                 systemInstruction = Contents.of(buildSystemInstruction()),
@@ -749,7 +752,9 @@ class ChatViewModel(
         try {
             conv.sendMessageAsync(currentMessage, extraContext = thinkCtx).collect { msg ->
                 val c = msg.contents.toString()
-                if (c.isNotEmpty()) {
+                val hasThinkChannel = msg.channels.containsKey("thought") || msg.channels.containsKey("thinking")
+                // 思考阶段内容仅存入 channel，不追加到主消息
+                if (!hasThinkChannel && c.isNotEmpty()) {
                     updateModelMessage(msgId, c, true)
                 }
                 if (msg.channels.isNotEmpty()) {
@@ -943,16 +948,42 @@ class ChatViewModel(
                 }.map { it.await() }
             }
 
-            val toolCallId = "call_${java.util.UUID.randomUUID().toString().take(8)}"
+            // 构建完整 tool_calls 信息列表（含 id、name、arguments），存入 assistant 消息
+            val toolCallInfoList = toolCalls.map { (id, name, argsMap) ->
+                val argsJson = org.json.JSONObject().apply { argsMap.forEach { (k, v) -> put(k, v) } }.toString()
+                ToolCallInfo(
+                    id = id ?: "call_${java.util.UUID.randomUUID().toString().take(8)}",
+                    name = name,
+                    arguments = argsJson,
+                )
+            }
             historyMessages.add(ChatMessage(
                 role = ChatRole.Model, content = response,
-                toolCallId = toolCallId,
+                toolCalls = toolCallInfoList,
             ))
 
-            var combinedResult = results.joinToString("\n\n")
-            val lintBlock = toolCallHandler.autoInjectLint(toolCalls)
-            if (lintBlock != null) { combinedResult += "\n\n$lintBlock" }
+            // 每个工具执行结果作为独立的 role:tool 消息添加（OpenAI 规范要求一对一匹配）
+            toolCalls.forEachIndexed { i, tc ->
+                val resultText = results.getOrElse(i) { "No result" }
+                historyMessages.add(ChatMessage(
+                    role = ChatRole.Tool,
+                    content = resultText,
+                    toolCallId = tc.first,
+                    toolName = tc.second,
+                ))
+            }
             val hadModifyingTools = toolCalls.any { it.second in ChatConfig.MODIFYING_TOOLS }
+
+            // Lint 诊断作为额外 tool 消息
+            val lintBlock = toolCallHandler.autoInjectLint(toolCalls)
+            if (lintBlock != null) {
+                historyMessages.add(ChatMessage(
+                    role = ChatRole.Tool,
+                    content = lintBlock,
+                    toolCallId = "lint_${java.util.UUID.randomUUID().toString().take(8)}",
+                    toolName = "readLints",
+                ))
+            }
 
             val display = StringBuilder()
             for (i in toolCalls.indices) {
@@ -965,11 +996,6 @@ class ChatViewModel(
             finalizeModelMessage(currentMsgId)
 
             _state.update { it.copy(modelActivity = ModelActivity.ProcessingResult, activityDetail = "") }
-
-            historyMessages.add(ChatMessage(
-                role = ChatRole.Tool, content = combinedResult,
-                toolCallId = toolCallId,
-            ))
 
             if (cloudRounds % ChatConfig.SUMMARIZE_INTERVAL == 0) {
                 historyMessages.clear()

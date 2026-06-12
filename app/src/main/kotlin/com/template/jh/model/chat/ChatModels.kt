@@ -9,6 +9,13 @@ data class AttachedFile(
     val path: String,
 )
 
+/** 工具调用信息（对应 OpenAI function calling 中 assistant 消息的 tool_calls 条目） */
+data class ToolCallInfo(
+    val id: String,           // 工具调用唯一 ID，如 "call_abc123"
+    val name: String,         // 工具函数名，如 "readFile"
+    val arguments: String,    // 参数字符串，如 "{\"path\":\"src/Main.kt\"}"
+)
+
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val role: ChatRole,
@@ -19,6 +26,7 @@ data class ChatMessage(
     val toolName: String? = null,       // 工具函数名（如 "readFile"），用于 Content.ToolResponse.name
     val imageUris: List<Uri> = emptyList(), // 附加图片 URI（用于聊天消息中显示缩略图）
     val channelContent: String? = null, // LiteRT-LM channels 中的思考内容
+    val toolCalls: List<ToolCallInfo> = emptyList(), // 工具调用列表（assistant 消息），云端路径按 OpenAI 规范还原
 )
 
 enum class ChatRole { User, Model, System, Tool }

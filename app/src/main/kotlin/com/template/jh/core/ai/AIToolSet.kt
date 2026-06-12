@@ -159,8 +159,8 @@ class AIToolSet(
             appendLine("runCommand(command) — 执行 shell 命令，在当前项目目录下运行。超时 30 秒，输出上限 5000 字符。")
             appendLine("searchWeb(query) — 联网搜索最新信息。获取实时数据或超出知识范围的内容。")
             appendLine("readLints() — 读取构建/lint/编译错误，返回文件路径和行号。无缓存时自动运行 gradle lint。")
-            appendLine("searchConversationMemory(query) — 语义搜索对话历史。需要回忆之前讨论内容时使用，如 '我们改过哪些文件'、'上次怎么修的 bug'。")
-            appendLine("getRecentConversationMemory(count?) — 获取最近对话摘要，用于回顾最近几次交流内容。count 默认 5，上限 20。")
+            appendLine("searchConversationMemory(query) — 按关键词搜索对话历史。需要回忆之前讨论内容时使用，如 '我们改过哪些文件'、'上次怎么修的 bug'。返回匹配条目前200字符预览，最多5条。")
+            appendLine("getRecentConversationMemory(count?) — 获取最近对话消息全文。每次返回最近指定条数，count 默认 1。")
         }
 
         /** 构建 OpenAI 兼容的 tools 定义 JSON */
@@ -187,14 +187,14 @@ class AIToolSet(
         // ... memory tool definitions
         private fun buildSearchConversationMemoryTool() = toolDef(
             "searchConversationMemory",
-            "语义搜索对话历史。需要回忆之前讨论内容时使用，如'我们改过哪些文件'、'上次怎么修的bug'。搜索所有记忆层包括短期记忆、摘要和向量索引。",
+            "按关键词搜索对话历史。需要回忆之前讨论内容时使用。返回匹配条目前200字符预览，最多5条。仅搜索当前对话记忆。",
             listOf("query"),
             "query" to p("string", "搜索内容，如'文件结构'或'错误修复'"),
         )
         private fun buildGetRecentConversationMemoryTool() = toolDef(
             "getRecentConversationMemory",
-            "获取最近对话摘要。用于回顾最近几次交流内容。默认返回最近5条。",
-            props = arrayOf("count" to p("integer", "最近条目数，默认5，最大20")),
+            "获取最近对话消息全文。每次返回最近指定条数，count默认1。",
+            props = arrayOf("count" to p("integer", "最近条目数，默认1")),
         )
 
         private fun p(type: String, desc: String): org.json.JSONObject = org.json.JSONObject().apply {
@@ -820,7 +820,7 @@ class AIToolSet(
 
     // === 对话历史记忆工具（仅本地模型可见） ===
 
-    @Tool(description = "语义搜索对话历史。需要回忆之前讨论内容时使用，如'我们改过哪些文件'、'上次怎么修的bug'。仅搜索当前对话记忆。")
+    @Tool(description = "按关键词搜索对话历史。需要回忆之前讨论内容时使用。返回匹配条目前200字符预览，最多5条。仅搜索当前对话记忆。")
     fun searchConversationMemory(
         @ToolParam(description = "搜索内容，如'文件结构'或'错误修复'") query: String,
     ): String {
@@ -829,9 +829,9 @@ class AIToolSet(
         return mem.searchFormatted(query, conversationId = currentConversationId)
     }
 
-    @Tool(description = "获取最近对话摘要。用于回顾最近几次交流内容。默认返回最近5条，仅返回当前对话。")
+    @Tool(description = "获取最近对话消息全文。每次返回最近指定条数，count默认1。")
     fun getRecentConversationMemory(
-        @ToolParam(description = "最近条目数，默认5，最大20") count: Int = 5,
+        @ToolParam(description = "最近条目数，默认1") count: Int = 1,
     ): String {
         val mem = conversationMemory ?: return "对话记忆系统未加载。"
         Log.d("AIToolSet", "获取最近会话记忆: count=$count")

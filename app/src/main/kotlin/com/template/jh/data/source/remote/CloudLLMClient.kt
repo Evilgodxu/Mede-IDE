@@ -4,6 +4,7 @@ import android.content.Context
 import com.template.jh.model.chat.ApiUsage
 import com.template.jh.model.chat.ChatMessage
 import com.template.jh.model.chat.ChatRole
+import com.template.jh.model.chat.ToolCallInfo
 import com.template.jh.model.chat.CloudModelConfig
 import com.template.jh.model.chat.CloudToolCall
 import kotlinx.coroutines.Dispatchers
@@ -85,18 +86,30 @@ class CloudLLMClient(private val context: Context) {
                     }
                     ChatRole.Model -> {
                         obj.put("role", "assistant")
-                        obj.put("content", msg.content)
-                        if (msg.toolCallId != null) {
-                            val tcId = msg.toolCallId
+                        // 有 tool_calls 时 content 应为 null（OpenAI 规范）
+                        if (msg.toolCalls.isNotEmpty() && msg.content.isBlank()) {
+                            obj.put("content", JSONObject.NULL)
+                        } else {
+                            obj.put("content", msg.content)
+                        }
+                        if (msg.toolCalls.isNotEmpty()) {
                             obj.put("tool_calls", JSONArray().apply {
-                                put(JSONObject().apply {
-                                    put("id", tcId)
-                                    put("type", "function")
-                                    put("function", JSONObject().apply {
-                                        put("name", "?")
-                                        put("arguments", "{}")
+                                msg.toolCalls.forEach { tc ->
+                                    put(JSONObject().apply {
+                                        put("id", tc.id)
+                                        put("type", "function")
+                                        put("function", JSONObject().apply {
+                                            put("name", tc.name)
+                                            // arguments 必须是合法 JSON 字符串
+                                            val argsJson = try {
+                                                org.json.JSONObject(tc.arguments)
+                                            } catch (_: Exception) {
+                                                org.json.JSONObject()
+                                            }
+                                            put("arguments", argsJson.toString())
+                                        })
                                     })
-                                })
+                                }
                             })
                         }
                     }

@@ -38,6 +38,8 @@ private fun String.cleanForDisplay(): String {
     result = result.replace(Regex("\\n\\[用户指定的文件.*"), "")
     // 移除独立行的工具调用 JSON（仅松散匹配）
     result = result.replace(TOOL_CALL_LINE_REGEX, "")
+    // 移除深度思考 <think> 标记（漏网之鱼）
+    result = result.replace(Regex("</?think>"), "")
     result = result.replace(Regex("""\n{3,}"""), "\n\n").trim()
     return result
 }
