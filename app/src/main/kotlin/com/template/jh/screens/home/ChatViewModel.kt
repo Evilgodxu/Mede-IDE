@@ -767,6 +767,35 @@ class ChatViewModel(
             FileLogger.e("ChatViewModel", "本地对话处理失败: ${e.message}", e)
             updateModelMessage(msgId, "\n\n[错误: ${e.message}]", false)
         } finally {
+            // 如果通道 API 未提供思考内容但消息中有 <think> 或 [think] 块，从中提取
+            if (channelContent == null) {
+                val currentMsg = _state.value.messages.find { it.id == msgId }
+                if (currentMsg != null) {
+                    var thinkContent: String? = null
+                    val thinkTagMatch = Regex("<think>([\\s\\S]*?)</think>").find(currentMsg.content)
+                    if (thinkTagMatch != null) {
+                        thinkContent = thinkTagMatch.groupValues[1].trim()
+                    } else {
+                        val bracketMatch = Regex("\\[think]([\\s\\S]*?)\\[/think]").find(currentMsg.content)
+                        if (bracketMatch != null) {
+                            thinkContent = bracketMatch.groupValues[1].trim()
+                        }
+                    }
+                    if (thinkContent != null) {
+                        channelContent = thinkContent
+                        val cleaned = currentMsg.content
+                            .replace(Regex("<think>[\\s\\S]*?</think>"), "")
+                            .replace(Regex("\\[think][\\s\\S]*?\\[/think]"), "")
+                            .trim()
+                        _state.update { state ->
+                            val updatedMessages = state.messages.map {
+                                if (it.id == msgId) it.copy(content = cleaned) else it
+                            }
+                            state.copy(messages = updatedMessages)
+                        }
+                    }
+                }
+            }
             finalizeModelMessage(msgId, channelContent = channelContent)
             toolCallHandler.callback = null
             // 不关闭会话，匹配官方示例：Conversation 持续复用
@@ -910,6 +939,27 @@ class ChatViewModel(
             ))
 
             val response = fullResponse.toString().trim()
+            // 提取思考块（<think> 或 [think]）作为 channelContent
+            var channelContent: String? = null
+            var cleanResponse = response
+            val thinkTagMatch = Regex("<think>([\\s\\S]*?)</think>").find(response)
+            val bracketMatch = Regex("\\[think]([\\s\\S]*?)\\[/think]").find(response)
+            if (thinkTagMatch != null) {
+                channelContent = thinkTagMatch.groupValues[1].trim()
+                cleanResponse = response.replace(Regex("<think>[\\s\\S]*?</think>"), "").trim()
+            } else if (bracketMatch != null) {
+                channelContent = bracketMatch.groupValues[1].trim()
+                cleanResponse = response.replace(Regex("\\[think][\\s\\S]*?\\[/think]"), "").trim()
+            }
+            if (channelContent != null) {
+                // 用无 think 版本替换消息内容
+                _state.update { state ->
+                    val updatedMessages = state.messages.map { msg ->
+                        if (msg.id == currentMsgId) msg.copy(content = cleanResponse) else msg
+                    }
+                    state.copy(messages = updatedMessages)
+                }
+            }
             val toolCalls = if (nativeToolCalls.isNotEmpty()) {
                 nativeToolCalls.map { tc ->
                     val argsMap = try {
@@ -923,8 +973,8 @@ class ChatViewModel(
             }
 
             if (toolCalls == null || (toolCalls.isEmpty() && response.isBlank())) {
-                historyMessages.add(ChatMessage(role = ChatRole.Model, content = response))
-                finalizeModelMessage(currentMsgId)
+                historyMessages.add(ChatMessage(role = ChatRole.Model, content = cleanResponse))
+                finalizeModelMessage(currentMsgId, channelContent = channelContent)
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 return
             }
@@ -993,7 +1043,7 @@ class ChatViewModel(
                 if (i < toolCalls.size - 1) display.appendLine()
             }
             updateModelMessage(currentMsgId, "\n\n${display.toString().trimEnd()}", false)
-            finalizeModelMessage(currentMsgId)
+            finalizeModelMessage(currentMsgId, channelContent = channelContent)
 
             _state.update { it.copy(modelActivity = ModelActivity.ProcessingResult, activityDetail = "") }
 

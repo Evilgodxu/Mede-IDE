@@ -153,7 +153,7 @@ private fun OverviewLayer(snapshot: ContextSnapshot, memoryTotalTokens: Int, too
         contentAlignment = Alignment.Center,
     ) {
         // 外环：记忆（紧贴内环外侧）
-        Canvas(Modifier.size(126.dp)) {
+        Canvas(Modifier.size(112.dp)) {
             val sw = 8f
             val r = size.minDimension / 2f - sw / 2f
             val tl = Offset(sw / 2f, sw / 2f)
@@ -170,7 +170,7 @@ private fun OverviewLayer(snapshot: ContextSnapshot, memoryTotalTokens: Int, too
             }
         }
 
-        // 内环：总占用（当前用量 + 压缩释放）+ 剩余空间
+        // 内环：当前用量 + 压缩释放段（分别用不同颜色）+ 剩余空间
         Canvas(Modifier.size(100.dp)) {
             val sw = 10f
             val r = size.minDimension / 2f - sw / 2f
@@ -181,16 +181,16 @@ private fun OverviewLayer(snapshot: ContextSnapshot, memoryTotalTokens: Int, too
             drawArc(Color(0xFFE8E8E8), -90f, 360f, false,
                 style = Stroke(sw, cap = StrokeCap.Butt), topLeft = tl, size = sz)
 
-            // 总占用段（用量 + 压缩）
-            if (totalDeg > 0.5f) {
-                drawArc(usageColor, -90f, totalDeg, false,
+            // 当前用量段
+            if (usageDeg > 0.5f) {
+                drawArc(usageColor, -90f, usageDeg, false,
                     style = Stroke(sw, cap = StrokeCap.Butt), topLeft = tl, size = sz)
             }
 
-            // 压缩释放段（在总占用内覆盖紫色）
+            // 压缩释放段（紧跟在当前用量段后面，用紫色）
             if (showCompressedArc) {
                 val start = -90f + usageDeg
-                drawArc(Color(0xFF9C27B0).copy(alpha = 0.85f), start, compressedDeg, false,
+                drawArc(Color(0xFF9C27B0), start, compressedDeg, false,
                     style = Stroke(sw, cap = StrokeCap.Butt), topLeft = tl, size = sz)
             }
         }
