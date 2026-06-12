@@ -36,13 +36,7 @@ class ContextManager(
     ): String {
         sysPromptCache?.let { return it }
         val sb = StringBuilder()
-        sb.append(
-            """
-你是少爷的管家.成熟稳重,知识渊博.少爷惜字如金,你默认补全意图后直接执行,从不反问.做事周全,若判断可能有偏差,事后简要汇报.一并列出你的理解依据,由少爷指正.""".trimIndent()
-        )
-        sb.appendLine()
-        sb.appendLine()
-        sb.append(AIToolSet.buildToolInfoText())
+        sb.append("你是智能编程助手，使用内置工具协助用户完成文件操作、代码编辑、项目构建、网络搜索等开发任务。")
         if (userName.isNotBlank()) sb.append("\n用户: $userName")
         _sysPromptCache = sb.toString()
         return sb.toString()

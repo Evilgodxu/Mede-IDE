@@ -11,7 +11,15 @@ import com.template.jh.core.memory.ConversationMemory
 import com.template.jh.core.storage.FileManager
 import com.template.jh.core.utils.FileLogger
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.net.URLEncoder
+import java.nio.channels.FileChannel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import org.jsoup.Jsoup
 
 /** 工具执行状态回调 — 由 ChatViewModel 注入，打破 automaticToolCalling 黑盒 */
@@ -142,27 +150,6 @@ class AIToolSet(
         private const val MAX_AUTO_LINES = 200
         private const val TRUNCATE_WARNING_LINES = 500
 
-        /** 构建工具信息的纯文本描述（注入系统提示词）。内容与 @Tool 注解保持一致。 */
-        fun buildToolInfoText(): String = buildString {
-            appendLine("## 可用工具")
-            appendLine()
-            appendLine("readFile(path, offset?, limit?) — 读取文件内容，返回纯文本无行号前缀。offset 从 1 开始，limit 默认 1000。超 500 行自动截断为前 200 行。")
-            appendLine("writeFile(path, content, overwrite?) — 创建新文件。overwrite=false(默认)时若文件已存在则报错并提示用 replaceInFile；overwrite=true 则覆盖。")
-            appendLine("replaceInFile(path, old_string, new_string, lineStart?, lineEnd?) — 精确替换代码块。old_string 必须在搜索范围内唯一；可用 lineStart/lineEnd(1-based) 缩小范围，传 0 搜全文。")
-            appendLine("batchReplaceInFile(path, editsJson) — 批量编辑，一次替换多处不重叠代码。edits 基于原始文件同时匹配（非顺序应用），编辑不能重叠。单次编辑请用 replaceInFile。")
-            appendLine("deleteFile(path) — 删除文件或目录。谨慎使用，删除后无法恢复。")
-            appendLine("createDirectory(path) — 创建目录，自动创建所有父目录。支持多级路径如 'src/utils/helpers'")
-            appendLine("listFiles(subPath?) — 列出目录内容，显示 [FILE]/[DIR] 前缀和文件大小。路径支持绝对或相对，留空表示项目根目录。")
-            appendLine("grep(pattern, extension?, glob?, ignoreCase?, contextLines?) — 正则搜索文件内容，返回匹配文件、行号和上下文行。适合查找函数定义、变量使用等。")
-            appendLine("glob(pattern, maxResults?) — 按文件名 glob 模式搜索，如 '*.kt'、'Main*'。递归搜索项目根目录。适合知道文件名但不知完整路径时。")
-            appendLine("searchCodebase(query, targetDirectories?) — 语义搜索代码库，按含义查找相关代码。适合探索陌生代码或用自然语言描述找实现。比 grep 更适合模糊查询。")
-            appendLine("runCommand(command) — 执行 shell 命令，在当前项目目录下运行。超时 30 秒，输出上限 5000 字符。")
-            appendLine("searchWeb(query) — 联网搜索最新信息。获取实时数据或超出知识范围的内容。")
-            appendLine("readLints() — 读取构建/lint/编译错误，返回文件路径和行号。无缓存时自动运行 gradle lint。")
-            appendLine("searchConversationMemory(query) — 按关键词搜索对话历史。需要回忆之前讨论内容时使用，如 '我们改过哪些文件'、'上次怎么修的 bug'。返回匹配条目前200字符预览，最多5条。")
-            appendLine("getRecentConversationMemory(count?) — 获取最近对话消息全文。每次返回最近指定条数，count 默认 1。")
-        }
-
         /** 构建 OpenAI 兼容的 tools 定义 JSON */
         fun buildOpenAIToolsJson(): String {
             val tools = org.json.JSONArray()
@@ -181,6 +168,15 @@ class AIToolSet(
             tools.put(buildReadLintsTool())
             tools.put(buildSearchConversationMemoryTool())
             tools.put(buildGetRecentConversationMemoryTool())
+            tools.put(buildFileExistsTool())
+            tools.put(buildFileInfoTool())
+            tools.put(buildMoveFileTool())
+            tools.put(buildCopyFileTool())
+            tools.put(buildZipFilesTool())
+            tools.put(buildUnzipFilesTool())
+            tools.put(buildVisitWebTool())
+            tools.put(buildDownloadFileTool())
+            tools.put(buildHttpRequestTool())
             return tools.toString()
         }
 
@@ -262,6 +258,41 @@ class AIToolSet(
         private fun buildGlobTool() = toolDef("glob", "按文件名glob模式搜索，如'*.kt'、'Main*'。递归搜索项目根目录。适合知道文件名但不知完整路径时。", listOf("pattern"),
             "pattern" to p("string", "Glob模式，如'*.kt'所有Kotlin文件，'Main*'Main开头文件，'**/*.xml'所有XML"),
             "maxResults" to p("integer", "最大返回结果数，默认100"),
+        )
+        private fun buildFileExistsTool() = toolDef("fileExists", "检查文件或目录是否存在。", listOf("path"),
+            "path" to p("string", "文件或目录路径"),
+        )
+        private fun buildFileInfoTool() = toolDef("fileInfo", "获取文件元信息（大小、修改时间、类型等）。", listOf("path"),
+            "path" to p("string", "文件路径"),
+        )
+        private fun buildMoveFileTool() = toolDef("moveFile", "移动/重命名文件或目录。", listOf("source", "destination"),
+            "source" to p("string", "源路径"),
+            "destination" to p("string", "目标路径"),
+        )
+        private fun buildCopyFileTool() = toolDef("copyFile", "复制文件或目录。", listOf("source", "destination"),
+            "source" to p("string", "源路径"),
+            "destination" to p("string", "目标路径"),
+        )
+        private fun buildZipFilesTool() = toolDef("zipFiles", "将文件或目录压缩为 ZIP 归档。", listOf("source", "destination"),
+            "source" to p("string", "要压缩的文件或目录路径"),
+            "destination" to p("string", "ZIP 归档保存路径"),
+        )
+        private fun buildUnzipFilesTool() = toolDef("unzipFiles", "解压 ZIP 归档到目标目录。", listOf("source", "destination"),
+            "source" to p("string", "ZIP 归档路径"),
+            "destination" to p("string", "解压目标目录"),
+        )
+        private fun buildVisitWebTool() = toolDef("visitWeb", "访问网页并提取文本内容。用于查阅文档、获取网页信息等。", listOf("url"),
+            "url" to p("string", "网页 URL"),
+        )
+        private fun buildDownloadFileTool() = toolDef("downloadFile", "从 URL 下载文件到本地路径。", listOf("url", "destination"),
+            "url" to p("string", "文件下载 URL"),
+            "destination" to p("string", "保存路径"),
+        )
+        private fun buildHttpRequestTool() = toolDef("httpRequest", "发送 HTTP 请求，返回响应内容。支持 GET/POST/PUT/DELETE。", listOf("url"),
+            "url" to p("string", "请求 URL"),
+            "method" to p("string", "HTTP 方法：GET/POST/PUT/DELETE，默认 GET"),
+            "headers" to p("string", "可选的请求头，JSON 对象字符串，如 {\"Content-Type\":\"application/json\"}"),
+            "body" to p("string", "可选的请求体（POST/PUT 时使用）"),
         )
     }
 
@@ -639,6 +670,246 @@ class AIToolSet(
         }
     }
 
+    // ================================================================
+    //  新增工具：文件操作
+    // ================================================================
+
+    @Tool(description = "检查文件或目录是否存在。")
+    fun fileExists(
+        @ToolParam(description = "文件或目录路径") path: String,
+    ): String = traceTool("fileExists", "path" to path) {
+        val fm = fileManager ?: return@traceTool err("No project folder is open.")
+        val resolved = resolvePathOrAbsolute(path)
+        return if (fm.exists(resolved)) ok("Exists: $path") else err("Not found: $path")
+    }
+
+    @Tool(description = "获取文件元信息（大小、修改时间、类型等）。")
+    fun fileInfo(
+        @ToolParam(description = "文件路径") path: String,
+    ): String = traceTool("fileInfo", "path" to path) {
+        requireProject("获取文件信息")?.let { return it }
+        val fm = fileManager!!
+        val resolved = resolvePathOrAbsolute(path)
+        return try {
+            val base = fm.projectDirPath.ifEmpty { fm.storageRootPath }
+            val file = File(base, resolved)
+            if (!file.exists()) return err("File not found: $path")
+            val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+            buildString {
+                appendLine(ok("File info: $path"))
+                appendLine("  Name: ${file.name}")
+                appendLine("  Size: ${formatSize(file.length())}")
+                appendLine("  Type: ${if (file.isDirectory) "directory" else "file"}")
+                appendLine("  Modified: ${dateFormat.format(Date(file.lastModified()))}")
+                appendLine("  Path: ${file.absolutePath}")
+            }
+        } catch (e: Exception) {
+            err("Failed to get file info: ${e.message}")
+        }
+    }
+
+    @Tool(description = "移动/重命名文件或目录。")
+    fun moveFile(
+        @ToolParam(description = "源路径") source: String,
+        @ToolParam(description = "目标路径") destination: String,
+    ): String = traceTool("moveFile", "source" to source, "destination" to destination) {
+        requireProject("移动文件")?.let { return it }
+        try {
+            val base = fileManager!!.projectDirPath.ifEmpty { fileManager!!.storageRootPath }
+            val srcFile = File(base, resolvePathOrAbsolute(source))
+            val dstFile = File(base, resolvePathOrAbsolute(destination))
+            if (!srcFile.exists()) return err("Source not found: $source")
+            dstFile.parentFile?.mkdirs()
+            if (dstFile.exists()) return err("Destination already exists: $destination")
+            val success = srcFile.renameTo(dstFile)
+            if (success) {
+                FileOperationEvents.notify(source, "delete")
+                FileOperationEvents.notify(destination, "create")
+                ok("Moved: $source -> $destination")
+            } else {
+                err("Failed to move: $source -> $destination")
+            }
+        } catch (e: Exception) {
+            err("Move failed: ${e.message}")
+        }
+    }
+
+    @Tool(description = "复制文件或目录。")
+    fun copyFile(
+        @ToolParam(description = "源路径") source: String,
+        @ToolParam(description = "目标路径") destination: String,
+    ): String = traceTool("copyFile", "source" to source, "destination" to destination) {
+        requireProject("复制文件")?.let { return it }
+        try {
+            val base = fileManager!!.projectDirPath.ifEmpty { fileManager!!.storageRootPath }
+            val srcFile = File(base, resolvePathOrAbsolute(source))
+            val dstFile = File(base, resolvePathOrAbsolute(destination))
+            if (!srcFile.exists()) return err("Source not found: $source")
+            dstFile.parentFile?.mkdirs()
+            if (dstFile.exists()) return err("Destination already exists: $destination")
+            when {
+                srcFile.isDirectory -> srcFile.copyRecursively(dstFile, overwrite = false)
+                else -> srcFile.copyTo(dstFile, overwrite = false)
+            }
+            FileOperationEvents.notify(destination, "create")
+            ok("Copied: $source -> $destination")
+        } catch (e: Exception) {
+            err("Copy failed: ${e.message}")
+        }
+    }
+
+    @Tool(description = "将文件或目录压缩为 ZIP 归档。")
+    fun zipFiles(
+        @ToolParam(description = "要压缩的文件或目录路径") source: String,
+        @ToolParam(description = "ZIP 归档保存路径") destination: String,
+    ): String = traceTool("zipFiles", "source" to source, "destination" to destination) {
+        requireProject("压缩文件")?.let { return it }
+        try {
+            val base = fileManager!!.projectDirPath.ifEmpty { fileManager!!.storageRootPath }
+            val srcFile = File(base, resolvePathOrAbsolute(source))
+            val dstFile = File(base, resolvePathOrAbsolute(destination))
+            if (!srcFile.exists()) return err("Source not found: $source")
+            dstFile.parentFile?.mkdirs()
+            val zipFile = net.lingala.zip4j.ZipFile(dstFile)
+            val params = net.lingala.zip4j.model.ZipParameters()
+            params.compressionLevel = net.lingala.zip4j.model.enums.CompressionLevel.NORMAL
+            when {
+                srcFile.isDirectory -> zipFile.addFolder(srcFile, params)
+                else -> zipFile.addFile(srcFile, params)
+            }
+            FileOperationEvents.notify(destination, "create")
+            ok("Zipped: $source -> $destination")
+        } catch (e: Exception) {
+            err("Zip failed: ${e.message}")
+        }
+    }
+
+    @Tool(description = "解压 ZIP 归档到目标目录。")
+    fun unzipFiles(
+        @ToolParam(description = "ZIP 归档路径") source: String,
+        @ToolParam(description = "解压目标目录") destination: String,
+    ): String = traceTool("unzipFiles", "source" to source, "destination" to destination) {
+        requireProject("解压文件")?.let { return it }
+        try {
+            val base = fileManager!!.projectDirPath.ifEmpty { fileManager!!.storageRootPath }
+            val srcFile = File(base, resolvePathOrAbsolute(source))
+            val dstDir = File(base, resolvePathOrAbsolute(destination))
+            if (!srcFile.exists()) return err("Archive not found: $source")
+            dstDir.mkdirs()
+            net.lingala.zip4j.ZipFile(srcFile).extractAll(dstDir.absolutePath)
+            FileOperationEvents.notify(destination, "create")
+            ok("Unzipped: $source -> $destination")
+        } catch (e: Exception) {
+            err("Unzip failed: ${e.message}")
+        }
+    }
+
+    // ================================================================
+    //  新增工具：网络操作
+    // ================================================================
+
+    @Tool(description = "访问网页并提取文本内容。用于查阅文档、获取网页信息等。")
+    fun visitWeb(
+        @ToolParam(description = "网页 URL") url: String,
+    ): String {
+        if (url.isBlank()) return err("URL is empty.")
+        Log.d("AIToolSet", "访问网页: url=$url")
+        FileLogger.d("AIToolSet", "访问网页: url=$url")
+        return try {
+            val doc = Jsoup.connect(url)
+                .userAgent("Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36")
+                .timeout(15000)
+                .followRedirects(true)
+                .get()
+            val title = doc.title().ifBlank { "(no title)" }
+            val body = doc.body()?.text()?.trim()?.take(5000) ?: "(empty body)"
+            FileLogger.d("AIToolSet", "访问网页: $title (${body.length} chars)")
+            ok("Title: $title\n\n$body")
+        } catch (e: Exception) {
+            Log.e("AIToolSet", "访问网页失败: ${e.message}", e)
+            FileLogger.e("AIToolSet", "访问网页失败: ${e.message}", e)
+            err("${e.message}")
+        }
+    }
+
+    @Tool(description = "从 URL 下载文件到本地路径。")
+    fun downloadFile(
+        @ToolParam(description = "文件下载 URL") url: String,
+        @ToolParam(description = "保存路径") destination: String,
+    ): String = traceTool("downloadFile", "url" to url, "destination" to destination) {
+        requireProject("下载文件")?.let { return it }
+        if (url.isBlank()) return err("URL is empty.")
+        try {
+            val base = fileManager!!.projectDirPath.ifEmpty { fileManager!!.storageRootPath }
+            val dstFile = File(base, resolvePathOrAbsolute(destination))
+            dstFile.parentFile?.mkdirs()
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.connectTimeout = 15000
+            connection.readTimeout = 30000
+            connection.instanceFollowRedirects = true
+            connection.connect()
+            if (connection.responseCode !in 200..299) {
+                return err("HTTP ${connection.responseCode}: ${connection.responseMessage}")
+            }
+            connection.inputStream.use { input ->
+                FileOutputStream(dstFile).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            FileOperationEvents.notify(destination, "create")
+            val size = formatSize(dstFile.length())
+            FileLogger.d("AIToolSet", "下载完成: $destination ($size)")
+            ok("Downloaded: $destination ($size)")
+        } catch (e: Exception) {
+            err("Download failed: ${e.message}")
+        }
+    }
+
+    @Tool(description = "发送 HTTP 请求，返回响应内容。支持 GET/POST/PUT/DELETE。")
+    fun httpRequest(
+        @ToolParam(description = "请求 URL") url: String,
+        @ToolParam(description = "HTTP 方法：GET/POST/PUT/DELETE，默认 GET") method: String = "GET",
+        @ToolParam(description = "可选的请求头，JSON 对象字符串") headers: String = "",
+        @ToolParam(description = "可选的请求体（POST/PUT 时使用）") body: String = "",
+    ): String {
+        if (url.isBlank()) return err("URL is empty.")
+        Log.d("AIToolSet", "HTTP请求: method=$method url=$url")
+        FileLogger.d("AIToolSet", "HTTP请求: method=$method url=$url")
+        return try {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.requestMethod = method.uppercase()
+            connection.connectTimeout = 15000
+            connection.readTimeout = 30000
+            connection.instanceFollowRedirects = true
+            if (headers.isNotBlank()) {
+                try {
+                    val json = org.json.JSONObject(headers)
+                    for (k in json.keys()) connection.setRequestProperty(k, json.getString(k))
+                } catch (_: Exception) { }
+            }
+            if (body.isNotBlank() && (method.uppercase() == "POST" || method.uppercase() == "PUT")) {
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            }
+            connection.connect()
+            val code = connection.responseCode
+            val response = if (code in 200..299) {
+                connection.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $code"
+            }
+            val preview = response.take(3000)
+            val suffix = if (response.length > 3000) "\n... (${response.length - 3000} more chars)" else ""
+            FileLogger.d("AIToolSet", "HTTP $method $url -> $code (${response.length} chars)")
+            ok("HTTP $code\n$preview$suffix")
+        } catch (e: Exception) {
+            Log.e("AIToolSet", "HTTP请求失败: ${e.message}", e)
+            FileLogger.e("AIToolSet", "HTTP请求失败: ${e.message}", e)
+            err("${e.message}")
+        }
+    }
+
     @Tool(description = "读取构建/lint/编译错误，返回文件路径和行号。无缓存时自动运行gradle lint。")
     fun readLints(): String {
         Log.d("AIToolSet", "读取代码检查")
@@ -816,6 +1087,9 @@ class AIToolSet(
         "grep", "searchCodebase", "glob",
         "runCommand", "searchWeb", "readLints",
         "searchConversationMemory", "getRecentConversationMemory",
+        "fileExists", "fileInfo", "moveFile", "copyFile",
+        "zipFiles", "unzipFiles",
+        "visitWeb", "downloadFile", "httpRequest",
     )
 
     // === 对话历史记忆工具（仅本地模型可见） ===

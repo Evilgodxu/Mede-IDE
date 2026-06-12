@@ -66,6 +66,16 @@ class ToolCallHandler(
             "readLints" -> aiToolSet.readLints()
             "searchConversationMemory" -> aiToolSet.searchConversationMemory(args.g("query"))
             "getRecentConversationMemory" -> aiToolSet.getRecentConversationMemory(args.gInt("count", default = 5))
+            "fileExists" -> aiToolSet.fileExists(args.g("path"))
+            "fileInfo" -> aiToolSet.fileInfo(args.g("path"))
+            "moveFile" -> aiToolSet.moveFile(args.g("source"), args.g("destination"))
+            "copyFile" -> aiToolSet.copyFile(args.g("source"), args.g("destination"))
+            "zipFiles" -> aiToolSet.zipFiles(args.g("source"), args.g("destination"))
+            "unzipFiles" -> aiToolSet.unzipFiles(args.g("source"), args.g("destination"))
+            "visitWeb" -> aiToolSet.visitWeb(args.g("url"))
+            "downloadFile" -> aiToolSet.downloadFile(args.g("url"), args.g("destination"))
+            "httpRequest" -> aiToolSet.httpRequest(
+                args.g("url"), args.g("method").ifEmpty { "GET" }, args.g("headers"), args.g("body"))
             else -> "Unknown tool: $name"
         }
         FileLogger.d("ToolCallHandler", "executeAiTool: $name returned ${result.take(200)}")
@@ -94,6 +104,11 @@ class ToolCallHandler(
             "searchConversationMemory", "getRecentConversationMemory" -> ModelActivity.SearchingCode
             "runCommand" -> ModelActivity.RunningCommand
             "readLints" -> ModelActivity.ReadingLints
+            "moveFile", "copyFile" -> ModelActivity.EditingFile
+            "zipFiles", "unzipFiles" -> ModelActivity.EditingFile
+            "downloadFile" -> ModelActivity.WritingFile
+            "visitWeb", "searchWeb" -> ModelActivity.SearchingWeb
+            "httpRequest" -> ModelActivity.SearchingWeb
             else -> ModelActivity.ExecutingTool
         }
     }
@@ -119,7 +134,8 @@ class ToolCallHandler(
 
     /** 工具调用后自动注入 Lint 诊断（仅当有修改操作时） */
     suspend fun autoInjectLint(toolCalls: List<Triple<String?, String, Map<String, String>>>): String? {
-        val modifyingTools = setOf("writeFile", "replaceInFile", "batchReplaceInFile", "deleteFile", "createDirectory")
+        val modifyingTools = setOf("writeFile", "replaceInFile", "batchReplaceInFile", "deleteFile", "createDirectory",
+            "moveFile", "copyFile", "zipFiles", "unzipFiles", "downloadFile")
         if (toolCalls.none { it.second in modifyingTools }) return null
         val result = withContext(Dispatchers.IO) { aiToolSet.readLints() }
         return if (result.contains("No lint errors") || result.contains("读取诊断失败") || result.contains("No errors")) null

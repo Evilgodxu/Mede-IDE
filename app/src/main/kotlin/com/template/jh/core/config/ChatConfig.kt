@@ -17,10 +17,14 @@ object ChatConfig {
         "batchReplaceInFile", "deleteFile", "createDirectory", "runCommand",
         "searchWeb", "readLints", "grep", "searchCodebase", "glob",
         "searchConversationMemory", "getRecentConversationMemory",
+        "fileExists", "fileInfo", "moveFile", "copyFile",
+        "zipFiles", "unzipFiles",
+        "visitWeb", "downloadFile", "httpRequest",
     )
 
     val MODIFYING_TOOLS = setOf(
         "writeFile", "replaceInFile", "batchReplaceInFile", "deleteFile", "createDirectory",
+        "moveFile", "copyFile", "zipFiles", "unzipFiles", "downloadFile",
     )
 
     val OPEN_FILE_TOOLS = setOf(
