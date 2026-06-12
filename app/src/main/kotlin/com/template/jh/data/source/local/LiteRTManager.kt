@@ -287,10 +287,10 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
     override fun close() { unloadModel() }
 
     // 扫描模型文件（.litertlm，递归+MediaStore双通道，30s 缓存）
-    fun scanModels(customPaths: List<String> = emptyList()): List<ModelInfo> {
+    fun scanModels(customPaths: List<String> = emptyList(), force: Boolean = false): List<ModelInfo> {
         val cached = modelsCache
         val now = System.currentTimeMillis()
-        if (cached != null && customPaths.isEmpty() && (now - modelsCacheTime) < modelsCacheTtlMs) return cached
+        if (!force && cached != null && customPaths.isEmpty() && (now - modelsCacheTime) < modelsCacheTtlMs) return cached
         val seen = mutableSetOf<String>()
         val models = mutableListOf<ModelInfo>()
 

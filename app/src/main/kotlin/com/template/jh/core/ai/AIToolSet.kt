@@ -30,6 +30,10 @@ class AIToolSet(
     @Volatile
     var callback: ToolExecutionCallback? = null
 
+    /** 当前对话 ID，由 ChatViewModel 设置，记忆工具按此隔离 */
+    @Volatile
+    var currentConversationId: String? = null
+
     /** 包裹 @Tool 方法：自动触发 onToolStart / onToolResult */
     private inline fun <T> traceTool(name: String, block: () -> T): T {
         callback?.onToolStart(name, emptyMap())
@@ -268,9 +272,9 @@ class AIToolSet(
             .trimEnd('\n')
     }
 
-    @Tool(description = "读取文本文件内容，返回纯文本无行号前缀。支持分页：offset从1开始，limit默认1000。超500行自动截断为前200行。")
+    @Tool(description = "读取文件内容，返回纯文本无行号前缀。支持分页：offset从1开始，limit默认1000。超500行自动截断为前200行。")
     fun readFile(
-        @ToolParam(description = "文件路径，相对项目根目录，如'app/src/main.kt'") path: String,
+        @ToolParam(description = "文件路径，绝对路径或相对项目根目录，如'app/src/main.kt'") path: String,
         @ToolParam(description = "起始行号，从1开始计数，默认1") offset: Int = 1,
         @ToolParam(description = "最大读取行数，默认1000") limit: Int = 1000,
     ): String = traceTool("readFile", "path" to path, "offset" to offset, "limit" to limit) {
@@ -314,7 +318,7 @@ class AIToolSet(
 
     @Tool(description = "创建新文件。overwrite=false(默认)时若文件已存在则报错并提示用replaceInFile修改；overwrite=true则覆盖。")
     fun writeFile(
-        @ToolParam(description = "文件路径，相对项目根目录，如'src/App.kt'") path: String,
+        @ToolParam(description = "文件路径，绝对路径或相对项目根目录，如'src/App.kt'") path: String,
         @ToolParam(description = "要写入的完整文本内容") content: String,
         @ToolParam(description = "是否覆盖已有文件，默认false") overwrite: Boolean = false,
     ): String = traceTool("writeFile", "path" to path, "content" to content, "overwrite" to overwrite) {
@@ -359,7 +363,7 @@ class AIToolSet(
     // 这是唯一推荐的编辑方式：提供 old_string（要查找的代码块）和 new_string（新代码块）
     @Tool(description = "编辑文件，精确替换代码块。old_string必须在搜索范围内唯一；可用lineStart/lineEnd(1-based)缩小范围，传0搜全文。")
     fun replaceInFile(
-        @ToolParam(description = "文件路径，相对项目根目录，如'src/MainActivity.kt'") path: String,
+        @ToolParam(description = "文件路径，绝对路径或相对项目根目录，如'src/MainActivity.kt'") path: String,
         @ToolParam(description = "要查找的精确代码块，在搜索范围内必须唯一匹配") old_string: String,
         @ToolParam(description = "替换后的新代码块") new_string: String,
         @ToolParam(description = "搜索起始行(1-based)，0表示从文件开头") lineStart: Int = 0,
@@ -426,15 +430,15 @@ class AIToolSet(
     // 批量编辑 — 一次调用替换多处不重叠的内容
     @Tool(description = "批量编辑，一次替换多处不重叠代码。edits基于原始文件同时匹配（非顺序应用），编辑不能重叠。单次编辑请用replaceInFile。")
     fun batchReplaceInFile(
-        @ToolParam(description = "文件路径，相对项目根目录，如'src/MainActivity.kt'") path: String,
-        @ToolParam(description = "JSON数组：[{\"old_string\":\"原代码\",\"new_string\":\"新代码\"}]") editsJson: String,
-    ): String = traceTool("batchReplaceInFile", "path" to path, "editsJson" to editsJson) {
+        @ToolParam(description = "文件路径，绝对路径或相对项目根目录，如'src/MainActivity.kt'") path: String,
+        @ToolParam(description = "JSON数组：[{\"old_string\":\"原代码\",\"new_string\":\"新代码\"}]") edits: String,
+    ): String = traceTool("batchReplaceInFile", "path" to path, "edits" to edits) {
         requireProject("批量编辑")?.let { return@traceTool it }
         val fm = fileManager!!
         val resolvedPath = resolvePathOrAbsolute(path)
         return@traceTool try {
-            Log.d("AIToolSet", "批量替换: path=$resolvedPath editsLen=${editsJson.length}")
-            FileLogger.d("AIToolSet", "批量替换: path=$resolvedPath editsLen=${editsJson.length}")
+            Log.d("AIToolSet", "批量替换: path=$resolvedPath editsLen=${edits.length}")
+            FileLogger.d("AIToolSet", "批量替换: path=$resolvedPath editsLen=${edits.length}")
             val original = readFileRaw(resolvedPath)
             if (original == null) {
                 Log.w("AIToolSet", "批量替换: 文件未找到: $resolvedPath")
@@ -443,19 +447,19 @@ class AIToolSet(
             }
 
             // 解析 JSON edits 数组
-            val jsonArr = org.json.JSONArray(editsJson)
-            val edits = mutableListOf<CodeEditTool.Edit>()
+            val jsonArr = org.json.JSONArray(edits)
+            val editList = mutableListOf<CodeEditTool.Edit>()
             for (i in 0 until jsonArr.length()) {
                 val obj = jsonArr.getJSONObject(i)
                 val oldStr = obj.optString("old_string", "") ?: ""
                 val newStr = obj.optString("new_string", "") ?: ""
                 if (oldStr.isEmpty()) return err("Edit #${i + 1}: missing old_string")
-                edits.add(CodeEditTool.Edit(oldStr, newStr))
+                editList.add(CodeEditTool.Edit(oldStr, newStr))
             }
 
-            if (edits.isEmpty()) return err("No edits provided.")
+            if (editList.isEmpty()) return err("No edits provided.")
 
-            when (val result = CodeEditTool.batchReplace(original, edits)) {
+            when (val result = CodeEditTool.batchReplace(original, editList)) {
                 is CodeEditTool.ReplaceResult.Success -> {
                     val newContent = normalizeBlankLines(result.newText)
                     val writeResult = fm.writeFile(resolvedPath, newContent)
@@ -465,7 +469,7 @@ class AIToolSet(
                     }
                     FileOperationEvents.notify(resolvedPath, "modify")
                     FileLogger.d("AIToolSet", "批量替换成功: $resolvedPath")
-                    ok("$resolvedPath — ${edits.size} edits applied. ${result.message}")
+                    ok("$resolvedPath — ${editList.size} edits applied. ${result.message}")
                 }
                 is CodeEditTool.ReplaceResult.Error -> {
                     FileLogger.w("AIToolSet", "批量替换: CodeEditTool 拒绝: ${result.message.take(200)}")
@@ -486,7 +490,7 @@ class AIToolSet(
 
     @Tool(description = "删除文件或目录。谨慎使用，删除后无法恢复。")
     fun deleteFile(
-        @ToolParam(description = "文件或目录路径，相对项目根目录，如'src/OldFile.kt'或'temp/'") path: String,
+        @ToolParam(description = "文件或目录路径，绝对路径或相对项目根目录，如'src/OldFile.kt'或'temp/'") path: String,
     ): String = traceTool("deleteFile", "path" to path) {
         requireProject("删除文件")?.let { return it }
         val fm = fileManager!!
@@ -507,7 +511,7 @@ class AIToolSet(
 
     @Tool(description = "创建目录，自动创建所有父目录。支持多级路径如'src/utils/helpers'")
     fun createDirectory(
-        @ToolParam(description = "目录路径，相对项目根目录，如'src/utils'") path: String,
+        @ToolParam(description = "目录路径，绝对路径或相对项目根目录，如'src/utils'") path: String,
     ): String = traceTool("createDirectory", "path" to path) {
         requireProject("创建目录")?.let { return it }
         val fm = fileManager!!
@@ -816,21 +820,21 @@ class AIToolSet(
 
     // === 对话历史记忆工具（仅本地模型可见） ===
 
-    @Tool(description = "语义搜索对话历史。需要回忆之前讨论内容时使用，如'我们改过哪些文件'、'上次怎么修的bug'。")
+    @Tool(description = "语义搜索对话历史。需要回忆之前讨论内容时使用，如'我们改过哪些文件'、'上次怎么修的bug'。仅搜索当前对话记忆。")
     fun searchConversationMemory(
         @ToolParam(description = "搜索内容，如'文件结构'或'错误修复'") query: String,
     ): String {
         val mem = conversationMemory ?: return "对话记忆系统未加载。"
         Log.d("AIToolSet", "搜索会话记忆: query=$query")
-        return mem.searchFormatted(query)
+        return mem.searchFormatted(query, conversationId = currentConversationId)
     }
 
-    @Tool(description = "获取最近对话摘要。用于回顾最近几次交流内容。")
+    @Tool(description = "获取最近对话摘要。用于回顾最近几次交流内容。默认返回最近5条，仅返回当前对话。")
     fun getRecentConversationMemory(
         @ToolParam(description = "最近条目数，默认5，最大20") count: Int = 5,
     ): String {
         val mem = conversationMemory ?: return "对话记忆系统未加载。"
         Log.d("AIToolSet", "获取最近会话记忆: count=$count")
-        return mem.recentFormatted(count.coerceIn(1, 20))
+        return mem.recentFormatted(count.coerceIn(1, 20), conversationId = currentConversationId)
     }
 }

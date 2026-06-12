@@ -44,26 +44,25 @@ class ToolCallHandler(
             parseBool(this[key] ?: aliases.firstNotNullOfOrNull { this[it] }, default)
 
         val result = when (name) {
-            "listFiles" -> aiToolSet.listFiles(args.g("subPath", "sub_path", "path"))
+            "listFiles" -> aiToolSet.listFiles(args.g("subPath"))
             "readFile" -> aiToolSet.readFile(
                 args.g("path"), args.gInt("offset", default = 1), args.gInt("limit", default = 1000))
             "writeFile" -> aiToolSet.writeFile(
                 args.g("path"), args.g("content"), args.gBool("overwrite", default = false))
             "replaceInFile" -> aiToolSet.replaceInFile(
-                args.g("path"), args.g("old_string", "oldString", "old_str"), args.g("new_string", "newString", "new_str"),
-                args.gInt("lineStart", "line_start", default = 0), args.gInt("lineEnd", "line_end", default = 0))
+                args.g("path"), args.g("old_string"), args.g("new_string"),
+                args.gInt("lineStart", default = 0), args.gInt("lineEnd", default = 0))
             "batchReplaceInFile" -> aiToolSet.batchReplaceInFile(
-                args.g("path"), args.g("edits", "editsJson", "edits_json"))
+                args.g("path"), args.g("edits"))
             "grep" -> aiToolSet.grep(
-                args.g("pattern", "query"), args.g("extension", "ext"), args.g("glob"),
-                args.gBool("ignoreCase", "ignore_case", "caseSensitive", "case_sensitive"),
-                args.gInt("contextLines", "context_lines", "context", default = 2))
-            "searchCodebase" -> aiToolSet.searchCodebase(args.g("query"), args.g("targetDirectories", "target_directories", "directories"))
-            "glob" -> aiToolSet.glob(args.g("pattern"), args.gInt("maxResults", "max_results", default = 100))
+                args.g("pattern"), args.g("extension"), args.g("glob"),
+                args.gBool("ignoreCase"), args.gInt("contextLines", default = 2))
+            "searchCodebase" -> aiToolSet.searchCodebase(args.g("query"), args.g("targetDirectories"))
+            "glob" -> aiToolSet.glob(args.g("pattern"), args.gInt("maxResults", default = 100))
             "runCommand" -> aiToolSet.runCommand(args.g("command"))
             "searchWeb" -> aiToolSet.searchWeb(args.g("query"))
             "deleteFile" -> aiToolSet.deleteFile(args.g("path"))
-            "createDirectory" -> aiToolSet.createDirectory(args.g("path", "dirPath", "dir_path"))
+            "createDirectory" -> aiToolSet.createDirectory(args.g("path"))
             "readLints" -> aiToolSet.readLints()
             "searchConversationMemory" -> aiToolSet.searchConversationMemory(args.g("query"))
             "getRecentConversationMemory" -> aiToolSet.getRecentConversationMemory(args.gInt("count", default = 5))

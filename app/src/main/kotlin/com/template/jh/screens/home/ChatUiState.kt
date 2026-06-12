@@ -51,13 +51,11 @@ data class ChatUiState(
     val contextCompressedCount: Int = 0,   // 压缩次数
     val contextSummary: String = "",       // 云端 LLM 生成的上下文结构化摘要 JSON
     // 记忆系统状态
-    val memoryKeyFactCount: Int = 0,       // Layer 1 关键事实条数
-    val memorySummaryCount: Int = 0,       // Layer 3 摘要段数
-    val memoryEntryCount: Int = 0,         // Layer 2 短期记忆条数
-    val memoryTotalTokens: Int = 0,        // 记忆系统 token 估算（已压缩存储，不占当前窗口）
+    val memoryEntryCount: Int = 0,         // 记忆条目数
+    val memoryTotalTokens: Int = 0,        // 记忆系统 token 估算（不占当前窗口）
     val attachedImageUris: List<Uri> = emptyList(),
     // 本地推理后端配置
-    val backendType: BackendType = BackendType.CPU,
+    val backendType: BackendType = BackendType.GPU,
     val npuLibraryDir: String = "",
     // MTP (Multi-Turn Prediction / Speculative Decoding)
     val enableSpeculativeDecoding: Boolean = false,

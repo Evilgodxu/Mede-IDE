@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.template.jh.core.analytics.LlmCallRecord
 import com.template.jh.core.analytics.ModelUsageStats
+import com.template.jh.core.analytics.ToolCallRecord
+import com.template.jh.core.analytics.ToolUsageStats
 import com.template.jh.core.analytics.UsageStats
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -40,12 +42,21 @@ class UsageAnalyticsRepository(private val context: Context) {
         }
     }
 
+    /** 记录一次工具调用 */
+    suspend fun recordToolCall(call: ToolCallRecord) {
+        context.usageStore.edit { prefs ->
+            val current = prefs[Keys.STATS_JSON]?.let { parseStats(it) } ?: UsageStats()
+            val updated = aggregateToolCall(current, call)
+            prefs[Keys.STATS_JSON] = serializeStats(updated)
+        }
+    }
+
     /** 重置所有统计 */
     suspend fun resetStats() {
         context.usageStore.edit { it[Keys.STATS_JSON] = serializeStats(UsageStats()) }
     }
 
-    // ===== 聚合逻辑 =====
+    // ===== LLM 调用聚合 =====
 
     private fun aggregate(current: UsageStats, call: LlmCallRecord, resetToday: Boolean): UsageStats {
         val todayDate = todayDate()
@@ -74,6 +85,18 @@ class UsageAnalyticsRepository(private val context: Context) {
         )
     }
 
+    // ===== 工具调用聚合 =====
+
+    private fun aggregateToolCall(current: UsageStats, call: ToolCallRecord): UsageStats {
+        val existing = current.byTool[call.toolName] ?: ToolUsageStats()
+        val byTool = current.byTool + (call.toolName to ToolUsageStats(
+            calls = existing.calls + 1,
+            failed = existing.failed + if (call.success) 0 else 1,
+            totalDurationMs = existing.totalDurationMs + call.durationMs,
+        ))
+        return current.copy(byTool = byTool)
+    }
+
     // ===== 序列化 =====
 
     private fun serializeStats(stats: UsageStats): String = JSONObject().apply {
@@ -92,6 +115,13 @@ class UsageAnalyticsRepository(private val context: Context) {
                 put("durationMs", v.durationMs)
             }
         }))
+        put("byTool", JSONObject(stats.byTool.mapValues { (_, v) ->
+            JSONObject().apply {
+                put("calls", v.calls)
+                put("failed", v.failed)
+                put("totalDurationMs", v.totalDurationMs)
+            }
+        }))
     }.toString()
 
     private fun parseStats(json: String): UsageStats {
@@ -107,6 +137,15 @@ class UsageAnalyticsRepository(private val context: Context) {
                     durationMs = m.optLong("durationMs", 0),
                 )
             }
+            val byToolRaw = obj.optJSONObject("byTool") ?: JSONObject()
+            val byTool = byToolRaw.keys().asSequence().associate { key ->
+                val t = byToolRaw.getJSONObject(key)
+                key to ToolUsageStats(
+                    calls = t.optInt("calls", 0),
+                    failed = t.optInt("failed", 0),
+                    totalDurationMs = t.optLong("totalDurationMs", 0),
+                )
+            }
             UsageStats(
                 totalCalls = obj.optInt("totalCalls", 0),
                 totalPromptTokens = obj.optInt("totalPromptTokens", 0),
@@ -116,6 +155,7 @@ class UsageAnalyticsRepository(private val context: Context) {
                 todayTokens = obj.optInt("todayTokens", 0),
                 lastResetDate = obj.optString("lastResetDate", ""),
                 byModel = byModel,
+                byTool = byTool,
             )
         } catch (_: Exception) { UsageStats() }
     }

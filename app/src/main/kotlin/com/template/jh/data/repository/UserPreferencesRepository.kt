@@ -358,7 +358,7 @@ class UserPreferencesRepository(private val context: Context) {
 
     // 本地推理后端类型
     val backendType: Flow<BackendType> = context.dataStore.data
-        .map { it[PreferencesKeys.BACKEND_TYPE]?.let { BackendType.fromName(it) } ?: BackendType.CPU }
+        .map { it[PreferencesKeys.BACKEND_TYPE]?.let { BackendType.fromName(it) } ?: BackendType.GPU }
 
     suspend fun setBackendType(type: BackendType) {
         context.dataStore.edit { it[PreferencesKeys.BACKEND_TYPE] = type.name }
@@ -389,12 +389,12 @@ class UserPreferencesRepository(private val context: Context) {
                     val obj = JSONObject(json)
                     com.template.jh.model.chat.ModelParams(
                         topK = obj.optInt("topK", 10),
-                        topP = obj.optDouble("topP", 0.95),
-                        temperature = obj.optDouble("temperature", 0.8),
+                        topP = obj.optDouble("topP", 0.7),
+                        temperature = obj.optDouble("temperature", 0.1),
                         seed = obj.optInt("seed", 0),
-                        contextWindowTokens = obj.optInt("contextWindowTokens", 32768),
+                        contextWindowTokens = obj.optInt("contextWindowTokens", 4096),
                         enableSpeculativeDecoding = obj.optBoolean("enableSpeculativeDecoding", false),
-                        backendType = BackendType.fromName(obj.optString("backendType", "CPU")),
+                        backendType = BackendType.fromName(obj.optString("backendType", "GPU")),
                     )
                 } catch (_: Exception) { com.template.jh.model.chat.ModelParams() }
             } else com.template.jh.model.chat.ModelParams()

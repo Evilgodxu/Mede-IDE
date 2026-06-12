@@ -2,6 +2,7 @@ package com.template.jh.screens.home
 
 import android.app.Application
 import android.net.Uri
+import android.os.Environment
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -10,13 +11,13 @@ import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Message
-import com.google.ai.edge.litertlm.ToolCall
 import com.google.ai.edge.litertlm.tool
 import com.template.jh.core.ai.AIToolSet
 import com.template.jh.core.ai.FileOperationEvents
 import com.template.jh.core.ai.ToolCallHandler
 import com.template.jh.core.ai.ToolExecutionCallback
 import com.template.jh.core.analytics.LlmCallRecord
+import com.template.jh.core.analytics.ToolCallRecord
 import com.template.jh.core.analytics.UsageStats
 import com.template.jh.core.config.ChatConfig
 import com.template.jh.core.memory.ChatMessageAdapter
@@ -48,6 +49,7 @@ import com.template.jh.model.chat.BackendType
 import com.template.jh.screens.home.components.chat.toDisplayItems
 import com.template.jh.screens.home.logic.utils.FileTypeUtil
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -57,7 +59,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -86,22 +87,9 @@ class ChatViewModel(
     private val _state = MutableStateFlow(ChatUiState())
     val state: StateFlow<ChatUiState> = _state
 
-    data class StreamingState(val msgId: String, val content: String)
-    private val _streamingContent = MutableStateFlow<StreamingState?>(null)
-    val streamingContent: StateFlow<StreamingState?> = _streamingContent.asStateFlow()
-
-    val displayItems: StateFlow<List<DisplayItem>> = combine(
-        _state, _streamingContent
-    ) { s, stream ->
-        val items = toDisplayItems(s.messages)
-        if (stream == null) return@combine items
-        val lastModelIdx = items.indexOfLast { it.role == DisplayRole.Model }
-        if (lastModelIdx < 0) return@combine items
-        items.toMutableList().also { list ->
-            val old = list[lastModelIdx]
-            list[lastModelIdx] = old.copy(content = stream.content, isStreaming = true)
-        }
-    }.flowOn(Dispatchers.Default)
+    val displayItems: StateFlow<List<DisplayItem>> = _state
+        .map { it.messages.toDisplayItems() }
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val currentToolActivity: StateFlow<DisplayItem?> = _state.map { s ->
@@ -137,6 +125,8 @@ class ChatViewModel(
     private var sendJob: Job? = null
     @Volatile private var activeConversation: Conversation? = null
     private var pendingInitialMessages: List<Message>? = null
+    /** 工具调用开始时间戳（用于计算耗时） */
+    private val _toolStartTimes = mutableMapOf<String, Long>()
 
     // System prompt 依赖值缓存
     @Volatile private var sysPromptUserName: String = ""
@@ -153,7 +143,6 @@ class ChatViewModel(
         userName = sysPromptUserName,
         rules = sysPromptRules,
         skills = sysPromptSkills,
-        deepThink = sysPromptDeepThink,
         cloudModelEnabled = _state.value.cloudModelEnabled,
         aiToolSet = aiToolSet,
     )
@@ -182,8 +171,6 @@ class ChatViewModel(
         val stats = contextManager.getMemoryStats()
         _state.update {
             it.copy(
-                memoryKeyFactCount = stats.keyFactCount,
-                memorySummaryCount = 0,
                 memoryEntryCount = stats.entryCount,
                 memoryTotalTokens = stats.estimatedTokens,
             )
@@ -204,18 +191,13 @@ class ChatViewModel(
             messages = s.messages,
             sysPromptTokens = contextManager.estimateSystemPromptTokens(contextManager.getSysPromptCache()),
         )
-        val architecture = com.template.jh.core.memory.VisualizerEngine.buildMemoryArchitecture(conversationMemory)
-        val keyFactCategories = com.template.jh.core.memory.VisualizerEngine.buildKeyFactCategories(conversationMemory)
-        val compressionHistory = com.template.jh.core.memory.VisualizerEngine.buildCompressionHistory(s.messages)
-        return DashboardData(snapshot, breakdown, architecture, keyFactCategories, compressionHistory)
+        return DashboardData(snapshot, breakdown, usageStats.value)
     }
 
     data class DashboardData(
         val snapshot: com.template.jh.core.memory.ContextSnapshot,
         val breakdown: com.template.jh.core.memory.TokenBreakdown,
-        val architecture: com.template.jh.core.memory.MemoryArchitecture,
-        val keyFactCategories: com.template.jh.core.memory.KeyFactCategories,
-        val compressionHistory: List<com.template.jh.core.memory.CompressionRecord>,
+        val usageStats: UsageStats = UsageStats(),
     )
 
     private suspend fun applyCompressResult(result: ContextManager.CompressResult) {
@@ -245,10 +227,40 @@ class ChatViewModel(
         return result.messages
     }
 
+    /** 本地模型：collect 完成后检查上下文是否超过 35% 阈值，超限则压缩并重建 */
+    private suspend fun compressLocalContextIfNeeded() {
+        val msgs = _state.value.messages
+        if (msgs.isEmpty()) return
+        val threshold = getCompressThreshold()
+        val totalTokens = contextManager.estimateContextTokens(msgs)
+        if (totalTokens <= threshold) return
+
+        val result = contextManager.compressMessages(
+            messages = msgs,
+            activeConversationId = _state.value.activeConversationId,
+            threshold = threshold,
+        )
+        if (result.removedTokens <= 0) return
+
+        // 更新 UI 消息列表为压缩后的版本
+        _state.update { it.copy(messages = result.messages) }
+        applyCompressResult(result)
+
+        // 关闭当前会话，下次 ensureConversation 自动重建
+        activeConversation?.let {
+            try { it.cancelProcess() } catch (_: Exception) {}
+            try { it.close() } catch (_: Exception) {}
+        }
+        activeConversation = null
+        pendingInitialMessages = contextManager.chatMessagesToLiteRT(result.messages)
+    }
+
     // ========== init ==========
 
     init {
-        scanModels()
+        viewModelScope.launch {
+            scanWhenStorageGranted()
+        }
         viewModelScope.launch {
             combine(
                 preferencesRepo.deepThinkEnabled,
@@ -286,6 +298,7 @@ class ChatViewModel(
         viewModelScope.launch {
             val saved = conversationRepo.load()
             _state.update { it.copy(conversations = saved) }
+            syncToolMemoryScope()
             conversationMemory.load()
             refreshMemoryState()
             try {
@@ -398,9 +411,16 @@ class ChatViewModel(
 
     fun scanModels() {
         viewModelScope.launch(Dispatchers.IO) {
-            val models = liteRTManager.scanModels()
+            val models = liteRTManager.scanModels(force = true)
             _state.update { it.copy(availableModels = models) }
         }
+    }
+
+    private suspend fun scanWhenStorageGranted() {
+        while (!Environment.isExternalStorageManager()) {
+            delay(500)
+        }
+        scanModels()
     }
 
     fun downloadModel(url: String, fileName: String) {
@@ -545,8 +565,9 @@ class ChatViewModel(
                 if (isCloud) {
                     processWithCloudTools(text, modelMsgId, ctx, tempImagePaths)
                 } else {
-                    ensureConversation(autoToolCalling = false)
+                    ensureConversation()
                     processLocalMessage(text, modelMsgId, tempImagePaths)
+                    compressLocalContextIfNeeded()
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
@@ -562,7 +583,8 @@ class ChatViewModel(
 
     fun cancelGeneration() {
         sendJob?.cancel()
-        // 不销毁会话，匹配官方示例永不关闭模式
+        // 取消 C++ 推理但不销毁会话，匹配官方示例永不关闭模式
+        activeConversation?.let { try { it.cancelProcess() } catch (_: Exception) {} }
         _state.value.messages.lastOrNull()?.let { msg -> if (msg.isStreaming) finalizeModelMessage(msg.id) }
         _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
     }
@@ -624,11 +646,20 @@ class ChatViewModel(
         _state.update { it.copy(contextMaxTokens = window) }
     }
 
-    private fun ensureConversation(autoToolCalling: Boolean = false): Conversation {
+    private fun ensureConversation(autoToolCalling: Boolean = true): Conversation {
+        // 复用现有会话：仅系统指令变更或切换对话时重建
+        val needsRebuild = convSysPromptVersion != sysPromptVersion ||
+            (pendingInitialMessages != null && pendingInitialMessages!!.isNotEmpty())
+        if (!needsRebuild && activeConversation != null) {
+            pendingInitialMessages = null
+            return activeConversation!!
+        }
         val initialMsgs = pendingInitialMessages
         pendingInitialMessages = null
-        // 每轮重建，匹配 Gallery 官方应用模式
-        activeConversation?.let { try { it.close() } catch (_: Exception) {} }
+        activeConversation?.let {
+            try { it.cancelProcess() } catch (_: Exception) {}
+            try { it.close() } catch (_: Exception) {}
+        }
         activeConversation = null
         convSysPromptVersion = sysPromptVersion
         val conv = liteRTManager.createConversation(
@@ -659,14 +690,9 @@ class ChatViewModel(
             _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
             return
         }
-        // 上下文注入消息渠道（不走系统指令）
-        val convId = _state.value.activeConversationId ?: ""
-        val memoryCtx = contextManager.getMemoryContext(convId)
-        val keyFactsCtx = contextManager.getKeyFactsContext()
+        // 上下文注入消息渠道
         val editorCtx = buildEditorContext()
         val messageBuilder = StringBuilder()
-        if (memoryCtx.isNotBlank()) messageBuilder.appendLine(memoryCtx).appendLine()
-        if (keyFactsCtx.isNotBlank()) messageBuilder.appendLine(keyFactsCtx).appendLine()
         if (editorCtx.isNotBlank()) messageBuilder.appendLine(editorCtx).appendLine()
         if (sysPromptRules.isNotEmpty()) {
             messageBuilder.appendLine("【系统规则】")
@@ -687,73 +713,58 @@ class ChatViewModel(
 
         val hasImages = imagePaths.isNotEmpty()
         val thinkCtx = mapOf("enable_thinking" to sysPromptDeepThink)
-        var currentMessage: Message = if (hasImages) {
+        val currentMessage: Message = if (hasImages) {
             val contents = mutableListOf<Content>(Content.Text(userText))
             imagePaths.forEach { contents.add(Content.ImageFile(absolutePath = it)) }
             Message.user(Contents.of(contents))
         } else {
             Message.user(userText)
         }
-        var currentMsgId = msgId
         var channelContent: String? = null
 
+        // 注入回调：框架自动执行 @Tool 方法时更新 UI 状态并记录工具调用
+        toolCallHandler.callback = object : ToolExecutionCallback {
+            override fun onToolStart(name: String, args: Map<String, String>) {
+                val detail = args["path"] ?: args["command"] ?: args["query"] ?: ""
+                _state.update { it.copy(modelActivity = toolCallHandler.toolNameToActivity(name), activityDetail = detail) }
+                _toolStartTimes[name] = System.currentTimeMillis()
+            }
+            override fun onToolResult(name: String, args: Map<String, String>, result: String) {
+                _state.update { it.copy(modelActivity = ModelActivity.ProcessingResult, activityDetail = "") }
+                val startMs = _toolStartTimes.remove(name) ?: return
+                val durationMs = System.currentTimeMillis() - startMs
+                val success = !result.startsWith("Tool error:") && !result.startsWith("Error:")
+                viewModelScope.launch {
+                    usageAnalyticsRepo.recordToolCall(
+                        ToolCallRecord(
+                            toolName = name,
+                            success = success,
+                            durationMs = durationMs,
+                        )
+                    )
+                }
+            }
+        }
+
         try {
-            for (round in 0..<ChatConfig.MAX_TOOL_RETRY_ROUNDS) {
-                val roundText = StringBuilder()
-                val roundToolCalls = mutableListOf<ToolCall>()
-
-                conv.sendMessageAsync(currentMessage, extraContext = thinkCtx).collect { msg ->
-                    val c = msg.contents.toString()
-                    if (c.isNotEmpty()) {
-                        roundText.append(c)
-                        updateModelMessage(currentMsgId, c, true)
-                    }
-                    if (msg.toolCalls.isNotEmpty()) {
-                        roundToolCalls.addAll(msg.toolCalls)
-                    }
-                    if (msg.channels.isNotEmpty()) {
-                        channelContent = (channelContent ?: "") + msg.channels.values.joinToString("\n")
-                    }
+            conv.sendMessageAsync(currentMessage, extraContext = thinkCtx).collect { msg ->
+                val c = msg.contents.toString()
+                if (c.isNotEmpty()) {
+                    updateModelMessage(msgId, c, true)
                 }
-
-                if (roundToolCalls.isEmpty()) {
-                    // 无工具调用 → 最终回复
-                    break
+                if (msg.channels.isNotEmpty()) {
+                    channelContent = (channelContent ?: "") + msg.channels.values.joinToString("\n")
                 }
-
-                // 执行工具调用
-                val toolResults = mutableListOf<Content.ToolResponse>()
-                val display = StringBuilder()
-
-                for (tc in roundToolCalls) {
-                    val argsStr = tc.arguments.mapValues { it.value?.toString() ?: "" }
-                    val name = tc.name
-                    val result = withContext(Dispatchers.IO) {
-                        toolCallHandler.executeAiTool(name, argsStr)
-                    }
-                    display.appendLine("[工具调用: $name]")
-                    display.appendLine(result)
-                    toolResults.add(Content.ToolResponse(name, result))
-                }
-
-                // 显示工具结果
-                updateModelMessage(currentMsgId, "\n\n${display.toString().trimEnd()}", false)
-                finalizeModelMessage(currentMsgId)
-
-                // 发回工具结果，进入下一轮
-                currentMessage = Message.tool(Contents.of(toolResults))
-                currentMsgId = java.util.UUID.randomUUID().toString()
-                _state.update { it.copy(messages = it.messages + ChatMessage(id = currentMsgId, role = ChatRole.Model, content = "", isStreaming = true)) }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             FileLogger.e("ChatViewModel", "本地对话处理失败: ${e.message}", e)
-            updateModelMessage(currentMsgId, "\n\n[错误: ${e.message}]", false)
+            updateModelMessage(msgId, "\n\n[错误: ${e.message}]", false)
         } finally {
-            finalizeModelMessage(currentMsgId, channelContent = channelContent)
-            try { conv.close() } catch (_: Exception) {}
-            if (activeConversation === conv) { activeConversation = null }
+            finalizeModelMessage(msgId, channelContent = channelContent)
+            toolCallHandler.callback = null
+            // 不关闭会话，匹配官方示例：Conversation 持续复用
         }
     }
 
@@ -1068,7 +1079,6 @@ class ChatViewModel(
 
     fun newConversation() {
         sendJob?.cancel()
-        _streamingContent.value = null
         val s = _state.value
         val updatedConversations = if (s.messages.isNotEmpty()) {
             val title = s.messages.firstOrNull { it.role == ChatRole.User }?.content?.take(30) ?: "新对话"
@@ -1086,6 +1096,7 @@ class ChatViewModel(
                 isContextCompressed = false, contextCompressedTokens = 0, contextCompressedCount = 0,
                 contextSummary = "")
         }
+        syncToolMemoryScope()
         viewModelScope.launch(Dispatchers.IO) {
             closeConversation()
             persistConversations(updatedConversations)
@@ -1094,7 +1105,6 @@ class ChatViewModel(
 
     fun switchConversation(entry: ConversationEntry) {
         sendJob?.cancel()
-        _streamingContent.value = null
         pendingInitialMessages = entry.messages.mapNotNull { msg ->
             when (msg.role) {
                 ChatRole.User -> Message.user(msg.content)
@@ -1108,6 +1118,7 @@ class ChatViewModel(
             activeConversationId = entry.id, isHistoryOpen = false,
             isContextCompressed = false, contextCompressedTokens = 0, contextCompressedCount = 0,
             contextSummary = "") }
+        syncToolMemoryScope()
         viewModelScope.launch(Dispatchers.IO) { closeConversation() }
     }
 
@@ -1119,6 +1130,7 @@ class ChatViewModel(
             if (isActive) it.copy(conversations = updated, messages = emptyList(), activeConversationId = null)
             else it.copy(conversations = updated)
         }
+        syncToolMemoryScope()
         viewModelScope.launch(Dispatchers.IO) {
             if (isActive) closeConversation()
             persistConversations(updated)
@@ -1131,24 +1143,29 @@ class ChatViewModel(
     // ========== 消息状态更新 ==========
 
     private fun updateModelMessage(msgId: String, chunk: String, append: Boolean) {
-        _streamingContent.value = StreamingState(
-            msgId = msgId,
-            content = if (append) {
-                (_streamingContent.value?.content ?: "") + chunk
-            } else chunk,
-        )
+        _state.update { state ->
+            val updatedMessages = state.messages.map { msg ->
+                if (msg.id == msgId) {
+                    val newContent = if (append) msg.content + chunk else chunk
+                    msg.copy(content = newContent, isStreaming = true)
+                } else msg
+            }
+            state.copy(messages = updatedMessages)
+        }
     }
 
     private fun finalizeModelMessage(msgId: String, channelContent: String? = null) {
-        val finalContent = _streamingContent.value?.content ?: ""
         _state.update { state ->
             val updatedMessages = state.messages.map { msg ->
-                if (msg.id == msgId) msg.copy(content = finalContent, isStreaming = false, channelContent = channelContent ?: msg.channelContent)
+                if (msg.id == msgId) msg.copy(
+                    content = msg.content,
+                    isStreaming = false,
+                    channelContent = channelContent ?: msg.channelContent,
+                )
                 else msg
             }
             state.copy(messages = updatedMessages, isLoading = false)
         }
-        _streamingContent.value = null
         viewModelScope.launch { autoSaveToMemory() }
         saveCurrentToHistory()
     }
@@ -1160,27 +1177,43 @@ class ChatViewModel(
         val entry = ConversationEntry(id = s.activeConversationId ?: java.util.UUID.randomUUID().toString(), title = title, messages = s.messages)
         val updated = if (s.conversations.any { it.id == entry.id }) s.conversations.map { if (it.id == entry.id) entry else it }
         else listOf(entry) + s.conversations
-        _state.update { it.copy(conversations = updated, activeConversationId = entry.id) }
-        persistConversations(updated)
+        // 历史对话仅保留最近 15 条
+        val capped = updated.take(15)
+        _state.update { it.copy(conversations = capped, activeConversationId = entry.id) }
+        syncToolMemoryScope()
+        persistConversations(capped)
     }
 
     private fun persistConversations(conversations: List<ConversationEntry>) {
         viewModelScope.launch(Dispatchers.IO) { conversationRepo.save(conversations) }
     }
 
+    /** 同步 AIToolSet 记忆隔离用的当前对话 ID */
+    private fun syncToolMemoryScope() {
+        aiToolSet.currentConversationId = _state.value.activeConversationId
+    }
+
+    private var lastSavedMsgIndex = -1
+
     private suspend fun autoSaveToMemory() {
         val msgs = _state.value.messages
         if (msgs.isEmpty()) return
-        val recentUser = msgs.lastOrNull { it.role == ChatRole.User && !it.content.startsWith("[系统指令]") }
-        val recentModel = msgs.lastOrNull { it.role == ChatRole.Model && it.isStreaming == false && !it.content.startsWith("[上下文") }
-        val toSave = mutableListOf<ChatMessageAdapter>()
-        recentUser?.let { toSave.add(ChatMessageAdapter("user", it.content.take(2000))) }
-        recentModel?.let { toSave.add(ChatMessageAdapter("model", it.content.take(2000))) }
-        if (toSave.isNotEmpty()) {
-            val convId = _state.value.activeConversationId ?: ""
-            conversationMemory.addMessages(toSave, convId)
-            refreshMemoryState()
+        // 上下文超过 85% 时不再存储记忆（用户应开始新对话）
+        val ratio = if (_state.value.contextMaxTokens > 0)
+            contextManager.estimateContextTokens(msgs).toFloat() / _state.value.contextMaxTokens else 0f
+        if (ratio >= 0.85f) return
+        val convId = _state.value.activeConversationId ?: ""
+        // 增量保存：只保存上次记录之后的新消息
+        val newMessages = msgs.drop(lastSavedMsgIndex + 1)
+            .filter { it.role == ChatRole.User || (it.role == ChatRole.Model && it.isStreaming == false) }
+            .filterNot { it.content.startsWith("[系统指令]") || it.content.startsWith("[上下文") }
+        if (newMessages.isEmpty()) return
+        val toSave = newMessages.map { msg ->
+            ChatMessageAdapter(if (msg.role == ChatRole.User) "user" else "model", msg.content)
         }
+        conversationMemory.addMessages(toSave, convId)
+        lastSavedMsgIndex = msgs.size - 1
+        refreshMemoryState()
     }
 
     override fun onCleared() {

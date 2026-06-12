@@ -130,7 +130,6 @@ fun AIChatPanel(
 ) {
     val state by viewModel.state.collectAsState()
     val displayItems by viewModel.displayItems.collectAsState()
-    val streamingContent by viewModel.streamingContent.collectAsState()
     val currentToolActivity by viewModel.currentToolActivity.collectAsState()
     val listState = rememberLazyListState()
     var isAtBottom by remember { mutableStateOf(true) }
@@ -149,26 +148,17 @@ fun AIChatPanel(
         }
     }
 
-    // 流式输出时自动滚动到底部（监听 streamingContent 内容变化）
-    LaunchedEffect(streamingContent) {
-        if (streamingContent != null && isAtBottom) {
+    // 流式输出时自动滚动到底部（监听最后一条消息内容变化）
+    LaunchedEffect(displayItems.size, state.isLoading) {
+        if (isAtBottom) {
             val idx = displayItems.size - 1
             if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
         }
     }
 
     // 流式结束后自动滚动到底部
-    LaunchedEffect(streamingContent) {
-        if (streamingContent == null && state.isLoading) return@LaunchedEffect
-        if (streamingContent == null && !state.isLoading && isAtBottom) {
-            val idx = displayItems.size - 1
-            if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
-        }
-    }
-
-    // 新消息变化时滚动
-    LaunchedEffect(displayItems.size) {
-        if (isAtBottom) {
+    LaunchedEffect(state.isLoading) {
+        if (!state.isLoading && isAtBottom) {
             val idx = displayItems.size - 1
             if (idx >= 0) try { listState.scrollToItem(idx) } catch (_: Exception) {}
         }
@@ -254,8 +244,7 @@ fun AIChatPanel(
             isContextCompressed = state.isContextCompressed,
             contextCompressedTokens = state.contextCompressedTokens,
             contextCompressedCount = state.contextCompressedCount,
-            memoryKeyFactCount = state.memoryKeyFactCount,
-            memorySummaryCount = state.memorySummaryCount,
+            memoryEntryCount = state.memoryEntryCount,
             memoryTotalTokens = state.memoryTotalTokens,
             onContextInfoClick = { showContextInfoDialog = true },
             onImagePick = { imagePickerLauncher.launch("image/*") },
@@ -265,17 +254,17 @@ fun AIChatPanel(
 
         if (showContextInfoDialog) {
             val dashData = remember(state.messages, state.isContextCompressed, state.contextCompressedTokens,
-                state.memoryKeyFactCount, state.memoryTotalTokens) {
+                state.memoryEntryCount, state.memoryTotalTokens, state.contextSummary) {
                 viewModel.buildDashboardData()
             }
             ContextDashboard(
                 snapshot = dashData.snapshot,
                 breakdown = dashData.breakdown,
-                architecture = dashData.architecture,
-                keyFactCategories = dashData.keyFactCategories,
-                compressionHistory = dashData.compressionHistory,
                 contextSummary = state.contextSummary,
                 openedFilePaths = state.openedFilePaths,
+                memoryEntryCount = state.memoryEntryCount,
+                memoryTotalTokens = state.memoryTotalTokens,
+                toolStats = dashData.usageStats.byTool,
                 onDismiss = { showContextInfoDialog = false },
             )
         }
@@ -455,7 +444,7 @@ private fun ModelItemView(
 
         // 思考内容（匹配 Gallery 官方样式：可展开+虚线分隔）
         if (item.channelContent != null) {
-            var thinkExpanded by remember { mutableStateOf(true) }
+            var thinkExpanded by remember { mutableStateOf(false) }
             val dividerColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
             Column(modifier = Modifier.widthIn(max = 360.dp)) {
                 Row(
@@ -624,8 +613,7 @@ private fun ChatInputBar(
     isContextCompressed: Boolean = false,
     contextCompressedTokens: Int = 0,
     contextCompressedCount: Int = 0,
-    memoryKeyFactCount: Int = 0,
-    memorySummaryCount: Int = 0,
+    memoryEntryCount: Int = 0,
     memoryTotalTokens: Int = 0,
     onContextInfoClick: () -> Unit = {},
     onImagePick: () -> Unit = {},
@@ -786,7 +774,7 @@ private fun ChatInputBar(
                 (contextCompressedTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
             val memoryRatio = if (contextMaxTokens > 0 && memoryTotalTokens > 0)
                 (memoryTotalTokens.toFloat() / contextMaxTokens).coerceIn(0f, 1f) else 0f
-            val hasMemory = memoryKeyFactCount > 0 || memorySummaryCount > 0
+            val hasMemory = memoryEntryCount > 0
             Box(
                 modifier = Modifier
                     .size(22.dp)

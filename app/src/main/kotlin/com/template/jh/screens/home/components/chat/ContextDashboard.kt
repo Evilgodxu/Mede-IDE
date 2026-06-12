@@ -1,16 +1,9 @@
 package com.template.jh.screens.home.components.chat
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -20,7 +13,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -32,23 +24,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.template.jh.core.analytics.ToolUsageStats
+import com.template.jh.core.analytics.UsageStats
 import com.template.jh.core.memory.*
-import kotlin.math.abs
-
-// ========== 分层仪表板 ==========
 
 @Composable
 fun ContextDashboard(
     snapshot: ContextSnapshot,
     breakdown: TokenBreakdown,
-    architecture: MemoryArchitecture,
-    keyFactCategories: KeyFactCategories,
-    compressionHistory: List<CompressionRecord>,
     contextSummary: String,
     openedFilePaths: List<String>,
+    memoryEntryCount: Int,
+    memoryTotalTokens: Int,
+    toolStats: Map<String, ToolUsageStats> = emptyMap(),
     onDismiss: () -> Unit,
 ) {
-    var activeLayer by remember { mutableIntStateOf(0) } // 0=概览, 1=Token详情, 2=记忆详情, 3=时间线
+    var activeLayer by remember { mutableIntStateOf(0) } // 0=概览, 1=Token详情
 
     val dialogMaxHeight = with(androidx.compose.ui.platform.LocalConfiguration.current) {
         (screenHeightDp.dp * 0.75f).coerceAtLeast(300.dp)
@@ -64,10 +55,8 @@ fun ContextDashboard(
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
         ) {
             Column {
-                // === 顶部标签栏 ===
                 TabBar(activeLayer) { activeLayer = it }
 
-                // === 内容区 ===
                 Column(
                     modifier = Modifier
                         .weight(1f, fill = false)
@@ -76,13 +65,10 @@ fun ContextDashboard(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     when (activeLayer) {
-                        0 -> OverviewLayer(snapshot, architecture, keyFactCategories, contextSummary)
-                        1 -> TokenDetailLayer(snapshot, breakdown, compressionHistory)
-                        2 -> MemoryDetailLayer(architecture, keyFactCategories)
-                        3 -> TimelineLayer(compressionHistory, snapshot)
+                        0 -> OverviewLayer(snapshot, memoryTotalTokens, toolStats)
+                        1 -> TokenDetailLayer(snapshot, breakdown)
                     }
 
-                    // 已打开文件（所有层底部可见）
                     if (openedFilePaths.isNotEmpty()) {
                         HorizontalDivider()
                         Text("已打开文件", fontWeight = FontWeight.SemiBold,
@@ -106,28 +92,16 @@ fun ContextDashboard(
                         }
                     }
                 }
-
-                // === 底部操作 ===
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onDismiss) { Text("关闭") }
-                }
             }
         }
     }
 }
-
-// ========== 标签栏 ==========
 
 @Composable
 private fun TabBar(active: Int, onSelect: (Int) -> Unit) {
     val tabs = listOf(
         "概览" to Icons.Default.Dashboard,
         "Token" to Icons.Default.DataUsage,
-        "记忆" to Icons.Default.Memory,
-        "时间线" to Icons.Default.Timeline,
     )
     PrimaryScrollableTabRow(
         selectedTabIndex = active,
@@ -155,90 +129,100 @@ private fun TabBar(active: Int, onSelect: (Int) -> Unit) {
 // ========== L1: 概览层 ==========
 
 @Composable
-private fun OverviewLayer(
-    snapshot: ContextSnapshot,
-    architecture: MemoryArchitecture,
-    keyFactCategories: KeyFactCategories,
-    contextSummary: String,
-) {
+private fun OverviewLayer(snapshot: ContextSnapshot, memoryTotalTokens: Int, toolStats: Map<String, ToolUsageStats> = emptyMap()) {
     val ratio = snapshot.ratio
-    val color = Color(HeatColors.ratioColor(ratio))
+    val usageColor = Color(HeatColors.ratioColor(ratio))
+    val usageDeg = ratio * 360f
 
-    // === 主图表：嵌套环形图 ===
+    // 总占用 = 当前用量 + 累计压缩释放（压缩释放的 token 已不再占窗口，但展示历史总消耗）
+    val hasCompressed = snapshot.isCompressed && snapshot.compressedTokens > 0
+    val totalUsedTokens = if (hasCompressed) snapshot.usedTokens + snapshot.compressedTokens else snapshot.usedTokens
+    val totalRatio = if (snapshot.maxTokens > 0)
+        (totalUsedTokens.toFloat() / snapshot.maxTokens).coerceIn(0f, 1f) else 0f
+    val totalDeg = totalRatio * 360f
+    // 压缩段角度 = totalDeg 中除去 usageDeg 的部分
+    val compressedDeg = (totalDeg - usageDeg).coerceAtLeast(0f)
+    val showCompressedArc = hasCompressed && compressedDeg > 0.5f
+
+    val memoryRatio = if (snapshot.maxTokens > 0 && memoryTotalTokens > 0)
+        (memoryTotalTokens.toFloat() / snapshot.maxTokens).coerceIn(0f, 1f) else 0f
+    val memoryDeg = (memoryRatio * 360f).coerceAtMost(360f)
+
     Box(
-        modifier = Modifier.fillMaxWidth().height(140.dp),
+        modifier = Modifier.fillMaxWidth().height(160.dp),
         contentAlignment = Alignment.Center,
     ) {
-        // 外环：用量
-        Canvas(Modifier.size(120.dp)) {
-            val sw = 12f
+        // 外环：记忆（紧贴内环外侧）
+        Canvas(Modifier.size(126.dp)) {
+            val sw = 8f
             val r = size.minDimension / 2f - sw / 2f
             val tl = Offset(sw / 2f, sw / 2f)
             val sz = Size(r * 2, r * 2)
 
-            // 轨道
+            // 外环轨道
+            drawArc(Color(0xFFE3F2FD), -90f, 360f, false,
+                style = Stroke(sw, cap = StrokeCap.Butt), topLeft = tl, size = sz)
+
+            // 外环记忆段
+            if (memoryDeg > 0.5f) {
+                drawArc(Color(0xFF1565C0).copy(alpha = 0.45f), -90f, memoryDeg, false,
+                    style = Stroke(sw, cap = StrokeCap.Butt), topLeft = tl, size = sz)
+            }
+        }
+
+        // 内环：总占用（当前用量 + 压缩释放）+ 剩余空间
+        Canvas(Modifier.size(100.dp)) {
+            val sw = 10f
+            val r = size.minDimension / 2f - sw / 2f
+            val tl = Offset(sw / 2f, sw / 2f)
+            val sz = Size(r * 2, r * 2)
+
+            // 轨道（剩余空间）
             drawArc(Color(0xFFE8E8E8), -90f, 360f, false,
                 style = Stroke(sw, cap = StrokeCap.Butt), topLeft = tl, size = sz)
 
-            // 用量段
-            if (ratio > 0.005f) {
-                drawArc(color, -90f, ratio * 360f, false,
+            // 总占用段（用量 + 压缩）
+            if (totalDeg > 0.5f) {
+                drawArc(usageColor, -90f, totalDeg, false,
                     style = Stroke(sw, cap = StrokeCap.Butt), topLeft = tl, size = sz)
             }
 
-            // 压缩段（紫色内嵌）
-            if (snapshot.isCompressed && snapshot.compressedTokens > 0) {
-                val cr = (snapshot.compressedTokens.toFloat() / snapshot.maxTokens).coerceIn(0f, 1f)
-                val ca = (cr * 360f).coerceAtMost(120f)
-                val start = -90f + ratio * 360f + 3f
-                drawArc(Color(0xFF9C27B0).copy(alpha = 0.7f), start, ca, false,
-                    style = Stroke(sw * 0.8f, cap = StrokeCap.Butt), topLeft = tl, size = sz)
-            }
-        }
-
-        // 内环：记忆占比
-        if (architecture.totalTokens > 0) {
-            Canvas(Modifier.size(80.dp)) {
-                val sw = 10f
-                val r = size.minDimension / 2f - sw / 2f
-                val tl = Offset(sw / 2f, sw / 2f)
-                val sz = Size(r * 2, r * 2)
-
-                drawArc(Color(0xFFE8E8E8), -90f, 360f, false,
+            // 压缩释放段（在总占用内覆盖紫色）
+            if (showCompressedArc) {
+                val start = -90f + usageDeg
+                drawArc(Color(0xFF9C27B0).copy(alpha = 0.85f), start, compressedDeg, false,
                     style = Stroke(sw, cap = StrokeCap.Butt), topLeft = tl, size = sz)
-
-                val mr = (architecture.totalTokens.toFloat() / snapshot.maxTokens).coerceIn(0f, 1f)
-                if (mr > 0.01f) {
-                    drawArc(Color(0xFF1565C0).copy(alpha = 0.6f), -90f, mr * 360f, false,
-                        style = Stroke(sw, cap = StrokeCap.Butt), topLeft = tl, size = sz)
-                }
             }
         }
 
-        // 中心文字
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("${(ratio * 100).toInt()}%",
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold, color = color)
+                fontWeight = FontWeight.Bold, color = usageColor)
             Text("${fmt(snapshot.usedTokens)}/${fmt(snapshot.maxTokens)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (hasCompressed) {
+                Text("已释放 ${fmt(snapshot.compressedTokens)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF9C27B0))
+            }
         }
     }
 
-    // 图例
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
-        LegendDot(color, "当前用量")
-        if (snapshot.isCompressed) LegendDot(Color(0xFF9C27B0), "已压缩 ${snapshot.compressedCount}次")
-        if (architecture.totalTokens > 0) LegendDot(Color(0xFF1565C0), "记忆 ${architecture.totalTokens / 1000}k")
+        LegendDot(usageColor, "当前用量")
+        if (hasCompressed) LegendDot(Color(0xFF9C27B0), "已释放")
+        LegendDot(Color(0xFFE0E0E0), "剩余空间")
+        LegendDot(Color(0xFF1565C0).copy(alpha = 0.45f), "记忆")
     }
 
     HorizontalDivider()
 
-    // === 关键指标卡片 ===
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -247,40 +231,29 @@ private fun OverviewLayer(
             Modifier.weight(1f))
         MetricCard("工具", "${snapshot.toolCallCount}", Icons.Default.Build, Color(0xFFFF9800),
             Modifier.weight(1f))
-        MetricCard("事实", "${keyFactCategories.total}", Icons.Default.Lightbulb, Color(0xFFE91E63),
-            Modifier.weight(1f))
         MetricCard("窗口", fmt(snapshot.maxTokens), Icons.Default.Fullscreen, Color(0xFF607D8B),
             Modifier.weight(1f))
     }
 
-    // === 压缩状态 ===
+    if (toolStats.isNotEmpty()) {
+        HorizontalDivider()
+        Text("工具调用统计", fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        toolStats.forEach { (toolName, stat) ->
+            ToolStatRow(toolName, stat.calls, stat.failed, stat.totalDurationMs)
+        }
+    }
+
     if (snapshot.isCompressed) {
         CompressedBanner(snapshot)
-    }
-
-    // === 关键事实摘要 ===
-    if (keyFactCategories.total > 0) {
-        KeyFactsMiniChart(keyFactCategories)
-    }
-
-    // === 上下文摘要 ===
-    if (contextSummary.isNotBlank()) {
-        ExpandableSection("上下文摘要", icon = Icons.Default.Summarize,
-            accentColor = Color(0xFF7B1FA2)) {
-            Text(contextSummary.take(300), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
     }
 }
 
 // ========== L2: Token 详情层 ==========
 
 @Composable
-private fun TokenDetailLayer(
-    snapshot: ContextSnapshot,
-    breakdown: TokenBreakdown,
-    compressionHistory: List<CompressionRecord>,
-) {
+private fun TokenDetailLayer(snapshot: ContextSnapshot, breakdown: TokenBreakdown) {
     Text("Token 用量明细", fontWeight = FontWeight.Bold,
         style = MaterialTheme.typography.titleSmall)
     Text("${fmt(breakdown.totalTokens)} / ${fmt(snapshot.maxTokens)}  ·  ${snapshot.messageCount} 条消息",
@@ -289,14 +262,12 @@ private fun TokenDetailLayer(
 
     Spacer(Modifier.height(8.dp))
 
-    // === 水平堆叠条形图 ===
     val maxSeg = breakdown.segments.maxOfOrNull { it.tokens } ?: 1
     breakdown.segments.forEach { seg ->
         val segRatio = if (maxSeg > 0) seg.tokens.toFloat() / maxSeg else 0f
         TokenBar(seg.label, seg.tokens, segRatio, Color(seg.color), fmt(snapshot.maxTokens))
     }
 
-    // === 压缩节省 ===
     if (snapshot.isCompressed) {
         Spacer(Modifier.height(4.dp))
         HorizontalDivider()
@@ -307,322 +278,16 @@ private fun TokenDetailLayer(
         TokenBar("已释放", snapshot.compressedTokens,
             if (snapshot.compressedTokens > 0) savedRatio * 3f else 0f,
             Color(0xFF9C27B0), "累计")
-        Text("累计压缩 ${snapshot.compressedCount} 次，${compressionHistory.size} 条记录",
+        Text("累计压缩 ${snapshot.compressedCount} 次",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline)
     }
 
-    // === 剩余空间 ===
     Spacer(Modifier.height(4.dp))
     HorizontalDivider()
     val remaining = (snapshot.maxTokens - breakdown.totalTokens).coerceAtLeast(0)
     val remRatio = if (snapshot.maxTokens > 0) remaining.toFloat() / snapshot.maxTokens else 0f
     TokenBar("剩余空间", remaining, remRatio, Color(0xFFE0E0E0), "可用")
-}
-
-@Composable
-private fun TokenBar(label: String, tokens: Int, ratio: Float, color: Color, suffix: String = "") {
-    Column(modifier = Modifier.padding(vertical = 2.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(label, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface)
-            Text("${fmt(tokens)} $suffix", style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(ratio.coerceIn(0f, 1f))
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(color)
-            )
-        }
-    }
-}
-
-// ========== L2: 记忆详情层 ==========
-
-@Composable
-private fun MemoryDetailLayer(
-    architecture: MemoryArchitecture,
-    keyFactCategories: KeyFactCategories,
-) {
-    // === 记忆架构图 ===
-    Text("记忆系统架构", fontWeight = FontWeight.Bold,
-        style = MaterialTheme.typography.titleSmall)
-
-    Spacer(Modifier.height(8.dp))
-
-    // Layer 1 卡片
-    LayerCard(
-        title = "Layer 1 · 关键事实",
-        subtitle = "持久化存储，永不丢失",
-        color = Color(0xFFE91E63),
-        info = architecture.layer1,
-        isActive = architecture.layer1.entryCount > 0,
-    )
-
-    Spacer(Modifier.height(6.dp))
-
-    // 连线指示
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Icon(Icons.Default.ArrowDownward, null, Modifier.size(16.dp),
-            tint = MaterialTheme.colorScheme.outline)
-    }
-
-    // Layer 2 卡片
-    LayerCard(
-        title = "Layer 2 · 短期记忆",
-        subtitle = "最近 ${architecture.layer2.entryCount} 条 • 上限 ${architecture.layer2.maxEntries}",
-        color = Color(0xFF2196F3),
-        info = architecture.layer2,
-        isActive = architecture.layer2.entryCount > 0,
-    )
-
-    Spacer(Modifier.height(12.dp))
-
-    // === 关键事实分类饼图 ===
-    if (keyFactCategories.total > 0) {
-        HorizontalDivider()
-        Text("关键事实分类", fontWeight = FontWeight.SemiBold,
-            style = MaterialTheme.typography.labelMedium)
-        Spacer(Modifier.height(4.dp))
-        KeyFactsPieChart(keyFactCategories)
-    }
-
-    // === Layer 1 分类列表 ===
-    if (architecture.layer1.categories.isNotEmpty()) {
-        Spacer(Modifier.height(4.dp))
-        architecture.layer1.categories.forEach { cat ->
-            CategoryRow(cat.label, cat.count)
-        }
-    }
-
-    // === 记忆 token 估算 ===
-    Spacer(Modifier.height(8.dp))
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("记忆系统 token 估算",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("~${architecture.totalTokens / 1000}k",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF1565C0))
-        }
-    }
-}
-
-@Composable
-private fun LayerCard(
-    title: String,
-    subtitle: String,
-    color: Color,
-    info: MemoryArchitecture.LayerInfo,
-    isActive: Boolean,
-) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (isActive) color.copy(alpha = 0.08f)
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-        ),
-        shape = RoundedCornerShape(12.dp),
-        border = if (isActive) androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.3f)) else null,
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).background(color, CircleShape))
-                Spacer(Modifier.width(8.dp))
-                Text(title, style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold, color = color)
-            }
-            Text(subtitle, style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (isActive) {
-                Spacer(Modifier.height(6.dp))
-                // 进度条
-                Box(
-                    modifier = Modifier.fillMaxWidth().height(6.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(color.copy(alpha = 0.15f))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(info.ratio.coerceIn(0f, 1f))
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(color.copy(alpha = 0.6f))
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("${info.entryCount}/${info.maxEntries} 条",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = color.copy(alpha = 0.8f))
-                    Text("~${info.estimatedTokens / 1000}k token",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline)
-                }
-            } else {
-                Text("暂无数据", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline)
-            }
-        }
-    }
-}
-
-// ========== L2: 时间线层 ==========
-
-@Composable
-private fun TimelineLayer(
-    compressionHistory: List<CompressionRecord>,
-    snapshot: ContextSnapshot,
-) {
-    Text("压缩时间线", fontWeight = FontWeight.Bold,
-        style = MaterialTheme.typography.titleSmall)
-
-    if (snapshot.isCompressed) {
-        Spacer(Modifier.height(4.dp))
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF9C27B0).copy(alpha = 0.1f)),
-            shape = RoundedCornerShape(8.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("压缩状态: 已激活", style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.SemiBold, color = Color(0xFF7B1FA2))
-                Text("${snapshot.compressedCount} 次压缩  ·  释放 ${fmt(snapshot.compressedTokens)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color(0xFF7B1FA2))
-            }
-        }
-    }
-
-    Spacer(Modifier.height(8.dp))
-
-    if (compressionHistory.isEmpty()) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-            shape = RoundedCornerShape(8.dp),
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(Icons.Default.CheckCircle, null, Modifier.size(32.dp),
-                    tint = Color(0xFF4CAF50))
-                Spacer(Modifier.height(8.dp))
-                Text("暂无压缩记录", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("上下文用量低于阈值时无需压缩", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline)
-            }
-        }
-    } else {
-        // 时间线条目
-        compressionHistory.takeLast(10).forEachIndexed { i, record ->
-            TimelineEntry(i, record, i == compressionHistory.size - 1)
-        }
-    }
-}
-
-@Composable
-private fun TimelineEntry(index: Int, record: CompressionRecord, isLast: Boolean) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-        // 时间线指示器
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.width(24.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .background(
-                        if (record.triggerType == CompressionRecord.TriggerType.ContextError)
-                            Color(0xFFE53935) else Color(0xFF9C27B0),
-                        CircleShape,
-                    )
-            )
-            if (!isLast) {
-                Box(
-                    modifier = Modifier
-                        .width(2.dp)
-                        .height(40.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant)
-                )
-            }
-        }
-
-        Spacer(Modifier.width(8.dp))
-
-        // 内容
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = if (record.triggerType == CompressionRecord.TriggerType.ContextError)
-                    Color(0xFFE53935).copy(alpha = 0.06f)
-                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-            ),
-            shape = RoundedCornerShape(8.dp),
-        ) {
-            Column(Modifier.padding(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        "${record.triggerType.display()} · #${index + 1}",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (record.triggerType == CompressionRecord.TriggerType.ContextError)
-                            Color(0xFFC62828) else Color(0xFF7B1FA2),
-                    )
-                    Text(
-                        formatTimeAgo(record.timestamp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                }
-                val removedK = if (record.removedTokens < 1000) "<1k"
-                else "${record.removedTokens / 1000}k"
-                Text("释放 $removedK token，保留 ${record.keptExchanges} 轮对话",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (record.summaryGenerated) {
-                    Text("✓ 已生成摘要", style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF4CAF50))
-                }
-                if (record.keyFactsPreserved > 0) {
-                    Text("🔑 保留 ${record.keyFactsPreserved} 条关键事实",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFFE91E63))
-                }
-            }
-        }
-    }
 }
 
 // ========== 辅助组件 ==========
@@ -652,11 +317,30 @@ private fun MetricCard(
 }
 
 @Composable
-private fun LegendDot(color: Color, text: String) {
+private fun LegendDot(color: Color, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(8.dp).background(color, CircleShape))
+        Box(Modifier.size(8.dp).background(color, shape = RoundedCornerShape(4.dp)))
         Spacer(Modifier.width(4.dp))
-        Text(text, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun TokenBar(label: String, tokens: Int, ratio: Float, color: Color, maxLabel: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, Modifier.width(68.dp), style = MaterialTheme.typography.bodySmall)
+        Box(Modifier.weight(1f).height(12.dp).padding(end = 4.dp)) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth().background(
+                Color(0xFFF5F5F5), RoundedCornerShape(6.dp)))
+            Box(Modifier.fillMaxHeight().fillMaxWidth(ratio.coerceIn(0f, 1f)).background(
+                color, RoundedCornerShape(6.dp)))
+        }
+        Text(fmt(tokens), Modifier.width(56.dp), style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold, color = color)
     }
 }
 
@@ -674,7 +358,7 @@ private fun CompressedBanner(snapshot: ContextSnapshot) {
                 tint = Color(0xFF9C27B0))
             Spacer(Modifier.width(8.dp))
             Column {
-                Text("已压缩 ${snapshot.compressedCount} 次",
+                Text("已释放 ${snapshot.compressedCount} 次",
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold, color = Color(0xFF7B1FA2))
                 Text("累计释放 ${fmt(snapshot.compressedTokens)} token",
@@ -685,154 +369,38 @@ private fun CompressedBanner(snapshot: ContextSnapshot) {
     }
 }
 
-@Composable
-private fun KeyFactsMiniChart(categories: KeyFactCategories) {
-    ExpandableSection("关键事实 (${categories.total})", icon = Icons.Default.Lightbulb,
-        accentColor = Color(0xFFE91E63)) {
-        categories.toList().filter { it.count > 0 }.forEach { cat ->
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).background(Color(cat.color), CircleShape))
-                    Spacer(Modifier.width(6.dp))
-                    Text(cat.label, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface)
-                }
-                Text("${cat.count}", style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold, color = Color(cat.color))
-            }
-        }
-    }
-}
+// ========== 工具调用统计行 ==========
 
 @Composable
-private fun KeyFactsPieChart(categories: KeyFactCategories) {
-    val total = categories.total.toFloat()
-    if (total == 0f) return
-
-    Box(Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.size(80.dp)) {
-            val data = categories.toList().filter { it.count > 0 }
-            var startAngle = -90f
-            data.forEach { cat ->
-                val sweep = (cat.count / total) * 360f
-                if (sweep > 0.5f) {
-                    drawArc(Color(cat.color), startAngle, sweep, true,
-                        style = Stroke(8f, cap = StrokeCap.Butt),
-                        topLeft = Offset(4f, 4f),
-                        size = Size(size.width - 8f, size.height - 8f))
-                }
-                startAngle += sweep
-            }
-        }
-    }
-
-    // 图例
-    categories.toList().filter { it.count > 0 }.forEach { cat ->
-        val pct = if (total > 0) (cat.count / total * 100).toInt() else 0
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(8.dp).background(Color(cat.color), CircleShape))
-                Spacer(Modifier.width(6.dp))
-                Text(cat.label, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface)
-            }
-            Text("${cat.count} ($pct%)", style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun CategoryRow(label: String, count: Int) {
+private fun ToolStatRow(name: String, calls: Int, failed: Int, totalDurationMs: Long) {
+    val successColor = if (failed > 0) Color(0xFFE53935) else Color(0xFF4CAF50)
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface)
-        Text("$count 条", style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun ExpandableSection(
-    title: String,
-    icon: ImageVector = Icons.Default.Info,
-    accentColor: Color = MaterialTheme.colorScheme.primary,
-    content: @Composable () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = accentColor.copy(alpha = 0.05f)),
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-                    .padding(10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, null, Modifier.size(16.dp), tint = accentColor)
-                    Spacer(Modifier.width(6.dp))
-                    Text(title, style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold, color = accentColor)
-                }
-                Icon(
-                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    null, Modifier.size(16.dp), tint = accentColor,
-                )
-            }
-            AnimatedVisibility(
-                visible = expanded,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
-            ) {
-                Box(Modifier.padding(start = 10.dp, end = 10.dp, bottom = 10.dp)) {
-                    content()
-                }
-            }
+        Icon(Icons.Default.Build, null, Modifier.size(12.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(4.dp))
+        Text(name, Modifier.width(72.dp), style = MaterialTheme.typography.bodySmall,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.weight(1f))
+        Text("×${calls}", style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+        if (failed > 0) {
+            Spacer(Modifier.width(4.dp))
+            Text("失败${failed}", style = MaterialTheme.typography.labelSmall,
+                color = successColor)
         }
+        Spacer(Modifier.width(4.dp))
+        Text("${totalDurationMs / 1000}s", style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline)
     }
 }
 
-// ========== 工具函数 ==========
+// ========== 格式化 ==========
 
-private fun CompressionRecord.TriggerType.display(): String = when (this) {
-    CompressionRecord.TriggerType.AutoThreshold -> "自动阈值"
-    CompressionRecord.TriggerType.ContextError -> "上下文超限"
-    CompressionRecord.TriggerType.Manual -> "手动压缩"
-    CompressionRecord.TriggerType.Periodic -> "定期压缩"
-}
-
-private fun fmt(tokens: Int): String = when {
-    tokens >= 1_000_000 -> "${"%.1f".format(tokens / 1_000_000f)}M"
-    tokens >= 1000 -> "${tokens / 1000}k"
-    else -> "$tokens"
-}
-
-private fun formatTimeAgo(ts: Long): String {
-    val diff = System.currentTimeMillis() - ts
-    return when {
-        diff < 60_000 -> "刚刚"
-        diff < 3600_000 -> "${diff / 60_000}分钟前"
-        diff < 86_400_000 -> "${diff / 3_600_000}小时前"
-        else -> {
-            val cal = java.util.Calendar.getInstance().apply { timeInMillis = ts }
-            String.format("%tH:%tM", cal, cal)
-        }
-    }
+private fun fmt(n: Int): String = when {
+    n >= 1_000_000 -> "${n / 1_000_000}M"
+    n >= 1_000    -> "${n / 1_000}k"
+    else           -> n.toString()
 }

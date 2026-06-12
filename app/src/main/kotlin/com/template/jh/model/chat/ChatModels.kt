@@ -93,12 +93,12 @@ data class DownloadState(
 // 模型推理参数（对应 LiteRT-LM SamplerConfig + EngineConfig）
 data class ModelParams(
     val topK: Int = 10,
-    val topP: Double = 0.95,
-    val temperature: Double = 0.2,
+    val topP: Double = 0.7,
+    val temperature: Double = 0.1,
     val seed: Int = 0,
-    val contextWindowTokens: Int = 32768,        // 默认 32K（可通过引擎状态/用户配置动态更新）
+    val contextWindowTokens: Int = 4096,        // 默认 4K
     val enableSpeculativeDecoding: Boolean = false, // MTP 推测解码
-    val backendType: BackendType = BackendType.CPU, // 推理后端
+    val backendType: BackendType = BackendType.GPU, // 推理后端
 ) {
     init {
         require(topK > 0) { "topK must be positive, got $topK" }
