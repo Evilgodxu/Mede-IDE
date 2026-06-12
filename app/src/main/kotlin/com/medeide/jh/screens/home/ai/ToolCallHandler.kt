@@ -4,7 +4,6 @@ import android.util.Log
 import com.medeide.jh.screens.home.config.ChatConfig
 import com.medeide.jh.data.storage.FileManager
 import com.medeide.jh.data.utils.FileLogger
-import com.medeide.jh.model.chat.ModelActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -84,33 +83,6 @@ class ToolCallHandler(
         Log.e("ToolCallHandler", "executeAiTool failed: name=$name ${e.message}", e)
         FileLogger.e("ToolCallHandler", "executeAiTool failed: name=$name ${e.message}", e)
         "Tool error: ${e.message}"
-    }
-
-    // ============================================================
-    // 工具名称 ↔ ModelActivity 映射
-    // ============================================================
-
-    fun toolNameToActivity(name: String): ModelActivity {
-        return when (name) {
-            "listFiles" -> ModelActivity.ListingFiles
-            "readFile" -> ModelActivity.ReadingFile
-            "writeFile" -> ModelActivity.WritingFile
-            "replaceInFile", "batchReplaceInFile" -> ModelActivity.EditingFile
-            "deleteFile" -> ModelActivity.DeletingFile
-            "createDirectory" -> ModelActivity.CreatingDirectory
-            "grep", "glob" -> ModelActivity.SearchingCode
-            "searchCodebase" -> ModelActivity.SearchingCode
-            "searchWeb" -> ModelActivity.SearchingWeb
-            "searchConversationMemory", "getRecentConversationMemory" -> ModelActivity.SearchingCode
-            "runCommand" -> ModelActivity.RunningCommand
-            "readLints" -> ModelActivity.ReadingLints
-            "moveFile", "copyFile" -> ModelActivity.EditingFile
-            "zipFiles", "unzipFiles" -> ModelActivity.EditingFile
-            "downloadFile" -> ModelActivity.WritingFile
-            "visitWeb", "searchWeb" -> ModelActivity.SearchingWeb
-            "httpRequest" -> ModelActivity.SearchingWeb
-            else -> ModelActivity.ExecutingTool
-        }
     }
 
     // ============================================================

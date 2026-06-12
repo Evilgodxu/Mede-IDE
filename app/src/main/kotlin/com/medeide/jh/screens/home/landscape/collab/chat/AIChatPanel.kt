@@ -117,7 +117,6 @@ import com.medeide.jh.model.chat.ConversationEntry
 import com.medeide.jh.model.chat.DisplayItem
 import com.medeide.jh.model.chat.DisplayRole
 import com.medeide.jh.model.chat.EngineStatus
-import com.medeide.jh.model.chat.ModelActivity
 
 // AI 协作面板
 @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
@@ -130,7 +129,6 @@ fun AIChatPanel(
 ) {
     val state by viewModel.state.collectAsState()
     val displayItems by viewModel.displayItems.collectAsState()
-    val currentToolActivity by viewModel.currentToolActivity.collectAsState()
     val listState = rememberLazyListState()
     var isAtBottom by remember { mutableStateOf(true) }
 
@@ -166,7 +164,6 @@ fun AIChatPanel(
 
     Column(modifier = Modifier.fillMaxSize()) {
         ChatTopBar(
-            engineStatus = state.engineStatus,
             conversations = state.conversations,
             isHistoryOpen = state.isHistoryOpen,
             onNewTaskClick = { viewModel.newConversation(); onNewTaskClick() },
@@ -175,7 +172,6 @@ fun AIChatPanel(
             onSwitchConversation = { viewModel.switchConversation(it) },
             onDeleteConversation = { viewModel.deleteConversation(it) },
             onDismissHistory = { viewModel.closeHistory() },
-            currentToolActivity = currentToolActivity,
         )
 
         HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -307,31 +303,12 @@ private fun ScrollToBottomButton(
 
 @Composable
 private fun ChatTopBar(
-    engineStatus: EngineStatus,
     conversations: List<ConversationEntry>, isHistoryOpen: Boolean,
     onNewTaskClick: () -> Unit, onHistoryClick: () -> Unit, onSettingsClick: () -> Unit,
     onSwitchConversation: (ConversationEntry) -> Unit, onDeleteConversation: (String) -> Unit,
     onDismissHistory: () -> Unit,
-    currentToolActivity: DisplayItem? = null,
 ) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp).height(36.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        // 左侧标题区域：实时显示模型状态
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-            val title = currentToolActivity?.content
-                ?: if (engineStatus == EngineStatus.Ready) "等待指令"
-                   else if (engineStatus == EngineStatus.Loading) "加载模型中…"
-                   else if (engineStatus == EngineStatus.Error) "模型错误"
-                   else ""
-            if (title.isNotEmpty()) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             IconButton(onClick = onNewTaskClick, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Add, stringResource(R.string.ai_new_task), Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             // 历史按钮 + 下拉
@@ -391,7 +368,6 @@ private fun ConversationItemView(
     when (item.role) {
         DisplayRole.User -> UserItemView(item)
         DisplayRole.Model -> ModelItemView(item, isActiveStreaming)
-        DisplayRole.ToolActivity -> { }
     }
 }
 

@@ -42,9 +42,7 @@ import com.medeide.jh.model.chat.CloudModelConfig
 import com.medeide.jh.model.chat.CloudModelProfile
 import com.medeide.jh.model.chat.ConversationEntry
 import com.medeide.jh.model.chat.DisplayItem
-import com.medeide.jh.model.chat.DisplayRole
 import com.medeide.jh.model.chat.EngineStatus
-import com.medeide.jh.model.chat.ModelActivity
 import com.medeide.jh.model.chat.ModelParams
 import com.medeide.jh.model.chat.BackendType
 import com.medeide.jh.screens.home.landscape.collab.chat.toDisplayItems
@@ -92,20 +90,6 @@ class ChatViewModel(
         .map { it.messages.toDisplayItems() }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val currentToolActivity: StateFlow<DisplayItem?> = _state.map { s ->
-        if (s.isLoading && s.modelActivity != ModelActivity.Idle) {
-            val label = s.modelActivity.displayLabel()
-            val detail = if (s.activityDetail.isNotBlank()) ": ${s.activityDetail}" else ""
-            DisplayItem(
-                id = "tool_activity",
-                role = DisplayRole.ToolActivity,
-                content = "$label$detail",
-                isStreaming = true,
-                timestamp = System.currentTimeMillis(),
-            )
-        } else null
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     val usageStats: StateFlow<UsageStats> = usageAnalyticsRepo.stats.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), UsageStats()
@@ -565,7 +549,6 @@ class ChatViewModel(
                     compressLocalContextIfNeeded()
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
-                _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 throw e
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "发送消息失败", e)
@@ -581,7 +564,6 @@ class ChatViewModel(
         // 取消 C++ 推理但不销毁会话，匹配官方示例永不关闭模式
         activeConversation?.let { try { it.cancelProcess() } catch (_: Exception) {} }
         _state.value.messages.lastOrNull()?.let { msg -> if (msg.isStreaming) finalizeModelMessage(msg.id) }
-        _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
     }
 
     // ========== 输入优化（独立于推理工作流） ==========
@@ -685,7 +667,6 @@ class ChatViewModel(
             Log.e("ChatViewModel", "本地对话失败: 活跃会话为空")
             updateModelMessage(msgId, "\n\n[错误: 模型会话未就绪]", false)
             finalizeModelMessage(msgId)
-            _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
             return
         }
         // 上下文注入消息渠道
@@ -727,12 +708,9 @@ class ChatViewModel(
         // 注入回调：框架自动执行 @Tool 方法时更新 UI 状态并记录工具调用
         toolCallHandler.callback = object : ToolExecutionCallback {
             override fun onToolStart(name: String, args: Map<String, String>) {
-                val detail = args["path"] ?: args["command"] ?: args["query"] ?: ""
-                _state.update { it.copy(modelActivity = toolCallHandler.toolNameToActivity(name), activityDetail = detail) }
                 _toolStartTimes[name] = System.currentTimeMillis()
             }
             override fun onToolResult(name: String, args: Map<String, String>, result: String) {
-                _state.update { it.copy(modelActivity = ModelActivity.ProcessingResult, activityDetail = "") }
                 val startMs = _toolStartTimes.remove(name) ?: return
                 val durationMs = System.currentTimeMillis() - startMs
                 val success = !result.startsWith("Tool error:") && !result.startsWith("Error:")
@@ -830,7 +808,6 @@ class ChatViewModel(
 
         var currentMsgId = msgId
         var cloudRounds = 0
-        _state.update { it.copy(modelActivity = ModelActivity.Thinking, activityDetail = "") }
 
         val historyMessages = mutableListOf<ChatMessage>()
         val lastUserIdx = _state.value.messages.indexOfLast { it.role == ChatRole.User && it.id != currentMsgId }
@@ -930,7 +907,6 @@ class ChatViewModel(
                 ))
                 updateModelMessage(currentMsgId, "\n\n[云端模型错误: ${errMsg}]", false)
                 finalizeModelMessage(currentMsgId)
-                _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 return
             }
 
@@ -979,15 +955,7 @@ class ChatViewModel(
             if (toolCalls == null || (toolCalls.isEmpty() && response.isBlank())) {
                 historyMessages.add(ChatMessage(role = ChatRole.Model, content = cleanResponse))
                 finalizeModelMessage(currentMsgId, channelContent = channelContent)
-                _state.update { it.copy(modelActivity = ModelActivity.Idle, activityDetail = "") }
                 return
-            }
-
-            val firstTool = toolCalls.firstOrNull()
-            if (firstTool != null) {
-                val act = toolCallHandler.toolNameToActivity(firstTool.second)
-                val detail = firstTool.third["path"] ?: firstTool.third["command"] ?: firstTool.third["query"] ?: ""
-                _state.update { it.copy(modelActivity = act, activityDetail = detail) }
             }
 
             val results = coroutineScope {
@@ -1048,8 +1016,6 @@ class ChatViewModel(
             }
             updateModelMessage(currentMsgId, "\n\n${display.toString().trimEnd()}", false)
             finalizeModelMessage(currentMsgId, channelContent = channelContent)
-
-            _state.update { it.copy(modelActivity = ModelActivity.ProcessingResult, activityDetail = "") }
 
             if (cloudRounds % ChatConfig.SUMMARIZE_INTERVAL == 0) {
                 historyMessages.clear()

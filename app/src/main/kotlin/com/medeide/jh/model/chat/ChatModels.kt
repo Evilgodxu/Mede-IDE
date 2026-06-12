@@ -31,40 +31,6 @@ data class ChatMessage(
 
 enum class ChatRole { User, Model, System, Tool }
 
-enum class ModelActivity {
-    Idle,
-    Thinking,
-    ListingFiles,
-    ReadingFile,
-    WritingFile,
-    EditingFile,
-    DeletingFile,
-    CreatingDirectory,
-    SearchingCode,
-    SearchingWeb,
-    RunningCommand,
-    ReadingLints,
-    ExecutingTool,
-    ProcessingResult;
-
-    fun displayLabel(): String = when (this) {
-        Idle -> ""
-        Thinking -> "思考中…"
-        ListingFiles -> "正在列出目录"
-        ReadingFile -> "正在读取文件"
-        WritingFile -> "正在写入文件"
-        EditingFile -> "正在修改文件"
-        DeletingFile -> "正在删除文件"
-        CreatingDirectory -> "正在创建目录"
-        SearchingCode -> "正在搜索代码"
-        SearchingWeb -> "正在搜索网络"
-        RunningCommand -> "正在执行命令"
-        ReadingLints -> "正在检查编译错误"
-        ExecutingTool -> "正在执行操作"
-        ProcessingResult -> "正在组织回复"
-    }
-}
-
 data class ConversationEntry(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
@@ -188,7 +154,7 @@ data class CloudToolCall(
 )
 
 // 显示模型
-enum class DisplayRole { User, Model, ToolActivity }
+enum class DisplayRole { User, Model }
 
 data class DisplayItem(
     val id: String,

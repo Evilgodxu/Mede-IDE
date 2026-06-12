@@ -7,7 +7,6 @@ import com.medeide.jh.model.chat.CloudModelProfile
 import com.medeide.jh.model.chat.ConversationEntry
 import com.medeide.jh.model.chat.DownloadStatus
 import com.medeide.jh.model.chat.EngineStatus
-import com.medeide.jh.model.chat.ModelActivity
 import com.medeide.jh.model.chat.ModelInfo
 import com.medeide.jh.model.chat.ModelParams
 import com.medeide.jh.model.chat.BackendType
@@ -21,8 +20,6 @@ data class ChatUiState(
     val isModelPickerOpen: Boolean = false,
     val availableModels: List<ModelInfo> = emptyList(),
     val isLoading: Boolean = false,
-    val modelActivity: ModelActivity = ModelActivity.Idle,
-    val activityDetail: String = "", // 如文件路径、搜索关键词等详情
     val downloadStatus: DownloadStatus = DownloadStatus.Idle,
     val downloadProgress: Float = 0f,
     val downloadFileName: String = "",
