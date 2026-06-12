@@ -11,7 +11,6 @@ import com.medeide.jh.data.storage.FileManager
 import com.medeide.jh.model.FileItem
 import com.medeide.jh.model.McpServer
 import com.medeide.jh.model.Rule
-import com.medeide.jh.model.SkillItem
 import com.medeide.jh.data.repository.RecentEntry
 import com.medeide.jh.data.repository.UserPreferencesRepository
 import kotlinx.coroutines.Dispatchers
@@ -40,18 +39,16 @@ class HomeViewModel(
                 userPreferencesRepository.themeMode,
                 userPreferencesRepository.language,
                 userPreferencesRepository.rules,
-                userPreferencesRepository.skills,
                 userPreferencesRepository.mcpServers,
                 _folderState,
             ) { values: Array<Any?> ->
-                val fs = values[5] as? FolderState ?: FolderState()
+                val fs = values[4] as? FolderState ?: FolderState()
                 HomeUiState(
                     isLoading = false,
                     themeMode = values[0] as? String ?: "system",
                     language = values[1] as? String ?: "system",
                     rules = (values[2] as? List<Rule>) ?: emptyList(),
-                    skills = (values[3] as? List<SkillItem>) ?: emptyList(),
-                    mcpServers = (values[4] as? List<McpServer>) ?: emptyList(),
+                    mcpServers = (values[3] as? List<McpServer>) ?: emptyList(),
                     openedFolderName = fs.folderName,
                     openedFolderUri = fs.folderUri?.toString(),
                     storageRootPath = fs.storageRootPath,
@@ -253,10 +250,6 @@ class HomeViewModel(
 
     fun setRules(rules: List<Rule>) {
         viewModelScope.launch { userPreferencesRepository.setRules(rules) }
-    }
-
-    fun setSkills(skills: List<SkillItem>) {
-        viewModelScope.launch { userPreferencesRepository.setSkills(skills) }
     }
 
     fun setMcpServers(servers: List<McpServer>) {

@@ -67,7 +67,6 @@
     <string name="settings_category_general">General</string>
     <string name="settings_category_environment">Environment</string>
     <string name="settings_category_mcp">MCP</string>
-    <string name="settings_category_skill">Skill</string>
     <string name="settings_category_local_model">Local Model</string>
     <string name="settings_category_cloud_model">Cloud Model</string>
 
@@ -98,7 +97,6 @@
     <!-- Settings Panel -->
     <string name="loading">Loading…</string>
     <string name="settings_category_mcp_desc">MCP Server Configuration</string>
-    <string name="settings_category_skill_desc">AI Skill Management</string>
     <string name="settings_category_model_desc">Model Selection \&amp; Configuration</string>
     <string name="settings_category_conversation_desc">Conversation Settings</string>
     <string name="settings_category_rules_desc">Rules Configuration</string>

@@ -32,7 +32,6 @@ import androidx.compose.ui.unit.dp
 import com.medeide.jh.R
 import com.medeide.jh.model.McpServer
 import com.medeide.jh.model.Rule
-import com.medeide.jh.model.SkillItem
 import com.medeide.jh.screens.home.ChatViewModel
 import com.medeide.jh.screens.home.HomeUiState
 import com.medeide.jh.screens.home.HomeViewModel
@@ -43,7 +42,6 @@ enum class SettingsCategory(val labelResId: Int) {
     General(R.string.settings_category_general),
     Environment(R.string.settings_category_environment),
     MCP(R.string.settings_category_mcp),
-    Skill(R.string.settings_category_skill),
     LocalModel(R.string.settings_category_local_model),
     CloudModel(R.string.settings_category_cloud_model),
     Rules(R.string.settings_category_rules)
@@ -78,7 +76,7 @@ fun SettingsPane(
             SettingsCategoryContent(
                 category = selectedCategory, state = state,
                 onSetThemeMode = { viewModel.setThemeMode(it) }, onSetLanguage = { viewModel.setLanguage(it) },
-                onSetRules = { viewModel.setRules(it) }, onSetSkills = { viewModel.setSkills(it) },
+                onSetRules = { viewModel.setRules(it) },
                 onSetMcpServers = { viewModel.setMcpServers(it) },
                 chatViewModel = chatViewModel,
             )
@@ -102,7 +100,7 @@ private fun SettingsCategoryItem(category: SettingsCategory, isSelected: Boolean
 private fun SettingsCategoryContent(
     category: SettingsCategory, state: HomeUiState, onSetThemeMode: (String) -> Unit, onSetLanguage: (String) -> Unit,
     onSetRules: (List<Rule>) -> Unit,
-    onSetSkills: (List<SkillItem>) -> Unit, onSetMcpServers: (List<McpServer>) -> Unit,
+    onSetMcpServers: (List<McpServer>) -> Unit,
     chatViewModel: ChatViewModel?,
 ) {
     Column(
@@ -124,7 +122,6 @@ private fun SettingsCategoryContent(
             SettingsCategory.Environment -> EnvironmentSettingsContent()
             SettingsCategory.LocalModel -> LocalModelSettingsContent(chatViewModel)
             SettingsCategory.CloudModel -> CloudModelSettingsContent(chatViewModel)
-            SettingsCategory.Skill -> SkillsSettingsContent(state.skills, onSetSkills)
             SettingsCategory.MCP -> McpSettingsContent(state.mcpServers, onSetMcpServers)
             SettingsCategory.Rules -> RulesSettingsContent(state.rules, onSetRules)
         }

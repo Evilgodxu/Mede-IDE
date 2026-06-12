@@ -2,7 +2,6 @@ package com.medeide.jh.screens.home
 
 import com.medeide.jh.model.McpServer
 import com.medeide.jh.model.Rule
-import com.medeide.jh.model.SkillItem
 
 // 主屏幕 UI 状态
 data class HomeUiState(
@@ -12,7 +11,6 @@ data class HomeUiState(
     val openedFolderName: String? = null,
     val openedFolderUri: String? = null,
     val rules: List<Rule> = emptyList(),
-    val skills: List<SkillItem> = emptyList(),
     val mcpServers: List<McpServer> = emptyList(),
     /** 存储根路径（完整文件系统根） */
     val storageRootPath: String = "",

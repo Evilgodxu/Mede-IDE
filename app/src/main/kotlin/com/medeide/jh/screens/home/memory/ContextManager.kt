@@ -5,7 +5,6 @@ import com.medeide.jh.screens.home.ai.AIToolSet
 import com.medeide.jh.screens.home.config.ChatConfig
 import com.medeide.jh.data.storage.FileManager
 import com.medeide.jh.model.Rule
-import com.medeide.jh.model.SkillItem
 import com.medeide.jh.model.chat.AttachedFile
 import com.medeide.jh.model.chat.ChatMessage
 import com.medeide.jh.model.chat.ChatRole
@@ -30,14 +29,37 @@ class ContextManager(
         sysPromptCache: String?,
         userName: String,
         rules: List<Rule>,
-        skills: List<SkillItem>,
         cloudModelEnabled: Boolean,
         aiToolSet: AIToolSet? = null,
     ): String {
         sysPromptCache?.let { return it }
         val sb = StringBuilder()
-        sb.append("你是智能编程助手，使用内置工具协助用户完成文件操作、代码编辑、项目构建、网络搜索等开发任务。")
-        if (userName.isNotBlank()) sb.append("\n用户: $userName")
+        sb.appendLine("你是智能编程助手，使用内置工具协助用户完成文件操作、代码编辑、项目构建、网络搜索等开发任务。")
+        if (userName.isNotBlank()) sb.appendLine("用户: $userName")
+
+        // 注入规则
+        if (rules.isNotEmpty()) {
+            sb.appendLine().appendLine("【系统规则】")
+            rules.forEach { r ->
+                sb.appendLine("- ${r.name}: ${r.content}")
+            }
+        }
+
+        // 注入工具描述 — 让模型知道有哪些工具可用
+        if (aiToolSet != null) {
+            val toolNames = aiToolSet.toolNames()
+            if (toolNames.isNotEmpty()) {
+                sb.appendLine().appendLine("【可用工具】")
+                sb.appendLine("你可以调用以下工具来协助完成任务：")
+                toolNames.chunked(5).forEach { chunk ->
+                    sb.appendLine("  ${chunk.joinToString(", ")}")
+                }
+                sb.appendLine()
+                sb.appendLine("当你需要执行操作时，框架会自动处理工具调用格式。")
+                sb.appendLine("请根据任务需求选择合适的工具，工具执行结果会自动返回给你。")
+            }
+        }
+
         _sysPromptCache = sb.toString()
         return sb.toString()
     }

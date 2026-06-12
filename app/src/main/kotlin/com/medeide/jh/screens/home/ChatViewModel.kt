@@ -33,7 +33,6 @@ import com.medeide.jh.data.source.local.LiteRTManager
 import com.medeide.jh.data.source.local.toSamplerConfig
 import com.medeide.jh.data.source.remote.CloudLLMClient
 import com.medeide.jh.model.Rule
-import com.medeide.jh.model.SkillItem
 import com.medeide.jh.model.chat.AttachedFile
 import com.medeide.jh.model.chat.ChatMessage
 import com.medeide.jh.model.chat.ChatRole
@@ -116,7 +115,6 @@ class ChatViewModel(
     // System prompt 依赖值缓存
     @Volatile private var sysPromptUserName: String = ""
     @Volatile private var sysPromptRules: List<Rule> = emptyList()
-    @Volatile private var sysPromptSkills: List<SkillItem> = emptyList()
     @Volatile private var sysPromptDeepThink: Boolean = false
     @Volatile private var sysPromptVersion: Int = 0
     @Volatile private var convSysPromptVersion: Int = -1
@@ -127,7 +125,6 @@ class ChatViewModel(
         sysPromptCache = contextManager.getSysPromptCache(),
         userName = sysPromptUserName,
         rules = sysPromptRules,
-        skills = sysPromptSkills,
         cloudModelEnabled = _state.value.cloudModelEnabled,
         aiToolSet = aiToolSet,
     )
@@ -251,13 +248,11 @@ class ChatViewModel(
                 preferencesRepo.deepThinkEnabled,
                 preferencesRepo.userName,
                 preferencesRepo.rules,
-                preferencesRepo.skills,
                 _state.map { it.cloudModelEnabled }.distinctUntilChanged(),
-            ) { think, name, rules, skills, _ ->
+            ) { think, name, rules, _ ->
                 sysPromptDeepThink = think
                 sysPromptUserName = name
                 sysPromptRules = rules
-                sysPromptSkills = skills
                 contextManager.invalidateSysPromptCache()
                 sysPromptVersion++
             }.collect {}
@@ -673,20 +668,6 @@ class ChatViewModel(
         val editorCtx = buildEditorContext()
         val messageBuilder = StringBuilder()
         if (editorCtx.isNotBlank()) messageBuilder.appendLine(editorCtx).appendLine()
-        if (sysPromptRules.isNotEmpty()) {
-            messageBuilder.appendLine("【系统规则】")
-            sysPromptRules.forEach { r -> messageBuilder.appendLine("- ${r.name}: ${r.content}") }
-            messageBuilder.appendLine()
-        }
-        val enabledSkills = sysPromptSkills.filter { it.enabled }
-        if (enabledSkills.isNotEmpty()) {
-            messageBuilder.appendLine("【已启用技能】")
-            enabledSkills.forEach { s ->
-                messageBuilder.appendLine("${s.name}: ${s.description}")
-                if (s.prompt.isNotBlank()) messageBuilder.appendLine(s.prompt.take(500))
-            }
-            messageBuilder.appendLine()
-        }
         val fileBlock = contextManager.buildFileAttachmentBlock(files)
         if (fileBlock.isNotBlank()) {
             messageBuilder.appendLine(fileBlock).appendLine()

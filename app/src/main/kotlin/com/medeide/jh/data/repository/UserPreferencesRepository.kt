@@ -10,7 +10,6 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.medeide.jh.model.McpServer
 import com.medeide.jh.model.Rule
-import com.medeide.jh.model.SkillItem
 import com.medeide.jh.model.chat.BackendType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -34,7 +33,6 @@ class UserPreferencesRepository(private val context: Context) {
         val MODEL_NAME = stringPreferencesKey("model_name")
         val USER_NAME = stringPreferencesKey("user_name")
         val RULES_JSON = stringPreferencesKey("rules_json")
-        val SKILLS_JSON = stringPreferencesKey("skills_json")
         val MCP_SERVERS_JSON = stringPreferencesKey("mcp_servers_json")
         val SHOW_TOOL_CALLS = booleanPreferencesKey("show_tool_calls")
         val DEEP_THINK_ENABLED = booleanPreferencesKey("deep_think_enabled")
@@ -115,30 +113,6 @@ class UserPreferencesRepository(private val context: Context) {
             } catch (_: Exception) { emptyList() }
         }
 
-    val skills: Flow<List<SkillItem>> = context.dataStore.data
-        .map { prefs ->
-            val json = prefs[PreferencesKeys.SKILLS_JSON]
-            if (json != null) {
-                try {
-                    val arr = JSONArray(json)
-                    (0 until arr.length()).map { i ->
-                        val obj = arr.getJSONObject(i)
-                        SkillItem(
-                            id = obj.optString("id"),
-                            name = obj.optString("name"),
-                            description = obj.optString("description"),
-                            prompt = obj.optString("prompt"),
-                            enabled = obj.optBoolean("enabled", true),
-                        )
-                    }
-                } catch (_: Exception) {
-                    emptyList()
-                }
-            } else {
-                emptyList() // 无预置技能，由用户自行导入
-            }
-        }
-
     val mcpServers: Flow<List<McpServer>> = context.dataStore.data
         .map { prefs ->
             val json = prefs[PreferencesKeys.MCP_SERVERS_JSON] ?: return@map emptyList<McpServer>()
@@ -202,22 +176,6 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun setRules(rules: List<Rule>) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.RULES_JSON] = rulesToJson(rules)
-        }
-    }
-
-    suspend fun setSkills(skills: List<SkillItem>) {
-        context.dataStore.edit { prefs ->
-            val arr = JSONArray()
-            skills.forEach { s ->
-                val obj = org.json.JSONObject()
-                obj.put("id", s.id)
-                obj.put("name", s.name)
-                obj.put("description", s.description)
-                obj.put("prompt", s.prompt)
-                obj.put("enabled", s.enabled)
-                arr.put(obj)
-            }
-            prefs[PreferencesKeys.SKILLS_JSON] = arr.toString()
         }
     }
 
