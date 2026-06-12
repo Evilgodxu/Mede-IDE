@@ -49,7 +49,7 @@
 ## 项目结构
 
 ```
-app/src/main/kotlin/com/template/jh/
+app/src/main/kotlin/com/medeide/jh/
 ├── MainActivity.kt                          # 主 Activity
 ├── MyApplication.kt                         # Application 入口（Koin 初始化）
 ├── core/

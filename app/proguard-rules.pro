@@ -93,8 +93,8 @@
 -keep class com.google.ai.edge.litertlm.Capabilities { *; }
 
 # 自定义 ToolSet（反射调用）
--keep class com.template.jh.core.ai.WebSearchTool { *; }
--keepclassmembers class com.template.jh.core.ai.WebSearchTool {
+-keep class com.medeide.jh.core.ai.WebSearchTool { *; }
+-keepclassmembers class com.medeide.jh.core.ai.WebSearchTool {
     @com.google.ai.edge.litertlm.Tool <methods>;
 }
 

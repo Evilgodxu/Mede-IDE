@@ -13,11 +13,11 @@ if (localPropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.template.jh"
+    namespace = "com.medeide.jh"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.template.jh"
+        applicationId = "com.medeide.jh"
         minSdk = 32
         targetSdk = 37
         versionCode = 1

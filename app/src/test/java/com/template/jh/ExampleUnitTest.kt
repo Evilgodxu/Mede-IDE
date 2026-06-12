@@ -1,4 +1,4 @@
-package com.template.jh
+package com.medeide.jh
 
 import org.junit.Test
 
