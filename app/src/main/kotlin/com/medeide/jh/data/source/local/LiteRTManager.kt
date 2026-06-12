@@ -3,8 +3,8 @@ package com.medeide.jh.data.source.local
 import android.content.Context
 import android.util.Log
 import android.net.Uri
-import com.medeide.jh.core.utils.CpuFeatureDetector
-import com.medeide.jh.core.utils.FileLogger
+import com.medeide.jh.data.utils.CpuFeatureDetector
+import com.medeide.jh.data.utils.FileLogger
 import com.medeide.jh.model.chat.DownloadState
 import com.medeide.jh.model.chat.DownloadStatus
 import com.medeide.jh.model.chat.EngineState

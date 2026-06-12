@@ -1,7 +1,7 @@
 package com.medeide.jh
 
 import android.app.Application
-import com.medeide.jh.core.utils.FileLogger
+import com.medeide.jh.data.utils.FileLogger
 import com.medeide.jh.di.appModule
 import org.koin.android.ext.koin.androidContext
 import org.koin.android.ext.koin.androidLogger

@@ -1,12 +1,12 @@
 package com.medeide.jh.di
 
-import com.medeide.jh.core.ai.AIToolSet
-import com.medeide.jh.core.ai.InputOptimizer
-import com.medeide.jh.core.ai.ToolCallHandler
-import com.medeide.jh.core.memory.ContextManager
-import com.medeide.jh.core.memory.ConversationMemory
-import com.medeide.jh.core.storage.FileManager
-import com.medeide.jh.core.utils.ImageProcessor
+import com.medeide.jh.screens.home.ai.AIToolSet
+import com.medeide.jh.screens.home.ai.InputOptimizer
+import com.medeide.jh.screens.home.ai.ToolCallHandler
+import com.medeide.jh.screens.home.memory.ContextManager
+import com.medeide.jh.screens.home.memory.ConversationMemory
+import com.medeide.jh.data.storage.FileManager
+import com.medeide.jh.data.utils.ImageProcessor
 import com.medeide.jh.data.repository.ConversationRepository
 import com.medeide.jh.data.repository.UsageAnalyticsRepository
 import com.medeide.jh.data.repository.UserPreferencesRepository

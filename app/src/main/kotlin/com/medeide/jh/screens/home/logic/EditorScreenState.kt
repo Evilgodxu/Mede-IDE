@@ -11,7 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
-import com.medeide.jh.core.storage.FileManager
+import com.medeide.jh.data.storage.FileManager
 import com.medeide.jh.model.TabItem
 import com.medeide.jh.model.TabType
 import com.medeide.jh.model.displayNameFromPath

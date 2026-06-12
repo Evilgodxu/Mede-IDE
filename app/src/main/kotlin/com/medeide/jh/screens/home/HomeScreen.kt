@@ -43,18 +43,18 @@ import com.medeide.jh.model.FileItem
 import com.medeide.jh.model.TabItem
 import com.medeide.jh.model.TabType
 import com.medeide.jh.screens.home.ChatViewModel
-import com.medeide.jh.core.ai.FileOperationEvents
-import com.medeide.jh.core.storage.FileManager
-import com.medeide.jh.screens.home.components.chat.AIChatPanel
-import com.medeide.jh.screens.home.components.MainContentArea
-import com.medeide.jh.screens.home.components.MainTopBar
-import com.medeide.jh.screens.home.components.preview.PreviewPanel
-import com.medeide.jh.screens.home.components.search.SearchPanel
-import com.medeide.jh.screens.home.components.Sidebar
-import com.medeide.jh.screens.home.components.SidebarTab
-import com.medeide.jh.screens.home.components.ThreeColumnLayout
-import com.medeide.jh.screens.home.components.editor.CodeEditor
-import com.medeide.jh.screens.home.components.resourcepanel.ResourcePanel
+import com.medeide.jh.screens.home.ai.FileOperationEvents
+import com.medeide.jh.data.storage.FileManager
+import com.medeide.jh.screens.home.landscape.collab.chat.AIChatPanel
+import com.medeide.jh.screens.home.landscape.workspace.MainContentArea
+import com.medeide.jh.screens.home.landscape.topbar.MainTopBar
+import com.medeide.jh.screens.home.landscape.workspace.preview.PreviewPanel
+import com.medeide.jh.screens.home.landscape.topbar.search.SearchPanel
+import com.medeide.jh.screens.home.landscape.sidebar.Sidebar
+import com.medeide.jh.screens.home.landscape.sidebar.SidebarTab
+import com.medeide.jh.screens.home.ThreeColumnLayout
+import com.medeide.jh.screens.home.landscape.workspace.editor.CodeEditor
+import com.medeide.jh.screens.home.landscape.sidebar.resourcepanel.ResourcePanel
 import com.medeide.jh.screens.home.logic.EditorScreenState
 import com.medeide.jh.screens.home.logic.rememberEditorScreenState
 import com.medeide.jh.screens.home.logic.utils.FileTypeUtil
@@ -84,8 +84,8 @@ fun HomeScreen(
 
     val fileManager = org.koin.java.KoinJavaComponent.get<FileManager>(FileManager::class.java)
     val editorState = rememberEditorScreenState(chatViewModel, fileManager)
-    val audioPlaybackState = remember { com.medeide.jh.screens.home.components.audio.AudioPlaybackState() }
-    val videoPlaybackState = remember { com.medeide.jh.screens.home.components.viewer.VideoPlaybackState() }
+    val audioPlaybackState = remember { com.medeide.jh.screens.home.audio.AudioPlaybackState() }
+    val videoPlaybackState = remember { com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlaybackState() }
 
     // 每次启动时检测权限，已有权限则自动打开存储目录
     LaunchedEffect(Unit) {
@@ -277,7 +277,7 @@ fun HomeScreen(
     val recentFiles by viewModel.recentFiles.collectAsState()
     val recentFolders by viewModel.recentFolders.collectAsState()
     // 工具栏音乐播放
-    var scannedAudioTracks by remember { mutableStateOf<List<com.medeide.jh.screens.home.components.audio.AudioTrack>>(emptyList()) }
+    var scannedAudioTracks by remember { mutableStateOf<List<com.medeide.jh.screens.home.audio.AudioTrack>>(emptyList()) }
     var audioScanRequested by remember { mutableStateOf(false) }
     var hasAudioPermission by remember {
         mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(
@@ -294,11 +294,11 @@ fun HomeScreen(
     LaunchedEffect(audioScanRequested) {
         if (audioScanRequested && hasAudioPermission && scannedAudioTracks.isEmpty()) {
             withContext(Dispatchers.IO) {
-                scannedAudioTracks = com.medeide.jh.screens.home.components.audio.AudioPlaybackState.scanDeviceAudio(context)
+                scannedAudioTracks = com.medeide.jh.screens.home.audio.AudioPlaybackState.scanDeviceAudio(context)
             }
         }
     }
-    fun playAudioTrack(track: com.medeide.jh.screens.home.components.audio.AudioTrack) {
+    fun playAudioTrack(track: com.medeide.jh.screens.home.audio.AudioTrack) {
         try {
             if (audioPlaybackState.exoPlayer == null) {
                 val player = androidx.media3.exoplayer.ExoPlayer.Builder(context).build()
@@ -335,13 +335,13 @@ fun HomeScreen(
             audioPlaybackState.playlist = scannedAudioTracks
             audioPlaybackState.currentIndex = scannedAudioTracks.indexOfFirst { it.path == track.path }.coerceAtLeast(0)
             audioScanScope.launch(Dispatchers.IO) {
-                audioPlaybackState.lyrics = com.medeide.jh.screens.home.components.audio.LyricsParser.loadFromFile(context, track.path)
+                audioPlaybackState.lyrics = com.medeide.jh.screens.home.audio.LyricsParser.loadFromFile(context, track.path)
             }
         } catch (e: Exception) {
             audioPlaybackState.errorMsg = e.message
         }
     }
-    val onPlayAudioTrack: (com.medeide.jh.screens.home.components.audio.AudioTrack) -> Unit = { playAudioTrack(it) }
+    val onPlayAudioTrack: (com.medeide.jh.screens.home.audio.AudioTrack) -> Unit = { playAudioTrack(it) }
     val onStopAudio: () -> Unit = {
         audioPlaybackState.release()
     }

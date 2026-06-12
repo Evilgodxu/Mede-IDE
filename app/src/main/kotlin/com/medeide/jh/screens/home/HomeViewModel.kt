@@ -6,8 +6,8 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.medeide.jh.core.ai.FileOperationEvents
-import com.medeide.jh.core.storage.FileManager
+import com.medeide.jh.screens.home.ai.FileOperationEvents
+import com.medeide.jh.data.storage.FileManager
 import com.medeide.jh.model.FileItem
 import com.medeide.jh.model.McpServer
 import com.medeide.jh.model.Rule

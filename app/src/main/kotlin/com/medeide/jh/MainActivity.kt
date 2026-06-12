@@ -25,8 +25,8 @@ import com.medeide.jh.screens.permission.LocalActivity
 import com.medeide.jh.screens.permission.PermissionGuideScreen
 import com.medeide.jh.ui.adaptive.ProvideWindowSizeClass
 import com.medeide.jh.ui.theme.MyApplicationTheme
-import com.medeide.jh.core.utils.localization.LanguageManager
-import com.medeide.jh.core.utils.localization.ProvideLocalizedContext
+import com.medeide.jh.data.utils.localization.LanguageManager
+import com.medeide.jh.data.utils.localization.ProvideLocalizedContext
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 
