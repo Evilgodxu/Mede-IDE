@@ -80,7 +80,6 @@ fun HomeScreen(
     var cursorLine by remember { mutableIntStateOf(0) }
     var cursorLineContent by remember { mutableStateOf("") }
     var previewModeTabs by remember { mutableStateOf(setOf<String>()) }
-    var isResourceSecondPaneExpanded by remember { mutableStateOf(false) }
     val terminalTabTitle = stringResource(R.string.menu_terminal)
 
     val fileManager = org.koin.java.KoinJavaComponent.get<FileManager>(FileManager::class.java)
@@ -414,8 +413,6 @@ fun HomeScreen(
                     viewModel = viewModel,
                     chatViewModel = chatViewModel,
                     editorState = editorState,
-                    isResourceSecondPaneExpanded = isResourceSecondPaneExpanded,
-                    onResourceSecondPaneExpandedChange = { isResourceSecondPaneExpanded = it },
                     onFileClick = { fileItem ->
                         // 文本文件使用 filePath（相对/绝对均可，EditorScreenState 会处理)
                         // 非文本文件需要绝对路径或 content:// URI
@@ -470,7 +467,7 @@ fun HomeScreen(
                 )
             },
             isLeftPanelVisible = selectedTab != null,
-            isLeftPanelExpanded = isResourceSecondPaneExpanded,
+            isLeftPanelExpanded = true,
             centerContent = {
                 MainContentArea(
                     chatViewModel = chatViewModel,
@@ -611,8 +608,6 @@ private fun LeftPanelContent(
     viewModel: HomeViewModel,
     chatViewModel: ChatViewModel,
     editorState: EditorScreenState,
-    isResourceSecondPaneExpanded: Boolean = false,
-    onResourceSecondPaneExpandedChange: (Boolean) -> Unit = {},
     onFileClick: (FileItem) -> Unit = {},
     onAddToConversation: (FileItem) -> Unit = {},
     onOpenFileTab: (String) -> Unit = {},
@@ -655,8 +650,6 @@ private fun LeftPanelContent(
                     viewModel.openAsProjectDirectory(filePath)
                 },
                 projectDirPath = homeState.projectDirPath,
-                isSecondPaneExpanded = isResourceSecondPaneExpanded,
-                onSecondPaneExpandedChange = onResourceSecondPaneExpandedChange,
             )
         }
         SidebarTab.Search -> {

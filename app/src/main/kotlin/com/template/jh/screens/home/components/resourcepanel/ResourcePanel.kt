@@ -28,8 +28,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.SyncAlt
-import androidx.compose.material.icons.filled.ViewColumn
-import androidx.compose.material.icons.filled.ViewWeek
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
@@ -61,10 +59,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 资源管理器面板 - 多列文件管理器（类似 Finder Column View）
+ * 资源管理器面板 - 双列文件管理器（始终显示左右两列）
  *
- * 点击目录在右侧新列展开，支持横向滚动查看多层级。
- * 左右滑动选中文件，支持多选（范围选中）。
+ * 点击目录在右侧新列显示，支持左右滑动选中文件及范围多选。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -84,8 +81,6 @@ fun ResourcePanel(
     onMerge: (oldPath: String, newPath: String) -> Unit = { _, _ -> },
     onOpenAsProject: ((String) -> Unit)? = null,
     projectDirPath: String = "",
-    isSecondPaneExpanded: Boolean = false,
-    onSecondPaneExpandedChange: (Boolean) -> Unit = {},
 ) {
     data class Pane(
         val path: String,
@@ -210,11 +205,17 @@ fun ResourcePanel(
 
     LaunchedEffect(files, openedFolderName) {
         leftPane.value = Pane("", openedFolderName ?: "", files)
-        rightPane.value = null
         leftHistory.clear()
         rightHistory.clear()
         leftHistory.add(leftPane.value!!)
         leftHistoryIdx = 0
+        // 始终初始化右列为左列当前目录的内容
+        if (rightPane.value == null) {
+            onListChildren("") { children ->
+                rightPane.value = Pane("", openedFolderName ?: "", children)
+                pushRightHistory(rightPane.value!!)
+            }
+        }
     }
 
     LaunchedEffect(files) {
@@ -315,7 +316,7 @@ fun ResourcePanel(
     val context = LocalContext.current
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 资源管理器顶部工具栏（面包屑 + 第二列展开/收起 + 选择计数）
+        // 资源管理器顶部工具栏（面包屑 + 选择计数）
         if (openedFolderName != null) {
             val activePane = if (lastInteractedPane == 0) leftPane.value else rightPane.value
             Row(
@@ -333,32 +334,6 @@ fun ResourcePanel(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                // 展开/收起第二列
-                IconButton(
-                    onClick = {
-                        val next = !isSecondPaneExpanded
-                        onSecondPaneExpandedChange(next)
-                        if (!next) {
-                            rightPane.value = null
-                        } else if (rightPane.value == null) {
-                            val lp = leftPane.value
-                            if (lp != null) {
-                                onListChildren(lp.path) { children ->
-                                    rightPane.value = Pane(lp.path, lp.displayName, children)
-                                    pushRightHistory(rightPane.value!!)
-                                }
-                            }
-                        }
-                    },
-                    modifier = Modifier.size(32.dp),
-                ) {
-                    Icon(
-                        imageVector = if (isSecondPaneExpanded) Icons.Default.ViewWeek else Icons.Default.ViewColumn,
-                        contentDescription = if (isSecondPaneExpanded) "收起第二列" else "展开第二列",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
                 if (isSelectionMode && selectedItems.isNotEmpty()) {
                     Spacer(Modifier.width(8.dp))
                     Text(
@@ -453,8 +428,8 @@ fun ResourcePanel(
                             projectDirPath = projectDirPath,
                             modifier = Modifier.weight(1f),
                         )
-                        // 右列（展开时显示）
-                        if (isSecondPaneExpanded && rightPane.value != null) {
+                        // 右列（始终显示）
+                        if (rightPane.value != null) {
                             VerticalDivider(
                                 modifier = Modifier.fillMaxHeight(),
                                 thickness = 1.dp,
@@ -706,29 +681,27 @@ fun ResourcePanel(
                     Spacer(Modifier.weight(1f))
 
                     // 4. 同步双列目录（将非活跃列同步为活跃列路径）
-                    if (isSecondPaneExpanded) {
-                        IconButton(
-                            onClick = {
-                                val src = activePane!!
-                                onListChildren(src.path) { children ->
-                                    val newPane = Pane(src.path, src.displayName, children)
-                                    if (lastInteractedPane == 0) {
-                                        rightPane.value = newPane
-                                    } else {
-                                        leftPane.value = newPane
-                                        pushLeftHistory(newPane)
-                                    }
+                    IconButton(
+                        onClick = {
+                            val src = activePane!!
+                            onListChildren(src.path) { children ->
+                                val newPane = Pane(src.path, src.displayName, children)
+                                if (lastInteractedPane == 0) {
+                                    rightPane.value = newPane
+                                } else {
+                                    leftPane.value = newPane
+                                    pushLeftHistory(newPane)
                                 }
-                            },
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SyncAlt,
-                                contentDescription = "同步双列",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        Spacer(Modifier.weight(1f))
+                            }
+                        },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SyncAlt,
+                            contentDescription = "同步双列",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
+                    Spacer(Modifier.weight(1f))
 
                     // 5. 回到根目录
                     IconButton(
@@ -986,7 +959,6 @@ private fun FileListPaneContent(
                         selectedPaths = allSelectedPaths,
                         archivePath = archivePath,
                         onDismiss = { showMenu = false },
-                        onOpenFile = { onInteracted(); onFileClick(FileItem(node.name, node.uri, false, relativePath = node.relativePath, filePath = node.filePath)) },
                         onAddToConversation = { onInteracted(); onAddToConversation(FileItem(node.name, node.uri, node.isDirectory, relativePath = node.relativePath, filePath = node.filePath)) },
                         onCreateFile = { onInteracted(); onCreateFile(node) },
                         onCreateDirectory = { onInteracted(); onCreateDirectory(node) },

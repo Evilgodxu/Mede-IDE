@@ -17,7 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
+
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.ContentCopy
@@ -99,7 +99,6 @@ fun TreeContextMenu(
     selectedPaths: List<String> = emptyList(),
     archivePath: String? = null,
     onDismiss: () -> Unit,
-    onOpenFile: () -> Unit,
     onAddToConversation: () -> Unit,
     onCreateFile: () -> Unit,
     onCreateDirectory: () -> Unit,
@@ -121,9 +120,6 @@ fun TreeContextMenu(
     val showOpenAsProject = onOpenAsProject != null && node.isDirectory
     val isMultiSelect = selectedCount > 1
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
-    val hasCopyOrMove = onCopyToLeft != null || onCopyToRight != null ||
-        onMoveToLeft != null || onMoveToRight != null || archivePath != null
-
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
@@ -140,49 +136,58 @@ fun TreeContextMenu(
                 .heightIn(max = (screenHeightDp * 0.75f).dp)
                 .verticalScroll(scrollState)
         ) {
-            // Group 1: 打开 + 添加到对话
-            if (!node.isDirectory && !isMultiSelect) {
-                MenuRow(
-                    left = { MenuCell("打开文件", Icons.AutoMirrored.Filled.OpenInNew, { onDismiss(); onOpenFile(); Unit }) },
-                    right = { MenuCell(stringResource(R.string.add_to_conversation), Icons.Default.Add, { onDismiss(); onAddToConversation(); Unit }) },
-                )
-            } else {
-                MenuCell(stringResource(R.string.add_to_conversation), Icons.Default.Add, { onDismiss(); onAddToConversation(); Unit })
-            }
+            // Group 1: 添加到对话
+            MenuCell(stringResource(R.string.add_to_conversation), Icons.Default.Add, { onDismiss(); onAddToConversation(); Unit })
             HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp))
 
-            // Group 2: 复制/移动/解压（仅单选时显示）
+            // Group 2: 复制/移动/解压（仅单选时显示，条件显示各侧项）
             if (!isMultiSelect) {
-                if (onCopyToLeft != null && onCopyToRight != null) {
+                val showCopy = onCopyToLeft != null || onCopyToRight != null
+                val showMove = onMoveToLeft != null || onMoveToRight != null
+                val showExtract = archivePath != null && (onExtractToLeft != null || onExtractToRight != null)
+                if (showCopy) {
                     MenuRow(
-                        left = { MenuCell("复制到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onCopyToLeft(); Unit }) },
-                        right = { MenuCell("复制到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onCopyToRight(); Unit }) },
+                        left = {
+                            if (onCopyToLeft != null) {
+                                MenuCell("复制到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onCopyToLeft.invoke(); Unit })
+                            }
+                        },
+                        right = {
+                            if (onCopyToRight != null) {
+                                MenuCell("复制到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onCopyToRight.invoke(); Unit })
+                            }
+                        },
                     )
-                } else {
-                    onCopyToLeft?.let { MenuCell("复制到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); it(); Unit }) }
-                    onCopyToRight?.let { MenuCell("复制到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); it(); Unit }) }
                 }
-                if (onMoveToLeft != null && onMoveToRight != null) {
+                if (showMove) {
                     MenuRow(
-                        left = { MenuCell("移动到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onMoveToLeft(); Unit }) },
-                        right = { MenuCell("移动到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onMoveToRight(); Unit }) },
+                        left = {
+                            if (onMoveToLeft != null) {
+                                MenuCell("移动到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onMoveToLeft.invoke(); Unit })
+                            }
+                        },
+                        right = {
+                            if (onMoveToRight != null) {
+                                MenuCell("移动到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onMoveToRight.invoke(); Unit })
+                            }
+                        },
                     )
-                } else {
-                    onMoveToLeft?.let { MenuCell("移动到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); it(); Unit }) }
-                    onMoveToRight?.let { MenuCell("移动到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); it(); Unit }) }
                 }
-                if (archivePath != null) {
-                    if (onExtractToLeft != null && onExtractToRight != null) {
-                        MenuRow(
-                            left = { MenuCell("解压到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onExtractToLeft(selectedPaths); Unit }) },
-                            right = { MenuCell("解压到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onExtractToRight(selectedPaths); Unit }) },
-                        )
-                    } else {
-                        onExtractToLeft?.let { MenuCell("解压到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); it(selectedPaths); Unit }) }
-                        onExtractToRight?.let { MenuCell("解压到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); it(selectedPaths); Unit }) }
-                    }
+                if (showExtract) {
+                    MenuRow(
+                        left = {
+                            if (onExtractToLeft != null) {
+                                MenuCell("解压到左侧", Icons.AutoMirrored.Filled.ArrowBack, { onDismiss(); onExtractToLeft.invoke(selectedPaths); Unit })
+                            }
+                        },
+                        right = {
+                            if (onExtractToRight != null) {
+                                MenuCell("解压到右侧", Icons.AutoMirrored.Filled.ArrowForward, { onDismiss(); onExtractToRight.invoke(selectedPaths); Unit })
+                            }
+                        },
+                    )
                 }
-                if (hasCopyOrMove) {
+                if (showCopy || showMove || showExtract) {
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp))
                 }
             }

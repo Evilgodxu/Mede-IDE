@@ -51,7 +51,7 @@ class ContextManager(
     fun invalidateSysPromptCache() { _sysPromptCache = null }
     fun getSysPromptCache(): String? = _sysPromptCache
 
-    // === 编辑器上下文 ===
+    // === 实时状态上下文 ===
 
     fun buildEditorContext(
         activeFilePath: String,
@@ -61,16 +61,16 @@ class ContextManager(
         aiToolSet: AIToolSet,
     ): String {
         val ctx = StringBuilder()
-        ctx.appendLine("[实时感知]")
+        ctx.appendLine("[实时状态]")
 
         // 系统时间
         val now = java.time.LocalDateTime.now()
-        ctx.appendLine("时间: ${now.year}-${"%02d".format(now.monthValue)}-${"%02d".format(now.dayOfMonth)} ${"%02d".format(now.hour)}:${"%02d".format(now.minute)}")
+        ctx.appendLine("当前时间: ${now.year}-${"%02d".format(now.monthValue)}-${"%02d".format(now.dayOfMonth)} ${"%02d".format(now.hour)}:${"%02d".format(now.minute)}")
 
         // 项目路径
         val absoluteRoot = aiToolSet.getProjectRootPath()
         if (absoluteRoot.isNotBlank()) {
-            ctx.appendLine("项目: $absoluteRoot")
+            ctx.appendLine("当前项目: $absoluteRoot")
         }
 
         // 活动标签（音频/视频/图片/代码/文本等正在查看或编辑的内容）
@@ -97,9 +97,8 @@ class ContextManager(
     fun buildFileAttachmentBlock(refs: List<AttachedFile>): String {
         if (refs.isEmpty()) return ""
         val block = StringBuilder()
-        block.appendLine("[用户指定的文件（支持绝对路径和相对路径），使用 readFile 查看内容]")
-        refs.forEach { f -> block.appendLine("  - ${f.name} (${f.path})") }
-        return block.toString()
+        refs.forEach { f -> block.appendLine("用户要求查看 \"${f.path}\"") }
+        return block.toString().trimEnd()
     }
 
     // === Token 估算 ===

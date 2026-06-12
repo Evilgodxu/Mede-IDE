@@ -528,13 +528,7 @@ class ChatViewModel(
                 return
             }
         }
-        val fileBlock = contextManager.buildFileAttachmentBlock(files)
-        val userContent = buildString {
-            append(text)
-            if (fileBlock.isNotBlank()) { appendLine(); append(fileBlock) }
-            if (images.isNotEmpty()) { appendLine(); append("[已附加 ${images.size} 张图片]") }
-        }
-        val userMsg = ChatMessage(role = ChatRole.User, content = userContent, imageUris = images)
+        val userMsg = ChatMessage(role = ChatRole.User, content = text, imageUris = images)
         val modelMsgId = java.util.UUID.randomUUID().toString()
         val placeholderMsg = ChatMessage(id = modelMsgId, role = ChatRole.Model, content = "", isStreaming = true)
         _state.update { it.copy(messages = it.messages + userMsg + placeholderMsg, inputText = "", attachedImageUris = emptyList(), attachedFileRefs = emptyList(), isLoading = true) }
@@ -564,10 +558,10 @@ class ChatViewModel(
                 }
                 val isCloud = _state.value.cloudModelEnabled
                 if (isCloud) {
-                    processWithCloudTools(text, modelMsgId, ctx, tempImagePaths)
+                    processWithCloudTools(text, modelMsgId, ctx, tempImagePaths, files)
                 } else {
                     ensureConversation()
-                    processLocalMessage(text, modelMsgId, tempImagePaths)
+                    processLocalMessage(text, modelMsgId, tempImagePaths, files)
                     compressLocalContextIfNeeded()
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -684,6 +678,7 @@ class ChatViewModel(
     private suspend fun processLocalMessage(
         text: String, msgId: String,
         imagePaths: List<String> = emptyList(),
+        files: List<AttachedFile> = emptyList(),
     ) {
         val conv = activeConversation
         if (conv == null) {
@@ -710,6 +705,10 @@ class ChatViewModel(
                 if (s.prompt.isNotBlank()) messageBuilder.appendLine(s.prompt.take(500))
             }
             messageBuilder.appendLine()
+        }
+        val fileBlock = contextManager.buildFileAttachmentBlock(files)
+        if (fileBlock.isNotBlank()) {
+            messageBuilder.appendLine(fileBlock).appendLine()
         }
         messageBuilder.append(text)
         val userText = messageBuilder.toString().trim()
@@ -808,6 +807,7 @@ class ChatViewModel(
         text: String, msgId: String,
         ctx: Application,
         imagePaths: List<String> = emptyList(),
+        files: List<AttachedFile> = emptyList(),
     ) {
         val profile = _state.value.cloudModelProfiles.find { it.id == _state.value.activeCloudProfileId }
         if (profile == null) {
@@ -847,6 +847,10 @@ class ChatViewModel(
         val editorCtx = buildEditorContext()
         if (editorCtx.isNotBlank()) {
             historyMessages.add(ChatMessage(role = ChatRole.System, content = editorCtx))
+        }
+        val fileBlock = contextManager.buildFileAttachmentBlock(files)
+        if (fileBlock.isNotBlank()) {
+            historyMessages.add(ChatMessage(role = ChatRole.System, content = fileBlock))
         }
         historyMessages.add(ChatMessage(role = ChatRole.User, content = text))
 
