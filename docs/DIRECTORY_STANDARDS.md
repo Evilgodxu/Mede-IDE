@@ -22,21 +22,22 @@ app/src/main/kotlin/com/company/app/
 ├── navigation/                # 导航配置
 ├── screens/                   # UI 页面层（页面即模块，内容全内聚）
 │   └── {page}/                # 页面模块（如 home/、detail/）
-│       ├── layouts/           # 布局变体（按窗口尺寸类别细分）
-│       │   ├── compact/       # 竖屏/紧凑单栏布局
-│       │   │   ├── {Page}CompactScreen.kt   # 组装入口 —— 平铺可见
-│       │   │   ├── topbar/                  # 该布局专属的功能子模块
-│       │   │   └── usercard/
-│       │   ├── medium/        # 横屏/中等宽度布局
-│       │   │   ├── {Page}MediumScreen.kt
-│       │   │   ├── topbar/
-│       │   │   └── sidebar/
-│       │   └── expanded/      # 宽屏多栏布局
-│       │       ├── {Page}ExpandedScreen.kt
-│       │       └── sidebar/
-│       ├── searchbar/         # 跨布局共享功能子模块（被多个 layout 复用）
-│       │   ├── SearchBar.kt
-│       │   └── SearchBarViewModel.kt
+│       ├── portrait/          # 竖屏布局
+│       │   ├── {Page}PortraitScreen.kt   # 组装入口 —— 平铺可见
+│       │   ├── topbar/                   # 布局结构目录（顶栏区）
+│       │   │   └── [子组件目录...]
+│       │   └── workspace/                # 布局结构目录（工作区）
+│       │       └── [子组件目录...]
+│       ├── landscape/         # 横屏布局
+│       │   ├── {Page}LandscapeScreen.kt
+│       │   ├── topbar/
+│       │   │   └── [子组件目录...]
+│       │   ├── sidebar/
+│       │   │   └── [子组件目录...]
+│       │   ├── workspace/
+│       │   │   └── [子组件目录...]
+│       │   └── collab/
+│       │       └── [子组件目录...]
 │       ├── data/              # 页面专属数据层
 │       │   └── {Page}Repository.kt
 │       ├── model/             # 页面专属领域模型
@@ -48,7 +49,7 @@ app/src/main/kotlin/com/company/app/
 │       │   ├── validators/    # 输入验证
 │       │   ├── extensions/    # 扩展函数
 │       │   └── utils/         # 工具类
-│       ├── {Page}Screen.kt   # 入口（根据窗口尺寸分派到对应 layout）
+│       ├── {Page}Screen.kt   # 入口（根据屏幕方向分派到对应 layout）
 │       ├── {Page}UiState.kt
 │       └── {Page}ViewModel.kt
 ├── ui/                        # 全局通用资源（跨页面复用，无业务绑定）
@@ -69,13 +70,19 @@ app/src/main/kotlin/com/company/app/
 ├── navigation/                # 导航配置
 ├── screens/                   # UI 页面层（页面即模块，内容全内聚）
 │   └── {page}/                # 页面模块
-│       ├── layouts/           # 布局变体
-│       │   ├── compact/
-│       │   │   ├── {Page}CompactScreen.kt
-│       │   │   └── {feature}/
-│       │   ├── medium/
-│       │   └── expanded/
-│       ├── {feature}/         # 跨布局共享功能子模块
+│       ├── portrait/
+│       │   ├── {Page}PortraitScreen.kt
+│       │   ├── {area}/                   # 布局结构目录
+│       │   │   └── [子组件目录...]
+│       │   └── {area}/
+│       │       └── [子组件目录...]
+│       ├── landscape/
+│       │   ├── {Page}LandscapeScreen.kt
+│       │   ├── {area}/
+│       │   │   └── [子组件目录...]
+│       │   └── {area}/
+│       │       └── [子组件目录...]
+│       ├── {feature}/         # 功能子模块
 │       ├── data/
 │       ├── model/
 │       ├── service/
@@ -91,21 +98,18 @@ app/src/main/kotlin/com/company/app/
 ## 核心原则
 
 - **页面即模块**：所有页面专属的数据、模型、组件、业务逻辑全内聚在 `screens/{page}/` 下，不在顶层目录创建
-- **布局显式化**：每种布局变体（compact / medium / expanded）在 `layouts/` 下独立目录，各自拥有组装入口和功能子模块
+- **布局显式化**：每种布局变体（portrait / landscape）在页面下独立目录，各自拥有组装入口、布局结构目录和功能子模块
 - **组件即子模块**：每个功能组件拥有独立子目录，内含完整实现；无 `components/` 容器目录，父目录平铺的文件即为组装入口
 - **顶层仅共享**：顶层 `data/`、`model/`、`ui/` 仅存放被多个页面复用的内容
 - **解耦优先**：每个功能独立成模块，由上层组装而非包含，避免改动误触其他功能
 
-## 布局 vs 共享 划分原则
+## 布局结构目录
 
-`screens/{page}/` 下存在两种位置来放置功能子模块：
+`screens/{page}/portrait/` 和 `screens/{page}/landscape/` 下包含的**布局结构目录**，是按屏幕区域划分的布局骨架，如顶栏区、侧栏区、工作区等。每个布局结构目录下存放该区域的功能组件子目录。
 
-| 位置 | 适用场景 | 示例 |
-|------|---------|------|
-| `layouts/compact/topbar/` | 该布局**独有**的功能，其他布局不需要 | 竖屏顶部工具栏 |
-| `screens/{page}/searchbar/` | **跨布局共享**的功能，两个以上布局使用 | 搜索栏在 compact 和 expanded 中都有 |
+**≥2 原则**：当一个布局区域内的功能组件数量 ≥ 2 时，每个功能必须独立为子目录，禁止平铺多个 .kt 文件在布局结构目录下。确保改动一个功能不会波及同区域的其他功能。
 
-判断规则：如果一个功能模块被两个或以上布局引用，提升到页面级别 `screens/{page}/` 下。否则放在对应 `layouts/{layout}/` 内。
+功能组件如需跨布局复用，提升到全局 `ui/` 层。
 
 ## 命名规范
 
@@ -118,7 +122,7 @@ app/src/main/kotlin/com/company/app/
 | 类型 | 规则 | 示例 |
 |------|------|------|
 | 页面入口 Screen | `{Page}Screen.kt` | `HomeScreen.kt` |
-| 布局 Screen | `{Page}{Layout}Screen.kt` | `HomeCompactScreen.kt` |
+| 布局 Screen | `{Page}{Layout}Screen.kt` | `HomePortraitScreen.kt` |
 | ViewModel | `{Page}ViewModel.kt` | `HomeViewModel.kt` |
 | UiState | `{Page}UiState.kt` | `HomeUiState.kt` |
 | 功能模块目录 | `{feature}/` | `topbar/` |
@@ -150,21 +154,29 @@ app/src/main/kotlin/com/company/app/
 **每个功能组件必须拥有独立子目录**，无论其行数多少或复杂度高低。不允许在任何 UI 目录下平铺组件文件。
 
 ```
-# 正确：每个功能独立子目录
-layouts/compact/
-├── HomeCompactScreen.kt         # 组装入口
-├── topbar/                      # 完整功能模块
-│   ├── TopBar.kt
-│   └── TopBarSearchInput.kt
-└── usercard/                    # 完整功能模块
-    ├── UserCard.kt
-    └── UserCardSection.kt
+# 正确：布局结构目录下每个功能独立子目录（即使只含 1 个文件也独立成目录）
+portrait/
+├── HomePortraitScreen.kt         # 组装入口
+├── topbar/                       # 布局结构目录（顶栏区，含 2+ 功能 → 拆子目录）
+│   ├── searchbar/                # 功能组件子目录
+│   │   ├── SearchBar.kt
+│   │   └── SearchBarViewModel.kt
+│   └── quickactions/             # 功能组件子目录
+│       └── QuickActions.kt
+└── workspace/                    # 布局结构目录（工作区，仅 1 个功能 → 可单文件）
+    └── canvas/
+        ├── Canvas.kt
+        └── CanvasToolbar.kt
 
-# 错误：组件平铺在父目录
-layouts/compact/
-├── HomeCompactScreen.kt
-├── TopBar.kt                    # 不应平铺
-└── UserCard.kt                  # 不应平铺
+# 错误：功能组件平铺在布局结构目录下（≥2 未拆子目录）
+portrait/
+├── HomePortraitScreen.kt
+├── topbar/
+│   ├── SearchBar.kt              # 顶栏区含 2+ 文件，应拆为独立子目录
+│   ├── SearchBarViewModel.kt
+│   └── QuickActions.kt
+└── workspace/
+    └── Canvas.kt
 ```
 
 ### 嵌套示例
