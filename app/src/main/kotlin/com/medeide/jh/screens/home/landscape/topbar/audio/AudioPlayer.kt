@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.audio
+package com.medeide.jh.screens.home.landscape.topbar.audio
 
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -47,7 +47,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.delay
 import java.io.File
 
-/** 参考 Echo-Music 的支持格式扩展列表 */
+// 参考 Echo-Music 的支持格式扩展列表
 private val SUPPORTED_AUDIO_EXTENSIONS = setOf(
     "aac", "amr", "flac", "m4a", "m4b", "m4p", "mid", "mka",
     "mp3", "mp4", "oga", "ogg", "opus", "wav", "weba", "webm",
@@ -288,7 +288,7 @@ fun AudioPlayer(
     }
 }
 
-/** 使用 ExoPlayer 加载并播放音频 */
+// 使用 ExoPlayer 加载并播放音频
 private fun loadTrack(state: AudioPlaybackState, context: android.content.Context, path: String) {
     try {
         state.errorMsg = null
@@ -315,7 +315,7 @@ private fun loadTrack(state: AudioPlaybackState, context: android.content.Contex
     }
 }
 
-/** 根据当前播放位置更新歌词索引 — 二分查找 */
+// 根据当前播放位置更新歌词索引 — 二分查找
 private fun updateLyricIndex(state: AudioPlaybackState, positionMs: Long) {
     val lines = state.lyrics
     if (lines.isEmpty()) {
@@ -338,7 +338,7 @@ private fun updateLyricIndex(state: AudioPlaybackState, positionMs: Long) {
     state.currentLyricIndex = result
 }
 
-/** 扫描同级目录音频文件（扩展格式参考 Echo-Music） */
+// 扫描同级目录音频文件（扩展格式参考 Echo-Music）
 private fun scanSiblingAudio(context: android.content.Context, audioPath: String): List<AudioTrack> {
     return if (audioPath.startsWith("content://")) {
         val name = runCatching {

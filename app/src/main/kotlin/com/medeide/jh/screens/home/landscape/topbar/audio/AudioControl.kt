@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.audio
+package com.medeide.jh.screens.home.landscape.topbar.audio
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee

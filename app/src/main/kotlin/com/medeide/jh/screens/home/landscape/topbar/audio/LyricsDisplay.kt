@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.audio
+package com.medeide.jh.screens.home.landscape.topbar.audio
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -21,10 +21,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
-/**
- * 歌词同步显示组件
- * 参考 Echo-Music 的 Lyrics.kt 核心同步逻辑
- */
+// 歌词同步显示组件
+// 参考 Echo-Music 的 Lyrics.kt 核心同步逻辑
 @Composable
 fun LyricsDisplay(
     lyrics: List<LyricLine>,

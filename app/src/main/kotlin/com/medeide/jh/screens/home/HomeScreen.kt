@@ -84,7 +84,7 @@ fun HomeScreen(
 
     val fileManager = org.koin.java.KoinJavaComponent.get<FileManager>(FileManager::class.java)
     val editorState = rememberEditorScreenState(chatViewModel, fileManager)
-    val audioPlaybackState = remember { com.medeide.jh.screens.home.audio.AudioPlaybackState() }
+    val audioPlaybackState = remember { com.medeide.jh.screens.home.landscape.topbar.audio.AudioPlaybackState() }
     val videoPlaybackState = remember { com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlaybackState() }
 
     // 每次启动时检测权限，已有权限则自动打开存储目录
@@ -277,7 +277,7 @@ fun HomeScreen(
     val recentFiles by viewModel.recentFiles.collectAsState()
     val recentFolders by viewModel.recentFolders.collectAsState()
     // 工具栏音乐播放
-    var scannedAudioTracks by remember { mutableStateOf<List<com.medeide.jh.screens.home.audio.AudioTrack>>(emptyList()) }
+    var scannedAudioTracks by remember { mutableStateOf<List<com.medeide.jh.screens.home.landscape.topbar.audio.AudioTrack>>(emptyList()) }
     var audioScanRequested by remember { mutableStateOf(false) }
     var hasAudioPermission by remember {
         mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(
@@ -294,11 +294,11 @@ fun HomeScreen(
     LaunchedEffect(audioScanRequested) {
         if (audioScanRequested && hasAudioPermission && scannedAudioTracks.isEmpty()) {
             withContext(Dispatchers.IO) {
-                scannedAudioTracks = com.medeide.jh.screens.home.audio.AudioPlaybackState.scanDeviceAudio(context)
+                scannedAudioTracks = com.medeide.jh.screens.home.landscape.topbar.audio.AudioPlaybackState.scanDeviceAudio(context)
             }
         }
     }
-    fun playAudioTrack(track: com.medeide.jh.screens.home.audio.AudioTrack) {
+    fun playAudioTrack(track: com.medeide.jh.screens.home.landscape.topbar.audio.AudioTrack) {
         try {
             if (audioPlaybackState.exoPlayer == null) {
                 val player = androidx.media3.exoplayer.ExoPlayer.Builder(context).build()
@@ -335,13 +335,13 @@ fun HomeScreen(
             audioPlaybackState.playlist = scannedAudioTracks
             audioPlaybackState.currentIndex = scannedAudioTracks.indexOfFirst { it.path == track.path }.coerceAtLeast(0)
             audioScanScope.launch(Dispatchers.IO) {
-                audioPlaybackState.lyrics = com.medeide.jh.screens.home.audio.LyricsParser.loadFromFile(context, track.path)
+                audioPlaybackState.lyrics = com.medeide.jh.screens.home.landscape.topbar.audio.LyricsParser.loadFromFile(context, track.path)
             }
         } catch (e: Exception) {
             audioPlaybackState.errorMsg = e.message
         }
     }
-    val onPlayAudioTrack: (com.medeide.jh.screens.home.audio.AudioTrack) -> Unit = { playAudioTrack(it) }
+    val onPlayAudioTrack: (com.medeide.jh.screens.home.landscape.topbar.audio.AudioTrack) -> Unit = { playAudioTrack(it) }
     val onStopAudio: () -> Unit = {
         audioPlaybackState.release()
     }

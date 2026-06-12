@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.audio
+package com.medeide.jh.screens.home.landscape.topbar.audio
 
 import android.content.Context
 import android.provider.MediaStore
@@ -14,10 +14,10 @@ data class AudioTrack(
     val name: String,
 )
 
-/** 歌词行 */
+// 歌词行
 data class LyricLine(val timeMs: Long, val text: String)
 
-/** 音频播放状态 */
+// 音频播放状态
 class AudioPlaybackState {
     var exoPlayer: ExoPlayer? by mutableStateOf(null)
     var isPlaying by mutableStateOf(false)
@@ -29,9 +29,9 @@ class AudioPlaybackState {
     var currentIndex by mutableIntStateOf(-1)
     var currentAudioPath by mutableStateOf("")
     var currentSongName by mutableStateOf("")
-    /** 歌词列表 */
+    // 歌词列表
     var lyrics by mutableStateOf<List<LyricLine>>(emptyList())
-    /** 当前歌词行索引 */
+    // 当前歌词行索引
     var currentLyricIndex by mutableIntStateOf(-1)
 
     fun release() {
@@ -49,7 +49,7 @@ class AudioPlaybackState {
     }
 
     companion object {
-        /** 扫描设备本地音频文件（MediaStore） */
+        // 扫描设备本地音频文件（MediaStore）
         suspend fun scanDeviceAudio(context: Context): List<AudioTrack> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val tracks = mutableListOf<AudioTrack>()
             try {

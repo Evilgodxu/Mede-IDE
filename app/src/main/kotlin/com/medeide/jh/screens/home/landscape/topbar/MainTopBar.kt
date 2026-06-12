@@ -34,10 +34,10 @@ import com.medeide.jh.model.chat.CloudModelProfile
 import com.medeide.jh.model.chat.EngineStatus
 import com.medeide.jh.model.chat.ModelInfo
 import com.medeide.jh.data.repository.RecentEntry
-import com.medeide.jh.screens.home.audio.AudioControl
-import com.medeide.jh.screens.home.audio.AudioPlaybackState
+import com.medeide.jh.screens.home.landscape.topbar.audio.AudioControl
+import com.medeide.jh.screens.home.landscape.topbar.audio.AudioPlaybackState
+import com.medeide.jh.screens.home.landscape.topbar.audio.AudioTrack
 import com.medeide.jh.screens.home.landscape.topbar.search.SearchBar
-import com.medeide.jh.screens.home.audio.AudioTrack
 
 // 主窗口顶部工具栏组件
 @OptIn(ExperimentalMaterial3Api::class)

@@ -52,8 +52,8 @@ import com.medeide.jh.R
 import com.medeide.jh.model.TabItem
 import com.medeide.jh.model.TabType
 import com.medeide.jh.screens.home.ChatViewModel
-import com.medeide.jh.screens.home.audio.AudioPlaybackState
-import com.medeide.jh.screens.home.audio.AudioPlayer
+import com.medeide.jh.screens.home.landscape.topbar.audio.AudioPlaybackState
+import com.medeide.jh.screens.home.landscape.topbar.audio.AudioPlayer
 import com.medeide.jh.screens.home.landscape.workspace.preview.ImagePreview
 import com.medeide.jh.screens.home.landscape.workspace.viewer.ArchiveViewer
 import com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlayer

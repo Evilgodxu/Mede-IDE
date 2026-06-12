@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.audio
+package com.medeide.jh.screens.home.landscape.topbar.audio
 
 import android.content.Context
 import android.net.Uri
@@ -6,7 +6,7 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 
-/** LRC 歌词解析 — 参考 Echo-Music 的 LyricsUtils.parseLyrics */
+// LRC 歌词解析 — 参考 Echo-Music 的 LyricsUtils.parseLyrics
 object LyricsParser {
 
     private val LINE_REGEX = "\\[(\\d{2}):(\\d{2})\\.(\\d{2,3})\\](.*)".toRegex()
