@@ -9,6 +9,7 @@ import com.medeide.jh.model.chat.CloudModelConfig
 import com.medeide.jh.model.chat.CloudToolCall
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -23,6 +24,14 @@ import java.util.concurrent.TimeUnit
 // 云端大模型客户端（OpenAI 兼容 API /chat/completions + SSE 流式）
 // 使用 OkHttp 替代 HttpURLConnection，获得连接池复用 + Gzip 自动解压
 class CloudLLMClient(private val context: Context) {
+
+    @Volatile private var currentCall: Call? = null
+
+    /** 取消当前正在进行的 HTTP 请求，关闭连接以通知服务器停止生成 */
+    fun cancelCurrentCall() {
+        currentCall?.cancel()
+        currentCall = null
+    }
 
     private val client by lazy {
         OkHttpClient.Builder()
@@ -162,57 +171,63 @@ class CloudLLMClient(private val context: Context) {
         data class TcAccumulator(var id: String = "", var name: String = "", val args: StringBuilder = StringBuilder())
         val toolCallAccumulators = mutableMapOf<Int, TcAccumulator>()
 
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                val errorBody = response.body.string()
-                throw RuntimeException("API error ${response.code}: $errorBody")
-            }
-            response.body.let { body ->
-                val source = body.source()
-                while (!source.exhausted()) {
-                    val line = source.readUtf8Line() ?: continue
-                    if (!line.startsWith("data: ")) continue
-                    val data = line.removePrefix("data: ").trim()
-                    if (data == "[DONE]") break
-                    try {
-                        val json = JSONObject(data)
-                        val usageObj = json.optJSONObject("usage")
-                        if (usageObj != null) {
-                            usage = ApiUsage(
-                                promptTokens = usageObj.optInt("prompt_tokens", usage.promptTokens),
-                                completionTokens = usageObj.optInt("completion_tokens", usage.completionTokens),
-                            )
-                        }
-                        val choices = json.optJSONArray("choices")
-                        if (choices == null || choices.length() == 0) continue
-                        val delta = choices.getJSONObject(0).optJSONObject("delta") ?: continue
-                        // 原生 tool_calls
-                        val tcArray = delta.optJSONArray("tool_calls")
-                        if (tcArray != null) {
-                            for (i in 0 until tcArray.length()) {
-                                val tc = tcArray.getJSONObject(i)
-                                val idx = tc.optInt("index", 0)
-                                val builder = toolCallAccumulators.getOrPut(idx) { TcAccumulator() }
-                                val id = tc.optString("id", "")
-                                if (id.isNotEmpty()) builder.id = id
-                                val func = tc.optJSONObject("function")
-                                if (func != null) {
-                                    val name = func.optString("name", "")
-                                    if (name.isNotEmpty()) builder.name = name
-                                    val args = func.optString("arguments", "")
-                                    if (args.isNotEmpty()) builder.args.append(args)
+        val call = client.newCall(request)
+        currentCall = call
+        try {
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    val errorBody = response.body.string()
+                    throw RuntimeException("API error ${response.code}: $errorBody")
+                }
+                response.body.let { body ->
+                    val source = body.source()
+                    while (!source.exhausted()) {
+                        val line = source.readUtf8Line() ?: continue
+                        if (!line.startsWith("data: ")) continue
+                        val data = line.removePrefix("data: ").trim()
+                        if (data == "[DONE]") break
+                        try {
+                            val json = JSONObject(data)
+                            val usageObj = json.optJSONObject("usage")
+                            if (usageObj != null) {
+                                usage = ApiUsage(
+                                    promptTokens = usageObj.optInt("prompt_tokens", usage.promptTokens),
+                                    completionTokens = usageObj.optInt("completion_tokens", usage.completionTokens),
+                                )
+                            }
+                            val choices = json.optJSONArray("choices")
+                            if (choices == null || choices.length() == 0) continue
+                            val delta = choices.getJSONObject(0).optJSONObject("delta") ?: continue
+                            // 原生 tool_calls
+                            val tcArray = delta.optJSONArray("tool_calls")
+                            if (tcArray != null) {
+                                for (i in 0 until tcArray.length()) {
+                                    val tc = tcArray.getJSONObject(i)
+                                    val idx = tc.optInt("index", 0)
+                                    val builder = toolCallAccumulators.getOrPut(idx) { TcAccumulator() }
+                                    val id = tc.optString("id", "")
+                                    if (id.isNotEmpty()) builder.id = id
+                                    val func = tc.optJSONObject("function")
+                                    if (func != null) {
+                                        val name = func.optString("name", "")
+                                        if (name.isNotEmpty()) builder.name = name
+                                        val args = func.optString("arguments", "")
+                                        if (args.isNotEmpty()) builder.args.append(args)
+                                    }
                                 }
                             }
-                        }
-                        // 文本内容
-                        val content = delta.optString("content", "")
-                        if (content.isNotEmpty()) {
-                            fullText.append(content)
-                            onChunk(content)
-                        }
-                    } catch (_: Exception) { }
+                            // 文本内容
+                            val content = delta.optString("content", "")
+                            if (content.isNotEmpty()) {
+                                fullText.append(content)
+                                onChunk(content)
+                            }
+                        } catch (_: Exception) { }
+                    }
                 }
             }
+        } finally {
+            currentCall = null
         }
 
         val toolCalls = toolCallAccumulators.entries

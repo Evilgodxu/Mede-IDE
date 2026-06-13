@@ -367,6 +367,7 @@ class ChatViewModel(
     fun loadModel(modelPath: String) {
         viewModelScope.launch {
             sendJob?.cancel()
+            cloudLLMClient.cancelCurrentCall()
             val backend = _state.value.backendType
             val npuDir = _state.value.npuLibraryDir
             liteRTManager.backendType = backend
@@ -382,6 +383,7 @@ class ChatViewModel(
         closeModelPicker()
         viewModelScope.launch {
             sendJob?.cancel()
+            cloudLLMClient.cancelCurrentCall()
             closeConversation()
             liteRTManager.loadModelFromUri(uri)
             preferencesRepo.setCloudModelEnabled(false)
@@ -554,6 +556,8 @@ class ChatViewModel(
 
     fun cancelGeneration() {
         sendJob?.cancel()
+        // 关闭云端 HTTP 连接，通知服务器停止生成，避免继续消耗 tokens
+        cloudLLMClient.cancelCurrentCall()
         activeConversation?.let {
             try { it.cancelProcess() } catch (_: Exception) {}
             try { it.close() } catch (_: Exception) {}
@@ -844,6 +848,11 @@ class ChatViewModel(
                 )
                 apiUsage = usage
                 nativeToolCalls.addAll(tcs)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // 用户主动取消，不显示错误信息
+                val lastMsg = _state.value.messages.find { it.id == currentMsgId }
+                if (lastMsg?.isStreaming == true) finalizeModelMessage(currentMsgId)
+                return
             } catch (e: Exception) {
                 val duration = System.currentTimeMillis() - roundStartTime
                 val errMsg = e.message ?: "Unknown error"
@@ -1081,6 +1090,7 @@ class ChatViewModel(
 
     fun clearMessages() {
         sendJob?.cancel()
+        cloudLLMClient.cancelCurrentCall()
         _state.update { it.copy(messages = emptyList(), inputText = "",
             isContextCompressed = false, contextCompressedTokens = 0, contextCompressedCount = 0,
             contextSummary = "") }
@@ -1089,6 +1099,7 @@ class ChatViewModel(
 
     fun newConversation() {
         sendJob?.cancel()
+        cloudLLMClient.cancelCurrentCall()
         val s = _state.value
         val updatedConversations = if (s.messages.isNotEmpty()) {
             val title = s.messages.firstOrNull { it.role == ChatRole.User }?.content?.take(30) ?: "新对话"
@@ -1115,6 +1126,7 @@ class ChatViewModel(
 
     fun switchConversation(entry: ConversationEntry) {
         sendJob?.cancel()
+        cloudLLMClient.cancelCurrentCall()
         pendingInitialMessages = entry.messages.mapNotNull { msg ->
             when (msg.role) {
                 ChatRole.User -> Message.user(msg.content)
