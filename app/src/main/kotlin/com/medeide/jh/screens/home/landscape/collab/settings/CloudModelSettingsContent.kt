@@ -99,7 +99,7 @@ private fun CloudModelCardContent(chatViewModel: ChatViewModel, chatState: ChatU
     var availableModels by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val vendorPresets = listOf(
-        CloudVendorPreset("DeepSeek", "https://api.deepseek.com/v1", listOf("deepseek-v4-pro", "deepseek-v4-flash"), defaultContextWindow = 1000000),
+        CloudVendorPreset("DeepSeek", "https://api.deepseek.com/v1", listOf("deepseek-v4-flash", "deepseek-v4-pro"), defaultContextWindow = 1000000),
         CloudVendorPreset("Kimi", "https://api.moonshot.cn/v1", listOf("kimi-k2.5", "kimi-k2.7-code"), defaultContextWindow = 262144),
         CloudVendorPreset("自定义", "", listOf(), defaultContextWindow = 184000),
     )
@@ -280,7 +280,7 @@ private fun CloudModelCardContent(chatViewModel: ChatViewModel, chatState: ChatU
                             Box {
                                 var showModelDropdown by remember { mutableStateOf(false) }
                                 val presetModels = when {
-                                    editEndpoint.contains("deepseek.com") -> listOf("deepseek-v4-pro", "deepseek-v4-flash")
+                                    editEndpoint.contains("deepseek.com") -> listOf("deepseek-v4-flash", "deepseek-v4-pro")
                                     editEndpoint.contains("moonshot.cn") -> listOf("kimi-k2.5", "kimi-k2.7-code")
                                     else -> emptyList()
                                 }
@@ -338,7 +338,7 @@ private fun CloudModelCardContent(chatViewModel: ChatViewModel, chatState: ChatU
                             placeholder = { Text("128000") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
-                            supportingText = { Text("75% 用量自动触发上下文压缩", style = MaterialTheme.typography.labelSmall) },
+                            supportingText = { Text("不会自动压缩上下文，超限时请新建对话", style = MaterialTheme.typography.labelSmall) },
                         )
 
                         // 输出最大 token 数
