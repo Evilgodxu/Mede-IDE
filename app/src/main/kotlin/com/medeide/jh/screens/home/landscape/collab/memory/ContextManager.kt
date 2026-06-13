@@ -71,7 +71,7 @@ class ContextManager(
             sb.appendLine("可用工具:")
             sb.appendLine("阅读: listFiles, readFile, grep, searchCodebase, glob, searchConversationMemory, getRecentConversationMemory")
             sb.appendLine("编辑: writeFile, replaceInFile, batchReplaceInFile, deleteFile, createDirectory, moveFile, copyFile")
-            sb.appendLine("终端: runCommand, getDiagnostics")
+            sb.appendLine("终端: 无（Android 不支持 shell 命令）")
             sb.appendLine("网络: searchWeb, visitWeb, downloadFile, httpRequest")
             sb.appendLine()
             sb.appendLine("工具调用格式（重要）:")

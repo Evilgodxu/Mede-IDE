@@ -14,8 +14,8 @@ object ChatConfig {
 
     val KNOWN_TOOLS = setOf(
         "listFiles", "readFile", "writeFile", "replaceInFile",
-        "batchReplaceInFile", "deleteFile", "createDirectory", "runCommand",
-        "searchWeb", "getDiagnostics", "grep", "searchCodebase", "glob",
+        "batchReplaceInFile", "deleteFile", "createDirectory",
+        "searchWeb", "grep", "searchCodebase", "glob",
         "searchConversationMemory", "getRecentConversationMemory",
         "moveFile", "copyFile",
         "visitWeb", "downloadFile", "httpRequest",

@@ -71,20 +71,10 @@ class ToolCallHandler(
                 args.g("information_request", "query"), args.g("target_directories", "targetDirectories"))
             "glob" -> aiToolSet.glob(
                 args.g("pattern"), args.g("path"), args.gInt("maxResults", default = 100))
-            "runCommand" -> aiToolSet.runCommand(
-                args.g("command"),
-                args.g("target_terminal"),
-                args.g("command_type").ifEmpty { "other" },
-                args.g("cwd"),
-                args.gBool("blocking", default = true),
-                args.gBool("requires_approval", default = false),
-                args.gInt("wait_ms_before_async", default = 0))
             "searchWeb" -> aiToolSet.searchWeb(
                 args.g("query"), args.gInt("num", default = 5), args.g("lr"))
             "deleteFile" -> aiToolSet.deleteFile(args.g("file_paths", "path"))
             "createDirectory" -> aiToolSet.createDirectory(args.g("path"))
-            "getDiagnostics" -> aiToolSet.getDiagnostics(args.g("uri"))
-            "readLints" -> aiToolSet.getDiagnostics(args.g("uri"))
             "searchConversationMemory" -> aiToolSet.searchConversationMemory(args.g("query"))
             "getRecentConversationMemory" -> aiToolSet.getRecentConversationMemory(args.gInt("count", default = 5))
             "moveFile" -> aiToolSet.moveFile(args.g("source"), args.g("destination"))
@@ -116,20 +106,6 @@ class ToolCallHandler(
     fun extractPathFromArgs(args: Map<String, String>): String? {
         val path = args["path"]
         return if (path.isNullOrBlank()) null else path
-    }
-
-    // ============================================================
-    // Lint 自动注入
-    // ============================================================
-
-    /** 工具调用后自动注入 Lint 诊断（仅当有修改操作时） */
-    suspend fun autoInjectLint(toolCalls: List<Triple<String?, String, Map<String, String>>>): String? {
-        val modifyingTools = setOf("writeFile", "replaceInFile", "batchReplaceInFile", "deleteFile", "createDirectory",
-            "moveFile", "copyFile", "downloadFile")
-        if (toolCalls.none { it.second in modifyingTools }) return null
-        val result = withContext(Dispatchers.IO) { aiToolSet.getDiagnostics() }
-        return if (result.contains("No lint errors") || result.contains("读取诊断失败") || result.contains("No errors")) null
-        else "[Lint 诊断]\n$result"
     }
 
     // ============================================================

@@ -260,24 +260,14 @@ private fun TerminalOutputLineItem(line: TerminalOutputLine) {
 }
 
 /**
- * 执行shell命令（优先使用 Termux，不可用时回退系统 shell）
+ * 执行shell命令（优先使用 Termux，不可用时提示无法执行）
  */
 private fun executeShellCommand(command: String, workingDir: String): String {
     return if (TermuxShell.isAvailable) {
         val fullCmd = "cd \"$workingDir\" && $command"
         TermuxShell.execOrNull(fullCmd) ?: TermuxShell.exec(fullCmd).second
     } else {
-        try {
-            val process = ProcessBuilder("sh", "-c", command)
-                .directory(java.io.File(workingDir))
-                .redirectErrorStream(true)
-                .start()
-            val output = process.inputStream.bufferedReader().use { it.readText() }
-            process.waitFor()
-            output
-        } catch (e: Exception) {
-            "Error: ${e.message}"
-        }
+        "Termux 未安装，无法执行 shell 命令。"
     }
 }
 

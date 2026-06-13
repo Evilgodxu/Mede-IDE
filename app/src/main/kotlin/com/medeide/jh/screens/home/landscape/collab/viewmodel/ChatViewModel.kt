@@ -956,17 +956,6 @@ class ChatViewModel(
             }
             val hadModifyingTools = toolCalls.any { it.second in ChatConfig.MODIFYING_TOOLS }
 
-            // Lint 诊断作为额外 tool 消息
-            val lintBlock = toolCallHandler.autoInjectLint(toolCalls)
-            if (lintBlock != null) {
-                historyMessages.add(ChatMessage(
-                    role = ChatRole.Tool,
-                    content = lintBlock,
-                    toolCallId = "lint_${java.util.UUID.randomUUID().toString().take(8)}",
-                    toolName = "getDiagnostics",
-                ))
-            }
-
             val display = StringBuilder()
             for (i in toolCalls.indices) {
                 val name = toolCalls[i].second
@@ -1160,7 +1149,9 @@ class ChatViewModel(
             }
             state.copy(messages = updatedMessages, isLoading = false)
         }
-        viewModelScope.launch { autoSaveToMemory() }
+        if (!_state.value.cloudModelEnabled) {
+            viewModelScope.launch { autoSaveToMemory() }
+        }
         saveCurrentToHistory()
     }
 

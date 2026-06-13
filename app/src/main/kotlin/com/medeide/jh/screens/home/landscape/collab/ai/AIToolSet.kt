@@ -1,6 +1,5 @@
 package com.medeide.jh.screens.home.landscape.collab.ai
 
-import android.content.Context
 import android.net.Uri
 import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
@@ -16,14 +15,12 @@ interface ToolExecutionCallback {
 }
 
 class AIToolSet(
-    private val context: Context,
     private val fileManager: FileManager? = null,
     private val conversationMemory: ConversationMemory? = null,
 ) : ToolSet {
 
     private val readTools = ReadTools(fileManager, conversationMemory)
     private val editTools = EditTools(fileManager)
-    private val terminalTools = TerminalTools(context, fileManager)
     private val webTools = WebTools(fileManager)
 
     /** ChatViewModel 注入的回调，每次 @Tool 方法执行前后自动调用 */
@@ -66,8 +63,6 @@ class AIToolSet(
             for (i in 0 until readJson.length()) tools.put(readJson.get(i))
             val editJson = EditTools.buildOpenAIToolsJson()
             for (i in 0 until editJson.length()) tools.put(editJson.get(i))
-            val terminalJson = TerminalTools.buildOpenAIToolsJson()
-            for (i in 0 until terminalJson.length()) tools.put(terminalJson.get(i))
             val webJson = WebTools.buildOpenAIToolsJson()
             for (i in 0 until webJson.length()) tools.put(webJson.get(i))
             return tools.toString()
@@ -200,26 +195,6 @@ class AIToolSet(
     }
 
     // ================================================================
-    //  终端工具 — 对齐 RunCommand / GetDiagnostics
-    // ================================================================
-
-    @Tool(description = "执行shell命令，在当前项目目录下运行。超时30秒，输出上限5000字符。")
-    fun runCommand(
-        @ToolParam(description = "要执行的命令，如'ls -la'或'./gradlew build'") command: String,
-        @ToolParam(description = "目标终端标识（Android环境仅一个终端），可选") target_terminal: String = "",
-        @ToolParam(description = "命令类型：web_server/long_running_process/short_running_process/other，默认other") command_type: String = "other",
-        @ToolParam(description = "工作目录路径，留空使用项目根目录") cwd: String = "",
-        @ToolParam(description = "是否阻塞等待完成，默认true") blocking: Boolean = true,
-        @ToolParam(description = "是否需要用户批准执行，默认false") requires_approval: Boolean = false,
-        @ToolParam(description = "异步模式的初始等待毫秒数，默认0") wait_ms_before_async: Int = 0,
-    ): String = terminalTools.runCommand(command, target_terminal, command_type, cwd, blocking, requires_approval, wait_ms_before_async)
-
-    @Tool(description = "读取构建/lint/编译错误诊断，返回文件路径和行号。无缓存时自动运行gradle lint。可选按uri过滤。")
-    fun getDiagnostics(
-        @ToolParam(description = "可选的文件路径过滤，仅返回该文件的诊断结果") uri: String = "",
-    ): String = terminalTools.getDiagnostics(uri)
-
-    // ================================================================
     //  联网工具 — 对齐 WebSearch / WebFetch
     // ================================================================
 
@@ -257,7 +232,6 @@ class AIToolSet(
     fun toolNames(): List<String> = buildList {
         addAll(ReadTools.toolNames())
         addAll(EditTools.toolNames())
-        addAll(TerminalTools.toolNames())
         addAll(WebTools.toolNames())
     }
 }

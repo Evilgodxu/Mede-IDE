@@ -26,7 +26,7 @@ val appModule = module {
     single { LiteRTManager(androidContext()) }
     single { ConversationMemory(androidContext()) }
     single { CloudLLMClient(androidContext()) }
-    single { AIToolSet(androidContext(), get(), get()) }
+    single { AIToolSet(get(), get()) }
     single { ImageProcessor(androidContext()) }
     single { ContextManager(get()) }
     single { ToolCallHandler(get(), get()) }
