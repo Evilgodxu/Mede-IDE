@@ -19,7 +19,6 @@
     <!-- 菜单 -->
     <string name="menu_file">文件</string>
     <string name="menu_edit">编辑</string>
-    <string name="menu_terminal">终端</string>
 
     <!-- 文件菜单 -->
     <string name="file_menu_close_folder">关闭文件夹</string>
@@ -76,7 +75,6 @@
     <!-- 设置分类 -->
     <string name="settings_tab_name">IDE设置</string>
     <string name="settings_category_general">通用设置</string>
-    <string name="settings_category_environment">环境配置</string>
     <string name="settings_category_mcp">MCP配置</string>
     <string name="settings_category_local_model">本地模型</string>
     <string name="settings_category_cloud_model">云端模型</string>
@@ -105,7 +103,6 @@
 
     <!-- 设置面板 -->
     <string name="loading">加载中…</string>
-    <string name="settings_category_environment_desc">终端环境变量配置</string>
     <string name="settings_category_mcp_desc">MCP 服务器配置</string>
     <string name="settings_category_model_desc">模型选择与配置</string>
     <string name="settings_category_conversation_desc">对话设置</string>

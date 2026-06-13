@@ -46,7 +46,6 @@ enum class SettingsCategory(val labelResId: Int) {
     RoleDefinition(R.string.settings_category_rules),
     LocalModel(R.string.settings_category_local_model),
     CloudModel(R.string.settings_category_cloud_model),
-    Environment(R.string.settings_category_environment),
     MCP(R.string.settings_category_mcp),
 }
 
@@ -132,7 +131,6 @@ private fun SettingsCategoryContent(
             )
             SettingsCategory.LocalModel -> LocalModelSettingsContent(chatViewModel)
             SettingsCategory.CloudModel -> CloudModelSettingsContent(chatViewModel)
-            SettingsCategory.Environment -> EnvironmentSettingsContent()
             SettingsCategory.MCP -> McpSettingsContent(state.mcpServers, onSetMcpServers)
         }
     }

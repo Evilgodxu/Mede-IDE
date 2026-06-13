@@ -78,7 +78,6 @@ fun HomeScreen(
     var cursorLine by remember { mutableIntStateOf(0) }
     var cursorLineContent by remember { mutableStateOf("") }
     var previewModeTabs by remember { mutableStateOf(setOf<String>()) }
-    val terminalTabTitle = stringResource(R.string.menu_terminal)
 
     val fileManager = org.koin.java.KoinJavaComponent.get<FileManager>(FileManager::class.java)
     val editorState = rememberEditorScreenState(chatViewModel, fileManager)
@@ -326,11 +325,6 @@ fun HomeScreen(
                 onLoadModel = { chatViewModel.loadModel(it) },
                 onBrowseModelFile = { filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
                 onSwitchCloudProfile = { chatViewModel.switchCloudProfile(it) },
-                isTerminalTabOpen = editorState.isTerminalTabOpen,
-                onToggleTerminal = {
-                    if (editorState.isTerminalTabOpen) editorState.closeTerminalTab()
-                    else editorState.openTerminalTab(terminalTabTitle)
-                },
                 audioPlaybackState = audioPlaybackState,
                 scannedAudioTracks = scannedAudioTracks,
                 onScanMusic = {

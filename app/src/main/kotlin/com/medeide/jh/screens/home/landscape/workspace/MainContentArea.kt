@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -58,7 +57,6 @@ import com.medeide.jh.screens.home.landscape.workspace.preview.ImagePreview
 import com.medeide.jh.screens.home.landscape.workspace.viewer.ArchiveViewer
 import com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlayer
 import com.medeide.jh.screens.home.settings.SettingsPane
-import com.medeide.jh.screens.home.landscape.workspace.terminal.TerminalPanel
 import com.medeide.jh.screens.home.landscape.workspace.viewer.WebPreview
 import com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlaybackState
 
@@ -191,12 +189,6 @@ fun MainContentArea(
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
-                    TabType.Terminal -> {
-                        TerminalPanel(
-                            initialDirectory = projectDirPath,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
                 }
             }
         }
@@ -254,7 +246,6 @@ private fun EditorTabBar(
                             TabType.Video -> Icons.Default.Videocam
                             TabType.Archive -> Icons.Default.FolderZip
                             TabType.Preview -> Icons.Default.Language
-                            TabType.Terminal -> Icons.Default.Terminal
                         },
                         contentDescription = null,
                         modifier = Modifier

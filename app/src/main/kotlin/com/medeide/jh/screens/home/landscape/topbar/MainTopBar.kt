@@ -48,9 +48,6 @@ fun MainTopBar(
     onLoadModel: (String) -> Unit = {},
     onBrowseModelFile: () -> Unit = {},
     onSwitchCloudProfile: (String) -> Unit = {},
-    // 终端
-    isTerminalTabOpen: Boolean = false,
-    onToggleTerminal: () -> Unit = {},
     // 音频播放
     audioPlaybackState: AudioPlaybackState? = null,
     scannedAudioTracks: List<AudioTrack> = emptyList(),
@@ -95,24 +92,6 @@ fun MainTopBar(
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
-
-                    Text(
-                        text = "丨",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.outlineVariant
-                    )
-
-                    // 终端按钮
-                    Box {
-                        Text(
-                            text = stringResource(R.string.menu_terminal),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = if (isTerminalTabOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier
-                                .clickable { onToggleTerminal() }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
 
                     Text(
                         text = "丨",
