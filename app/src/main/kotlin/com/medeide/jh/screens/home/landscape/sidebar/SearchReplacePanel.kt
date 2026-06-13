@@ -151,7 +151,7 @@ fun SearchReplacePanel(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(32.dp)
+                .height(36.dp)
                 .padding(horizontal = 8.dp, vertical = 2.dp)
                 .border(
                     width = 1.dp,
@@ -188,7 +188,7 @@ fun SearchReplacePanel(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(32.dp)
+                .height(36.dp)
                 .padding(horizontal = 8.dp, vertical = 2.dp)
                 .border(
                     width = 1.dp,
@@ -253,7 +253,7 @@ fun SearchReplacePanel(
             )
         }
 
-        // 工具栏 - 第二行：操作按钮（居中显示，按钮间 4dp 间距）
+        // 工具栏 - 第二行：操作按钮（居中显示，按钮间 8dp 间距）
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -280,7 +280,7 @@ fun SearchReplacePanel(
                 Icon(Icons.Default.ClearAll, "清空搜索", modifier = Modifier.size(14.dp))
             }
 
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(8.dp))
 
             // 全部替换
             FilledIconButton(
@@ -325,7 +325,7 @@ fun SearchReplacePanel(
                 Icon(Icons.Default.SwapHoriz, "全部替换", modifier = Modifier.size(14.dp))
             }
 
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(8.dp))
 
             // 搜索（刷新）
             FilledIconButton(

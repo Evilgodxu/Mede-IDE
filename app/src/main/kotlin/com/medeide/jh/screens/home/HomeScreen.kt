@@ -512,6 +512,7 @@ fun HomeScreen(
                                 cursorLine = line
                                 cursorLineContent = lineContent
                             },
+                            searchScrollVersion = editorState.searchScrollVersion,
                         )
                     },
                     // 搜索替换相关
@@ -519,9 +520,7 @@ fun HomeScreen(
                     currentSearchMatchIndex = editorState.currentSearchMatchIndex,
                     onSearchNavUp = {
                         var matches = editorState.currentSearchMatches
-                        if (editorState.currentSearchQuery.isNotBlank() &&
-                            editorState.currentSearchQuery != editorState.searchToolbarQuerySnapshot
-                        ) {
+                        if (editorState.currentSearchQuery.isNotBlank()) {
                             val activePath = editorState.getActiveFilePath()
                             if (activePath != null) {
                                 val content = editorState.editorContent[activePath]?.text ?: ""
@@ -548,13 +547,11 @@ fun HomeScreen(
                         val match = matches[newIdx]
                         val absPath = if (match.filePath.startsWith("/")) match.filePath
                             else "${homeState.projectDirPath.trimEnd('/')}/${match.filePath}"
-                        editorState.openFileAtLine(absPath, match.lineNumber)
+                        editorState.openFileAtLine(absPath, match.lineNumber, searchQuery = editorState.currentSearchQuery)
                     },
                     onSearchNavDown = {
                         var matches = editorState.currentSearchMatches
-                        if (editorState.currentSearchQuery.isNotBlank() &&
-                            editorState.currentSearchQuery != editorState.searchToolbarQuerySnapshot
-                        ) {
+                        if (editorState.currentSearchQuery.isNotBlank()) {
                             val activePath = editorState.getActiveFilePath()
                             if (activePath != null) {
                                 val content = editorState.editorContent[activePath]?.text ?: ""
@@ -581,7 +578,7 @@ fun HomeScreen(
                         val match = matches[newIdx]
                         val absPath = if (match.filePath.startsWith("/")) match.filePath
                             else "${homeState.projectDirPath.trimEnd('/')}/${match.filePath}"
-                        editorState.openFileAtLine(absPath, match.lineNumber)
+                        editorState.openFileAtLine(absPath, match.lineNumber, searchQuery = editorState.currentSearchQuery)
                     },
                     onReplaceCurrent = { filePath ->
                         val matches = editorState.currentSearchMatches
@@ -602,14 +599,56 @@ fun HomeScreen(
                             lines[lineIdx] = newLine
                             val newContent = lines.joinToString("\n")
                             editorState.editorContent[absPath] = TextFieldValue(newContent)
-                            editorState.currentSearchMatchIndex = (idx + 1).coerceAtMost(matches.size - 1)
+                            // 替换后重新计算当前文件的匹配，使计数和列表保持最新
+                            val activePath = editorState.getActiveFilePath()
+                            if (activePath != null && searchQuery.isNotEmpty()) {
+                                val newMatches = newContent.lines().mapIndexedNotNull { lineIdx2, line ->
+                                    if (line.contains(searchQuery, ignoreCase = true)) {
+                                        SearchResultItem(
+                                            filePath = activePath,
+                                            lineNumber = lineIdx2 + 1,
+                                            matchText = line.trim(),
+                                            contextLines = emptyList(),
+                                        )
+                                    } else null
+                                }
+                                editorState.currentSearchMatches = newMatches
+                                editorState.searchToolbarQuerySnapshot = searchQuery
+                                editorState.currentSearchMatchIndex = idx.coerceAtMost((newMatches.size - 1).coerceAtLeast(0))
+                            } else {
+                                editorState.currentSearchMatchIndex = (idx + 1).coerceAtMost(matches.size - 1)
+                            }
                         }
                     },
                     // 查找替换工具栏参数
                     isSearchToolbarVisible = editorState.isSearchToolbarVisible,
                     toolbarSearchQuery = editorState.currentSearchQuery,
                     toolbarReplaceText = editorState.currentReplaceText,
-                    onToolbarSearchQueryChange = { editorState.currentSearchQuery = it },
+                    onToolbarSearchQueryChange = {
+                        editorState.currentSearchQuery = it
+                        // 输入新查询时立即重建当前文件的匹配列表
+                        val activePath = editorState.getActiveFilePath()
+                        if (activePath != null && it.isNotBlank()) {
+                            val content = editorState.editorContent[activePath]?.text ?: ""
+                            val newMatches = content.lines().mapIndexedNotNull { idx, line ->
+                                if (line.contains(it, ignoreCase = true)) {
+                                    SearchResultItem(
+                                        filePath = activePath,
+                                        lineNumber = idx + 1,
+                                        matchText = line.trim(),
+                                        contextLines = emptyList(),
+                                    )
+                                } else null
+                            }
+                            editorState.currentSearchMatches = newMatches
+                            editorState.searchToolbarQuerySnapshot = it
+                            editorState.currentSearchMatchIndex = 0
+                        } else if (it.isBlank()) {
+                            editorState.currentSearchMatches = emptyList()
+                            editorState.searchToolbarQuerySnapshot = ""
+                            editorState.currentSearchMatchIndex = -1
+                        }
+                    },
                     onToolbarReplaceTextChange = { editorState.currentReplaceText = it },
                     onCloseSearchToolbar = { editorState.isSearchToolbarVisible = false },
                     onClearSearch = {

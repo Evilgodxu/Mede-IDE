@@ -25,6 +25,7 @@ fun CodeEditor(
     lineDiffs: Map<Int, LineChangeType> = emptyMap(),
     onCursorChange: ((line: Int, lineContent: String) -> Unit)? = null,
     onAddToChat: ((String) -> Unit)? = null,
+    searchScrollVersion: Int = 0,
 ) {
     // 光标位置跟踪
     val cursorLine = remember(text.selection) {
@@ -50,6 +51,7 @@ fun CodeEditor(
                 text = text,
                 onTextChange = onTextChange,
                 readOnly = readOnly,
+                searchScrollVersion = searchScrollVersion,
             )
         }
     }

@@ -46,6 +46,9 @@ class EditorScreenState(
     var persistentIsCaseSensitive by mutableStateOf(false)
     var persistentIsWholeWord by mutableStateOf(false)
 
+    // 用于触发编辑器自动滚动到光标行的版本号，每次导航递增
+    var searchScrollVersion by mutableIntStateOf(0)
+
     // 撤销/重做历史栈（每个文件独立）
     private val undoHistory = mutableMapOf<String, MutableList<String>>()
     private val redoHistory = mutableMapOf<String, MutableList<String>>()
@@ -145,12 +148,24 @@ class EditorScreenState(
         openTab(TabItem(path, displayName ?: displayNameFromPath(path), TabType.File))
     }
 
-    /** 打开文件并将光标定位到指定行 */
-    fun openFileAtLine(path: String, line: Int, displayName: String? = null) {
+    /** 打开文件并将光标定位到指定行，若提供 searchQuery 则选中该行中匹配的文本 */
+    fun openFileAtLine(path: String, line: Int, displayName: String? = null, searchQuery: String? = null) {
         openFileTab(path, displayName)
         val content = editorContent.getOrPut(path) { TextFieldValue(readFileFromSource(path)) }
         if (line <= 1 || content.text.isEmpty()) return
+        searchScrollVersion++
         val offset = calculateLineOffset(content.text, line).coerceAtMost(content.text.length)
+        if (searchQuery != null) {
+            val lines = content.text.lines()
+            val lineText = lines.getOrNull(line - 1) ?: return
+            val matchStartInLine = lineText.indexOf(searchQuery, ignoreCase = true)
+            if (matchStartInLine >= 0) {
+                val matchStart = (offset + matchStartInLine).coerceAtMost(content.text.length)
+                val matchEnd = (matchStart + searchQuery.length).coerceAtMost(content.text.length)
+                editorContent[path] = content.copy(selection = TextRange(matchStart, matchEnd))
+                return
+            }
+        }
         editorContent[path] = content.copy(selection = TextRange(offset))
     }
 

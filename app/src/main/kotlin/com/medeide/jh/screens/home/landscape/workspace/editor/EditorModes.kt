@@ -17,12 +17,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
@@ -34,11 +36,28 @@ fun NormalEditMode(
     text: TextFieldValue,
     onTextChange: (TextFieldValue) -> Unit,
     readOnly: Boolean = false,
+    searchScrollVersion: Int = 0,
 ) {
     val scrollState = rememberScrollState()
     val hScrollState = rememberScrollState()
     val fontSizeState = remember { mutableFloatStateOf(12f) }
     val fontSize = fontSizeState.floatValue
+
+    // 通过搜索导航点击时自动将光标行滚动到中间位置
+    val density = LocalDensity.current
+    LaunchedEffect(searchScrollVersion) {
+        if (searchScrollVersion == 0) return@LaunchedEffect
+        val cursorLine = text.text.substring(0, text.selection.start).count { it == '\n' }
+        val lineHeightPx = with(density) { (fontSize * 1.5f).sp.toPx() }
+        val viewportHeightPx = scrollState.viewportSize
+        val targetScrollPx = if (viewportHeightPx > 0) {
+            ((cursorLine + 0.5f) * lineHeightPx - viewportHeightPx / 2f).toInt()
+                .coerceIn(0, scrollState.maxValue)
+        } else {
+            (cursorLine * lineHeightPx).toInt().coerceAtMost(scrollState.maxValue)
+        }
+        scrollState.animateScrollTo(targetScrollPx)
+    }
 
     // 计算当前文本行数
     val lineCount = remember(text.text) { text.text.lines().size }
