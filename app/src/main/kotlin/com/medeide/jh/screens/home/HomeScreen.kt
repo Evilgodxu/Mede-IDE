@@ -420,10 +420,11 @@ fun HomeScreen(
                         }
                     },
                     onOpenFileTab = { editorState.openFileTab(it) },
+                    onCloseSearchPanel = { selectedTab = null },
                 )
             },
             isSidePanelVisible = selectedTab != null,
-            isSidePanelExpanded = true,
+            isSidePanelExpanded = selectedTab != SidebarTab.Search,
             workspaceContent = {
                 MainContentArea(
                     chatViewModel = chatViewModel,
@@ -555,6 +556,12 @@ fun HomeScreen(
                     onToolbarSearchQueryChange = { editorState.currentSearchQuery = it },
                     onToolbarReplaceTextChange = { editorState.currentReplaceText = it },
                     onCloseSearchToolbar = { editorState.isSearchToolbarVisible = false },
+                    onClearSearch = {
+                        editorState.currentSearchQuery = ""
+                        editorState.currentReplaceText = ""
+                        editorState.currentSearchMatches = emptyList()
+                        editorState.persistentSearchResults = emptyList()
+                    },
                 )
             },
             collabPanel = {
@@ -623,6 +630,7 @@ private fun LeftPanelContent(
     onFileClick: (FileItem) -> Unit = {},
     onAddToConversation: (FileItem) -> Unit = {},
     onOpenFileTab: (String) -> Unit = {},
+    onCloseSearchPanel: () -> Unit = {},
 ) {
     when (selectedTab) {
         null -> {}
@@ -669,6 +677,7 @@ private fun LeftPanelContent(
             SearchReplacePanel(
                 fileManager = fileManager,
                 editorState = editorState,
+                onClosePanel = onCloseSearchPanel,
             )
         }
     }

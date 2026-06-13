@@ -36,6 +36,13 @@ class EditorScreenState(
     var currentReplaceText by mutableStateOf("")
     var isSearchToolbarVisible by mutableStateOf(false)
 
+    // 持久化搜索结果（面板收起再展开后仍保留）
+    var persistentSearchResults by mutableStateOf<List<com.medeide.jh.screens.home.landscape.sidebar.SearchResultItem>>(emptyList())
+    var persistentSearchQuery by mutableStateOf("")
+    var persistentReplaceText by mutableStateOf("")
+    var persistentIsRegex by mutableStateOf(false)
+    var persistentIsCaseSensitive by mutableStateOf(false)
+
     // 撤销/重做历史栈（每个文件独立）
     private val undoHistory = mutableMapOf<String, MutableList<String>>()
     private val redoHistory = mutableMapOf<String, MutableList<String>>()

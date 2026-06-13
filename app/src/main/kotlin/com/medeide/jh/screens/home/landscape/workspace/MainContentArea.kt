@@ -20,9 +20,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.FindReplace
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -104,6 +105,7 @@ fun MainContentArea(
     onToolbarSearchQueryChange: (String) -> Unit = {},
     onToolbarReplaceTextChange: (String) -> Unit = {},
     onCloseSearchToolbar: () -> Unit = {},
+    onClearSearch: () -> Unit = {},
 ) {
     val hasTabs = tabs.isNotEmpty()
 
@@ -199,6 +201,7 @@ fun MainContentArea(
                                     onNavDown = onSearchNavDown,
                                     onReplaceCurrent = { onReplaceCurrent(activeTab.id) },
                                     onClose = onCloseSearchToolbar,
+                                    onClearSearch = onClearSearch,
                                     modifier = Modifier.align(Alignment.TopEnd),
                                 )
                             }
@@ -260,6 +263,7 @@ private fun EditorSearchOverlay(
     onNavDown: () -> Unit,
     onReplaceCurrent: () -> Unit,
     onClose: () -> Unit,
+    onClearSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -352,10 +356,23 @@ private fun EditorSearchOverlay(
                     modifier = Modifier.size(24.dp),
                 ) {
                     Icon(
-                        Icons.Default.FindReplace,
+                        Icons.Default.SwapHoriz,
                         contentDescription = "替换当前匹配",
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.error,
+                    )
+                }
+
+                // 清空按钮
+                IconButton(
+                    onClick = onClearSearch,
+                    modifier = Modifier.size(24.dp),
+                ) {
+                    Icon(
+                        Icons.Default.ClearAll,
+                        contentDescription = "清空搜索",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
 
