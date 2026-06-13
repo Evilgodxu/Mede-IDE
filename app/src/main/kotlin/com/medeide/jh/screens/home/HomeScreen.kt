@@ -48,6 +48,7 @@ import com.medeide.jh.data.storage.FileManager
 import com.medeide.jh.screens.home.landscape.collab.chat.CollabPanel
 import com.medeide.jh.screens.home.landscape.workspace.MainContentArea
 import com.medeide.jh.screens.home.landscape.topbar.MainTopBar
+import com.medeide.jh.data.repository.RecentEntry
 import com.medeide.jh.screens.home.landscape.sidebar.Sidebar
 import com.medeide.jh.screens.home.landscape.sidebar.SidebarTab
 import com.medeide.jh.screens.home.landscape.sidebar.SearchReplacePanel
@@ -84,6 +85,7 @@ fun HomeScreen(
     val editorState = rememberEditorScreenState(chatViewModel, fileManager)
     val audioPlaybackState = remember { com.medeide.jh.screens.home.landscape.topbar.audio.AudioPlaybackState() }
     val videoPlaybackState = remember { com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlaybackState() }
+    val allRecent by viewModel.allRecent.collectAsState()
 
     // 每次启动时检测权限，已有权限则自动打开存储目录
     LaunchedEffect(Unit) {
@@ -342,6 +344,15 @@ fun HomeScreen(
                     editorState.openSearchToolbar()
                     // 如果侧栏搜索面板未打开，不自动切换（保持当前面板）
                     // 查找替换工具栏已在编辑器右上角弹出
+                },
+                recentItems = allRecent,
+                onOpenRecentItem = { entry ->
+                    val file = java.io.File(entry.path)
+                    if (file.isDirectory()) {
+                        viewModel.openAsProjectDirectory(entry.path)
+                    } else {
+                        editorState.openFileTab(entry.path, entry.name)
+                    }
                 },
             )
         },

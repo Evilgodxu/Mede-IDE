@@ -21,6 +21,8 @@ fun CollabInputBar(
     isLoading: Boolean,
     isOptimizing: Boolean,
     engineStatus: EngineStatus,
+    cloudModelEnabled: Boolean = false,
+    activeCloudProfileId: String = "",
     onCancel: () -> Unit,
     onOptimize: () -> Unit,
     onImagePick: () -> Unit,
@@ -40,6 +42,10 @@ fun CollabInputBar(
     onOptimizeModeChange: (com.medeide.jh.screens.home.landscape.collab.ai.InputOptimizer.Mode) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    // 本地模型就绪 或 云端模型已配置 均可交互
+    val canInteract = engineStatus == EngineStatus.Ready ||
+            (cloudModelEnabled && activeCloudProfileId.isNotBlank())
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -49,7 +55,7 @@ fun CollabInputBar(
         CollabInputField(
             inputText = inputText,
             onInputChange = onInputChange,
-            engineStatus = engineStatus,
+            enabled = canInteract,
         )
 
         // ③-2 附件区
@@ -66,7 +72,7 @@ fun CollabInputBar(
             onInputChange = onInputChange,
             isLoading = isLoading,
             isOptimizing = isOptimizing,
-            engineStatus = engineStatus,
+            enabled = canInteract,
             onCancel = onCancel,
             onOptimize = onOptimize,
             onSend = onSend,

@@ -83,6 +83,8 @@ fun CollabPanel(
             isLoading = state.isLoading,
             isOptimizing = state.isOptimizing,
             engineStatus = state.engineStatus,
+            cloudModelEnabled = state.cloudModelEnabled,
+            activeCloudProfileId = state.activeCloudProfileId,
             onCancel = { viewModel.cancelGeneration() },
             onOptimize = { viewModel.optimizeInput() },
             onImagePick = { imagePickerLauncher.launch("image/*") },

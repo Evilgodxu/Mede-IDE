@@ -51,7 +51,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.medeide.jh.R
-import com.medeide.jh.model.chat.EngineStatus
 
 // 协作区消息输入框 - 功能工具栏
 @Composable
@@ -60,7 +59,7 @@ fun CollabToolBar(
     onInputChange: (String) -> Unit,
     isLoading: Boolean,
     isOptimizing: Boolean,
-    engineStatus: EngineStatus,
+    enabled: Boolean,
     onCancel: () -> Unit,
     onOptimize: () -> Unit,
     onSend: () -> Unit,
@@ -127,7 +126,7 @@ fun CollabToolBar(
         }
 
         // 添加图片按钮
-        if (engineStatus == EngineStatus.Ready) {
+        if (enabled) {
             IconButton(onClick = onImagePick, Modifier.size(32.dp)) {
                 Icon(
                     Icons.Default.Image,
@@ -142,7 +141,7 @@ fun CollabToolBar(
         VoiceInputButton(
             currentInput = inputText,
             onInputChange = onInputChange,
-            enabled = engineStatus == EngineStatus.Ready && !isLoading,
+            enabled = enabled && !isLoading,
         )
 
         // 上下文窗口进度按钮（分段环：用量+压缩+记忆）
@@ -174,7 +173,7 @@ fun CollabToolBar(
                 }
             }
         } else {
-            val canSend = (inputText.isNotBlank() || hasAttachments) && engineStatus == EngineStatus.Ready
+            val canSend = (inputText.isNotBlank() || hasAttachments) && enabled
             IconButton(onClick = onSend, Modifier.size(32.dp), enabled = canSend) {
                 Icon(
                     Icons.AutoMirrored.Filled.Send,

@@ -2,6 +2,7 @@ package com.medeide.jh.screens.home.landscape.sidebar
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,9 +19,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ClearAll
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.FilledIconButton
@@ -30,8 +31,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -148,44 +148,78 @@ fun SearchReplacePanel(
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.15f))
     ) {
         // 搜索输入框
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = {
-                searchQuery = it
-                // 实时同步到工具栏搜索输入框
-                editorState.currentSearchQuery = it
-            },
-            placeholder = { Text("搜索文件内容…", fontSize = 13.sp) },
-            singleLine = true,
-            textStyle = MaterialTheme.typography.bodySmall,
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-            ),
-        )
+                .height(28.dp)
+                .padding(horizontal = 8.dp, vertical = 2.dp)
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(4.dp),
+                )
+                .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (searchQuery.isEmpty()) {
+                Text(
+                    "搜索文件内容…",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+            BasicTextField(
+                value = searchQuery,
+                onValueChange = {
+                    searchQuery = it
+                    editorState.currentSearchQuery = it
+                },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
         // 替换输入框
-        OutlinedTextField(
-            value = replaceText,
-            onValueChange = {
-                replaceText = it
-                // 实时同步到工具栏替换输入框
-                editorState.currentReplaceText = it
-            },
-            placeholder = { Text("替换为…", fontSize = 13.sp) },
-            singleLine = true,
-            textStyle = MaterialTheme.typography.bodySmall,
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-            ),
-        )
+                .height(28.dp)
+                .padding(horizontal = 8.dp, vertical = 2.dp)
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    shape = RoundedCornerShape(4.dp),
+                )
+                .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (replaceText.isEmpty()) {
+                Text(
+                    "替换为…",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+            BasicTextField(
+                value = replaceText,
+                onValueChange = {
+                    replaceText = it
+                    editorState.currentReplaceText = it
+                },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
         // 工具栏 - 第一行：匹配模式选项
         val chipBorder = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
@@ -289,7 +323,7 @@ fun SearchReplacePanel(
                 Icon(Icons.Default.SwapHoriz, "全部替换", modifier = Modifier.size(14.dp))
             }
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(2.dp))
 
             // 搜索（刷新）
             FilledIconButton(

@@ -187,6 +187,16 @@ class HomeViewModel(
     val recentFolders: StateFlow<List<RecentEntry>> = userPreferencesRepository.recentFolders
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    // 合并最近打开的文件和目录，按时间倒序，最多 20 条
+    val allRecent: StateFlow<List<RecentEntry>> = combine(
+        userPreferencesRepository.recentFiles,
+        userPreferencesRepository.recentFolders,
+    ) { files, folders ->
+        (files + folders)
+            .sortedByDescending { it.timestamp }
+            .take(20)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     fun recordRecentFile(path: String, name: String) {
         viewModelScope.launch { userPreferencesRepository.addRecentFile(path, name) }
     }
