@@ -131,7 +131,7 @@ class CloudLLMClient(private val context: Context) {
             put("messages", msgs)
             put("stream", true)
             put("max_tokens", config.maxTokens)
-            put("temperature", 0.7)
+            put("temperature", 1.0)
             if (!toolsJson.isNullOrBlank()) {
                 put("tools", JSONArray(toolsJson))
             }
