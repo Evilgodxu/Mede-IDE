@@ -52,6 +52,7 @@ import com.medeide.jh.data.repository.RecentEntry
 import com.medeide.jh.screens.home.landscape.sidebar.Sidebar
 import com.medeide.jh.screens.home.landscape.sidebar.SidebarTab
 import com.medeide.jh.screens.home.landscape.sidebar.SearchReplacePanel
+import com.medeide.jh.screens.home.landscape.sidebar.SearchResultItem
 import com.medeide.jh.screens.home.ThreeColumnLayout
 import com.medeide.jh.screens.home.landscape.workspace.editor.CodeEditor
 import com.medeide.jh.screens.home.landscape.sidebar.resourcepanel.ResourcePanel
@@ -517,7 +518,29 @@ fun HomeScreen(
                     currentSearchMatches = editorState.currentSearchMatches,
                     currentSearchMatchIndex = editorState.currentSearchMatchIndex,
                     onSearchNavUp = {
-                        val matches = editorState.currentSearchMatches
+                        var matches = editorState.currentSearchMatches
+                        if (editorState.currentSearchQuery.isNotBlank() &&
+                            editorState.currentSearchQuery != editorState.searchToolbarQuerySnapshot
+                        ) {
+                            val activePath = editorState.getActiveFilePath()
+                            if (activePath != null) {
+                                val content = editorState.editorContent[activePath]?.text ?: ""
+                                val query = editorState.currentSearchQuery
+                                val newMatches = content.lines().mapIndexedNotNull { idx, line ->
+                                    if (line.contains(query, ignoreCase = true)) {
+                                        SearchResultItem(
+                                            filePath = activePath,
+                                            lineNumber = idx + 1,
+                                            matchText = line.trim(),
+                                            contextLines = emptyList(),
+                                        )
+                                    } else null
+                                }
+                                editorState.currentSearchMatches = newMatches
+                                editorState.searchToolbarQuerySnapshot = query
+                                matches = newMatches
+                            }
+                        }
                         if (matches.isEmpty()) return@MainContentArea
                         val currentIdx = editorState.currentSearchMatchIndex.coerceIn(0, matches.size - 1)
                         val newIdx = if (currentIdx <= 0) matches.size - 1 else currentIdx - 1
@@ -528,7 +551,29 @@ fun HomeScreen(
                         editorState.openFileAtLine(absPath, match.lineNumber)
                     },
                     onSearchNavDown = {
-                        val matches = editorState.currentSearchMatches
+                        var matches = editorState.currentSearchMatches
+                        if (editorState.currentSearchQuery.isNotBlank() &&
+                            editorState.currentSearchQuery != editorState.searchToolbarQuerySnapshot
+                        ) {
+                            val activePath = editorState.getActiveFilePath()
+                            if (activePath != null) {
+                                val content = editorState.editorContent[activePath]?.text ?: ""
+                                val query = editorState.currentSearchQuery
+                                val newMatches = content.lines().mapIndexedNotNull { idx, line ->
+                                    if (line.contains(query, ignoreCase = true)) {
+                                        SearchResultItem(
+                                            filePath = activePath,
+                                            lineNumber = idx + 1,
+                                            matchText = line.trim(),
+                                            contextLines = emptyList(),
+                                        )
+                                    } else null
+                                }
+                                editorState.currentSearchMatches = newMatches
+                                editorState.searchToolbarQuerySnapshot = query
+                                matches = newMatches
+                            }
+                        }
                         if (matches.isEmpty()) return@MainContentArea
                         val currentIdx = editorState.currentSearchMatchIndex.coerceIn(0, matches.size - 1)
                         val newIdx = if (currentIdx >= matches.size - 1) 0 else currentIdx + 1
@@ -571,6 +616,7 @@ fun HomeScreen(
                         editorState.currentSearchQuery = ""
                         editorState.currentReplaceText = ""
                         editorState.currentSearchMatches = emptyList()
+                        editorState.searchToolbarQuerySnapshot = ""
                         editorState.persistentSearchResults = emptyList()
                     },
                 )

@@ -371,6 +371,7 @@ fun SearchReplacePanel(
                             editorState.currentSearchMatches = fileResult.matches.filter {
                                 it.filePath == match.filePath
                             }
+                            editorState.searchToolbarQuerySnapshot = searchQuery
                             editorState.currentSearchMatchIndex = fileResult.matches.indexOf(match).coerceAtLeast(0)
                             editorState.currentSearchQuery = searchQuery
                             editorState.currentReplaceText = replaceText

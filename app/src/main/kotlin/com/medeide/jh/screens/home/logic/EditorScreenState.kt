@@ -35,6 +35,8 @@ class EditorScreenState(
     var currentSearchQuery by mutableStateOf("")
     var currentReplaceText by mutableStateOf("")
     var isSearchToolbarVisible by mutableStateOf(false)
+    // 记录生成 currentSearchMatches 时的查询快照，用于判断是否需要重新搜索
+    var searchToolbarQuerySnapshot by mutableStateOf("")
 
     // 持久化搜索结果（面板收起再展开后仍保留）
     var persistentSearchResults by mutableStateOf<List<com.medeide.jh.screens.home.landscape.sidebar.SearchResultItem>>(emptyList())
