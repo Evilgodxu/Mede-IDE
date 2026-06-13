@@ -95,14 +95,8 @@ class ChatViewModel(
     )
 
     val contextTokenCount: StateFlow<Int> = _state.map { s ->
-        val sysTokens = contextManager.estimateSystemPromptTokens(contextManager.getSysPromptCache())
-        var ascii = 0; var other = 0
-        for (msg in s.messages) {
-            for (c in msg.content) {
-                if (c.code <= 127) ascii++ else other++
-            }
-        }
-        ascii / 4 + other / 2 + sysTokens
+        contextManager.estimateContextTokens(s.messages) +
+            contextManager.estimateSystemPromptTokens(contextManager.getSysPromptCache())
     }.flowOn(Dispatchers.Default)
         .distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
@@ -451,8 +445,6 @@ class ChatViewModel(
     fun closeModelPicker() { _state.update { it.copy(isModelPickerOpen = false) } }
 
     fun setProjectRoot(uri: Uri?) {
-        aiToolSet.projectUri = uri
-        uri?.let { fileManager.setProjectUri(it) } ?: fileManager.clearProjectUri()
         val name = uri?.let { extractFolderName(it) } ?: ""
         _state.update { it.copy(projectRootName = name) }
     }
@@ -559,8 +551,15 @@ class ChatViewModel(
 
     fun cancelGeneration() {
         sendJob?.cancel()
-        // 取消 C++ 推理但不销毁会话，匹配官方示例永不关闭模式
-        activeConversation?.let { try { it.cancelProcess() } catch (_: Exception) {} }
+        activeConversation?.let {
+            try { it.cancelProcess() } catch (_: Exception) {}
+            try { it.close() } catch (_: Exception) {}
+        }
+        activeConversation = null
+        val msgs = _state.value.messages
+        if (msgs.isNotEmpty()) {
+            pendingInitialMessages = contextManager.chatMessagesToLiteRT(msgs)
+        }
         _state.value.messages.lastOrNull()?.let { msg -> if (msg.isStreaming) finalizeModelMessage(msg.id) }
     }
 
@@ -714,8 +713,9 @@ class ChatViewModel(
             conv.sendMessageAsync(currentMessage, extraContext = thinkCtx).collect { msg ->
                 val c = msg.contents.toString()
                 val hasThinkChannel = msg.channels.containsKey("thought") || msg.channels.containsKey("thinking")
-                // 思考阶段内容仅存入 channel，不追加到主消息
-                if (!hasThinkChannel && c.isNotEmpty()) {
+                val hasToolCalls = msg.toolCalls.isNotEmpty()
+                // 工具调用阶段的文本内容（可能含工具 JSON）由框架内部处理，不显示到聊天界面
+                if (!hasThinkChannel && !hasToolCalls && c.isNotEmpty()) {
                     updateModelMessage(msgId, c, true)
                 }
                 if (msg.channels.isNotEmpty()) {
@@ -802,9 +802,6 @@ class ChatViewModel(
                 if (msg.content.isNotBlank() || msg.role == ChatRole.Model) historyMessages.add(msg)
             }
         }
-        val compressed = compressMessages(historyMessages.toList())
-        historyMessages.clear()
-        historyMessages.addAll(compressed)
         val editorCtx = buildEditorContext()
         if (editorCtx.isNotBlank()) {
             historyMessages.add(ChatMessage(role = ChatRole.System, content = editorCtx))
@@ -815,28 +812,16 @@ class ChatViewModel(
         }
         historyMessages.add(ChatMessage(role = ChatRole.User, content = text))
 
-        val existingSummary = _state.value.contextSummary
-        if (existingSummary.isNotBlank() && historyMessages.none { it.content.startsWith("[上下文摘要]") }) {
-            historyMessages.add(0, ChatMessage(
-                role = ChatRole.Model,
-                content = "[上下文摘要]\n$existingSummary",
-            ))
-        }
-
         while (true) {
             cloudRounds++
-            val ctxThreshold = getCompressThreshold()
-            if (contextManager.estimateContextTokens(historyMessages) > ctxThreshold) {
-                historyMessages.clear()
-                historyMessages.addAll(compressMessages(historyMessages))
-                val summary = _state.value.contextSummary
-                if (summary.isNotBlank() && historyMessages.none { it.content.startsWith("[上下文摘要]") }) {
-                    historyMessages.add(0, ChatMessage(
-                        role = ChatRole.Model,
-                        content = "[上下文摘要]\n$summary",
-                    ))
-                }
+            if (cloudRounds > ChatConfig.MAX_TOOL_RETRY_ROUNDS) {
+                Log.w("ChatViewModel", "云端工具调用轮次超限(${ChatConfig.MAX_TOOL_RETRY_ROUNDS})，停止循环")
+                FileLogger.w("ChatViewModel", "云端工具调用轮次超限(${ChatConfig.MAX_TOOL_RETRY_ROUNDS})，停止循环")
+                val lastMsg = _state.value.messages.find { it.id == currentMsgId }
+                if (lastMsg?.isStreaming == true) finalizeModelMessage(currentMsgId)
+                return
             }
+
             val fullResponse = StringBuilder()
             val roundStartTime = System.currentTimeMillis()
             var apiUsage = com.medeide.jh.model.chat.ApiUsage()
@@ -864,21 +849,12 @@ class ChatViewModel(
                     errMsg.contains("token limit", ignoreCase = true) ||
                     errMsg.contains("too many tokens", ignoreCase = true) ||
                     errMsg.contains("maximum prompt length", ignoreCase = true)
-                if (isContextError && historyMessages.size > 3) {
-                    Log.w("ChatViewModel", "上下文长度超限，强制压缩历史")
-                    FileLogger.w("ChatViewModel", "上下文长度超限，强制压缩历史")
-                    val forcedThreshold = (getContextWindow() * 0.5).toInt()
-                    historyMessages.clear()
-                    historyMessages.addAll(compressMessages(historyMessages, forcedThreshold))
-                    val summary = _state.value.contextSummary
-                    if (summary.isNotBlank() && historyMessages.none { it.content.startsWith("[上下文摘要]") }) {
-                        historyMessages.add(0, ChatMessage(
-                            role = ChatRole.Model,
-                            content = "[上下文摘要]\n$summary",
-                        ))
-                    }
-                    cloudRounds--
-                    continue
+                if (isContextError) {
+                    Log.w("ChatViewModel", "上下文长度超限，云端 API 拒绝请求，请检查上下文窗口设置或减少对话历史")
+                    FileLogger.w("ChatViewModel", "上下文长度超限，云端 API 拒绝请求")
+                    updateModelMessage(currentMsgId, "\n\n[云端模型错误: 上下文长度超限，请检查上下文窗口设置或减少对话历史]", false)
+                    finalizeModelMessage(currentMsgId)
+                    return
                 }
                 Log.e("ChatViewModel", "发送到云端失败", e)
                 FileLogger.e("ChatViewModel", "发送到云端失败: ${errMsg}", e)
@@ -1001,18 +977,6 @@ class ChatViewModel(
             updateModelMessage(currentMsgId, "\n\n${display.toString().trimEnd()}", false)
             finalizeModelMessage(currentMsgId, channelContent = channelContent)
 
-            if (cloudRounds % ChatConfig.SUMMARIZE_INTERVAL == 0) {
-                historyMessages.clear()
-                historyMessages.addAll(compressMessages(historyMessages.toList()))
-                val summary = _state.value.contextSummary
-                if (summary.isNotBlank() && historyMessages.none { it.content.startsWith("[上下文摘要]") }) {
-                    historyMessages.add(0, ChatMessage(
-                        role = ChatRole.Model,
-                        content = "[上下文摘要]\n$summary",
-                    ))
-                }
-            }
-
             if (hadModifyingTools || cloudRounds % 3 == 0) {
                 val fullCtx = buildEditorContext()
                 if (fullCtx.isNotBlank()) {
@@ -1033,11 +997,11 @@ class ChatViewModel(
         updateContextMaxTokens()
     }
 
-    fun addCloudProfile(name: String, apiEndpoint: String, apiKey: String, modelName: String, contextWindow: Int = 128000) {
+    fun addCloudProfile(name: String, apiEndpoint: String, apiKey: String, modelName: String, contextWindow: Int = 184000, maxTokens: Int = 16000) {
         val id = java.util.UUID.randomUUID().toString()
         val newProfile = CloudModelProfile(id = id, name = name.ifEmpty { modelName },
             apiEndpoint = apiEndpoint, apiKey = apiKey, modelName = modelName,
-            contextWindow = contextWindow)
+            contextWindow = contextWindow, maxTokens = maxTokens)
         viewModelScope.launch {
             val current = preferencesRepo.cloudModelProfiles.first()
             val updated = current + newProfile

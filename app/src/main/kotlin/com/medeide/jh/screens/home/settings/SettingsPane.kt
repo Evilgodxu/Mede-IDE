@@ -43,11 +43,11 @@ import org.koin.androidx.compose.koinViewModel
 // 设置分类枚举
 enum class SettingsCategory(val labelResId: Int) {
     General(R.string.settings_category_general),
-    Environment(R.string.settings_category_environment),
-    LocalModel(R.string.settings_category_local_model),
     RoleDefinition(R.string.settings_category_rules),
-    MCP(R.string.settings_category_mcp),
+    LocalModel(R.string.settings_category_local_model),
     CloudModel(R.string.settings_category_cloud_model),
+    Environment(R.string.settings_category_environment),
+    MCP(R.string.settings_category_mcp),
 }
 
 // 双列设置面板
@@ -124,15 +124,15 @@ private fun SettingsCategoryContent(
                     GeneralSettingsCard(modifier = Modifier.fillMaxWidth())
                 }
             }
-            SettingsCategory.Environment -> EnvironmentSettingsContent()
-            SettingsCategory.LocalModel -> LocalModelSettingsContent(chatViewModel)
             SettingsCategory.RoleDefinition -> RoleDefinitionSettingsContent(
                 rules = state.rules,
                 activeRoleId = state.activeRoleId,
                 onSetRules = onSetRules,
                 onSetActiveRoleId = onSetActiveRoleId,
             )
+            SettingsCategory.LocalModel -> LocalModelSettingsContent(chatViewModel)
             SettingsCategory.CloudModel -> CloudModelSettingsContent(chatViewModel)
+            SettingsCategory.Environment -> EnvironmentSettingsContent()
             SettingsCategory.MCP -> McpSettingsContent(state.mcpServers, onSetMcpServers)
         }
     }

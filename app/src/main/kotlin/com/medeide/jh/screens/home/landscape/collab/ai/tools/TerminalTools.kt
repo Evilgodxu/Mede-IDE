@@ -9,7 +9,6 @@ import java.io.File
 class TerminalTools(
     private val context: Context,
     private val fileManager: FileManager?,
-    private val projectUriProvider: () -> android.net.Uri?,
 ) {
     // ================================================================
     //  执行命令  ←→ RunCommand(command, target_terminal, command_type, cwd, blocking, requires_approval, wait_ms_before_async)
@@ -144,21 +143,10 @@ class TerminalTools(
     // ================================================================
 
     private fun resolveProjectDir(): File {
-        val safUri = projectUriProvider()
-        if (safUri != null) {
-            try {
-                val docId = android.provider.DocumentsContract.getTreeDocumentId(safUri)
-                if (docId.startsWith("primary:")) {
-                    val realPath = docId.removePrefix("primary:")
-                    val dir = File(android.os.Environment.getExternalStorageDirectory(), realPath)
-                    if (dir.isDirectory) return dir
-                }
-                if (docId.startsWith("/tree/")) {
-                    val realPath = docId.removePrefix("/tree/").substringBefore(':')
-                    val dir = File(realPath)
-                    if (dir.isDirectory) return dir
-                }
-            } catch (_: Exception) { }
+        val rootPath = fileManager?.projectDirPath?.ifEmpty { fileManager.storageRootPath }
+        if (rootPath != null) {
+            val dir = File(rootPath)
+            if (dir.isDirectory) return dir
         }
         return File(context.filesDir, "workspace").also { it.mkdirs() }
     }

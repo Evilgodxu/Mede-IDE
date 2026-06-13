@@ -28,28 +28,61 @@ class ContextManager(
         activeRoleId: String,
         cloudModelEnabled: Boolean,
     ): String {
-        sysPromptCache?.let { return it }
+        if (!cloudModelEnabled) {
+            sysPromptCache?.let { return it }
+        }
         val sb = StringBuilder()
 
         // 查找当前激活的角色
         val activeRole = rules.find { it.id == activeRoleId } ?: rules.firstOrNull { it.isDefault }
 
         if (activeRole != null) {
-            // 使用激活角色的定义作为系统指令
             sb.appendLine(activeRole.content)
             if (userName.isNotBlank()) sb.appendLine("用户: $userName")
-            // 如果激活的是自定义角色（非默认），追加其详细设定
             if (!activeRole.isDefault) {
                 sb.appendLine().appendLine("【角色设定】")
                 sb.appendLine("- ${activeRole.name}: ${activeRole.content}")
             }
         } else {
-            // 兜底：使用默认系统指令
             sb.appendLine("你是智能编程助手，使用内置工具协助用户完成文件操作、代码编辑、项目构建、网络搜索等开发任务。")
             if (userName.isNotBlank()) sb.appendLine("用户: $userName")
         }
 
-        _sysPromptCache = sb.toString()
+        if (!cloudModelEnabled) {
+            // 本地模型：需要行为准则和工具指示（文本 prompt 驱动）
+            sb.appendLine()
+            sb.appendLine("核心行为准则:")
+            sb.appendLine("1. 工具优先 - 接到任务后立即调用工具执行，有工具可用时绝不空谈方案")
+            sb.appendLine("2. 先行动后解释 - 直接执行操作，完成后用1-2句简述结果，不写长篇分析")
+            sb.appendLine("3. 禁止反复询问 - 不问是否要执行/继续/修改，除非工具调用失败或信息严重不足")
+            sb.appendLine("4. 连续调用 - 不要停下来问接下来怎么办，先搜集信息再做判断")
+            sb.appendLine("5. 输出简洁 - 只回复关键结果或操作摘要，不输出思考过程或计划步骤")
+            sb.appendLine()
+            sb.appendLine("工具使用示例:")
+            sb.appendLine("- 用户说找到登录相关的代码 -> 调用 searchCodebase 或 grep")
+            sb.appendLine("- 用户说帮我改变量名 -> 调用 readFile + replaceInFile")
+            sb.appendLine("- 用户说这个项目有什么文件 -> 调用 listFiles")
+            sb.appendLine("- 用户说创建文件 -> 调用 writeFile")
+            sb.appendLine("- 用户说构建报错 -> 调用 getDiagnostics 或 runCommand")
+            sb.appendLine("- 用户说搜索文档 -> 调用 searchWeb")
+            sb.appendLine("- 用户说删除目录 -> 调用 deleteFile")
+            sb.appendLine("- 改代码流程: readFile -> replaceInFile/batchReplaceInFile (直接改不问)")
+            sb.appendLine()
+            sb.appendLine("可用工具:")
+            sb.appendLine("阅读: listFiles, readFile, grep, searchCodebase, glob, searchConversationMemory, getRecentConversationMemory")
+            sb.appendLine("编辑: writeFile, replaceInFile, batchReplaceInFile, deleteFile, createDirectory, moveFile, copyFile")
+            sb.appendLine("终端: runCommand, getDiagnostics")
+            sb.appendLine("网络: searchWeb, visitWeb, downloadFile, httpRequest")
+            sb.appendLine()
+            sb.appendLine("历史记录查询:")
+            sb.appendLine("- 如果用户提及曾经讨论/修改/确认过的内容而你记不清，使用 searchConversationMemory() 搜索历史对话")
+            sb.appendLine("- 需要了解最近的记忆记录使用 getRecentConversationMemory()")
+            sb.appendLine("- 注意: 详细的历史工具执行结果需要调用上述工具获取")
+        }
+
+        if (!cloudModelEnabled) {
+            _sysPromptCache = sb.toString()
+        }
         return sb.toString()
     }
 
@@ -215,6 +248,78 @@ class ContextManager(
         val keyFactsPreserved: Int = 0,
     )
 
+    companion object {
+        // 工具结果截断行数
+        private const val COMPACT_TOOL_LINES = 50
+        // 模型结论提取尾部保留行数
+        private const val COMPACT_MODEL_TAIL_LINES = 8
+    }
+
+    /**
+     * 为历史消息生成压缩摘要，保留完整的执行链条：
+     *   用户请求 → 记忆查看 → 工具执行 → 模型结论
+     *
+     * - 最近 KEEP_EXCHANGES 轮：完整保留
+     * - 更早的消息：逐条压缩，保留关键信息而非指向记忆工具
+     */
+    private fun compactHistoryMessage(msg: ChatMessage): ChatMessage = when (msg.role) {
+        // 用户消息：完整保留（起始节点）
+        ChatRole.User -> msg
+
+        // 模型消息：保留工具调用 + 压缩结论
+        ChatRole.Model -> {
+            val lines = msg.content.lines()
+            val toolCallLines = lines.filter { l ->
+                l.contains("[工具调用:") || l.contains("[Tool call:") ||
+                    l.trimStart().startsWith("{") && l.contains("\"method\"")
+            }
+            val replyLines = lines.filter { l ->
+                !l.contains("[工具调用:") && !l.contains("[Tool call:") &&
+                    !l.trimStart().startsWith("{") &&
+                    l.isNotBlank()
+            }
+
+            val compactContent = buildString {
+                // 工具调用线索
+                if (toolCallLines.isNotEmpty()) {
+                    toolCallLines.forEach { appendLine(it) }
+                    if (replyLines.isNotEmpty()) appendLine()
+                }
+                // 提取结论性内容（尾部关键行）
+                if (replyLines.isNotEmpty()) {
+                    if (replyLines.size <= COMPACT_MODEL_TAIL_LINES) {
+                        replyLines.forEach { appendLine(it) }
+                    } else {
+                        appendLine("[结论]")
+                        replyLines.takeLast(COMPACT_MODEL_TAIL_LINES).forEach { appendLine(it) }
+                    }
+                }
+            }
+            if (compactContent.isBlank()) msg else msg.copy(content = compactContent)
+        }
+
+        // 工具结果：保留概要 + 首尾关键行（完整内容仍可从记忆全量查询）
+        ChatRole.Tool -> {
+            val lines = msg.content.lines()
+            val toolName = msg.toolName ?: "未知工具"
+            if (lines.size <= COMPACT_TOOL_LINES + 1) {
+                // 结果本来就不大，直接保留
+                msg
+            } else {
+                val head = lines.take(COMPACT_TOOL_LINES / 2)
+                val tail = lines.takeLast(COMPACT_TOOL_LINES / 2)
+                buildString {
+                    appendLine("[工具: $toolName] 共 ${lines.size} 行，保留摘要:")
+                    head.forEach { appendLine(it) }
+                    appendLine("... (中间截断 ${lines.size - COMPACT_TOOL_LINES} 行，完整结果可通过记忆工具查询) ...")
+                    tail.forEach { appendLine(it) }
+                }.let { msg.copy(content = it) }
+            }
+        }
+
+        ChatRole.System -> msg
+    }
+
     suspend fun compressMessages(
         messages: List<ChatMessage>,
         activeConversationId: String?,
@@ -235,13 +340,23 @@ class ContextManager(
         }
 
         val keepEnd = truncated.size - recent.size
-        val combined = if (keepEnd > 0) recent else truncated
+        if (keepEnd <= 0) return CompressResult(messages, 0, "")
+
+        // 保留最近的完整轮次
+        val combined = mutableListOf<ChatMessage>()
+        // 对历史消息（keepEnd 之前）做压缩摘要
+        for (i in 0 until keepEnd) {
+            combined.add(compactHistoryMessage(truncated[i]))
+        }
+        // 追加最近的完整轮次
+        combined.addAll(recent)
+
         val removedTokens = totalTokens - estimateContextTokens(combined)
         return CompressResult(
             messages = combined,
             removedTokens = removedTokens,
-            summaryContent = "",
-            keyFactsPreserved = 0,
+            summaryContent = "有 ${keepEnd} 条历史消息已压缩为摘要，可通过记忆工具查询完整内容",
+            keyFactsPreserved = combined.size,
         )
     }
 

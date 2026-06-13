@@ -23,7 +23,7 @@ class AIToolSet(
 
     private val readTools = ReadTools(fileManager, conversationMemory)
     private val editTools = EditTools(fileManager)
-    private val terminalTools = TerminalTools(context, fileManager) { projectUri }
+    private val terminalTools = TerminalTools(context, fileManager)
     private val webTools = WebTools(fileManager)
 
     /** ChatViewModel 注入的回调，每次 @Tool 方法执行前后自动调用 */
@@ -50,13 +50,6 @@ class AIToolSet(
         callback?.onToolResult(name, args, result?.toString() ?: "")
         return result
     }
-
-    // SAF 项目根 URI（用户通过长按文件夹下拉列表设置的 workspace）
-    @Volatile var projectUri: Uri? = null
-        set(value) {
-            field = value
-            value?.let { fileManager?.setProjectUri(it) }
-        }
 
     /** 获取项目根目录的绝对路径（用于上下文注入） */
     fun getProjectRootPath(): String {

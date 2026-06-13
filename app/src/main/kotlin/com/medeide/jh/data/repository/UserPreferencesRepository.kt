@@ -87,8 +87,8 @@ class UserPreferencesRepository(private val context: Context) {
                         apiEndpoint = obj.optString("apiEndpoint", "https://api.openai.com/v1"),
                         apiKey = obj.optString("apiKey", ""),
                         modelName = obj.optString("modelName", "gpt-4o"),
-                        contextWindow = obj.optInt("contextWindow", 128000),
-                        maxTokens = obj.optInt("maxTokens", 8192),
+                        contextWindow = obj.optInt("contextWindow", 184000),
+                        maxTokens = obj.optInt("maxTokens", 16000),
                     )
                 }
             } catch (_: Exception) { emptyList() }
@@ -214,7 +214,7 @@ class UserPreferencesRepository(private val context: Context) {
         .map { it[PreferencesKeys.SHOW_TOOL_CALLS] ?: false }
 
     val deepThinkEnabled: Flow<Boolean> = context.dataStore.data
-        .map { it[PreferencesKeys.DEEP_THINK_ENABLED] ?: true }
+        .map { it[PreferencesKeys.DEEP_THINK_ENABLED] ?: false }
 
     val thinkingRounds: Flow<Int> = context.dataStore.data
         .map { (it[PreferencesKeys.THINKING_ROUNDS] ?: 2).coerceIn(1, 10) }

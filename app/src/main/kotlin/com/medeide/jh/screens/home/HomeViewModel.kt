@@ -140,26 +140,12 @@ class HomeViewModel(
     /** 获取项目目录路径 */
     fun getProjectDirPath(): String = fileManager.projectDirPath
 
-    /** SAF 模式 - 通过系统文件夹选择器 URI 打开文件夹 */
-    fun openFolder(uri: Uri) {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                try {
-                    fileManager.setProjectUri(uri)
-                    val docFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(getApplication(), uri)
-                    val folderName = docFile?.name ?: "未命名文件夹"
-                    _folderState.value = FolderState(folderUri = uri, folderName = folderName)
-                    refreshRootFiles()
-                } catch (_: Exception) {
-                    _folderState.value = FolderState()
-                    _files.value = emptyList()
-                }
-            }
-        }
+    /** 设置项目根目录（使用直接文件系统路径） */
+    fun setProjectRootPath(path: String, displayName: String) {
+        fileManager.setProjectDir(path)
+        _folderState.value = FolderState(folderName = displayName)
+        refreshRootFiles()
     }
-
-    /** 当前是否为直接文件系统访问模式 */
-    fun isDirectAccessMode(): Boolean = fileManager.isDirectAccessMode()
 
     /** 相对路径是否在项目目录范围内 */
     fun isProjectFile(relativePath: String): Boolean {
@@ -179,17 +165,6 @@ class HomeViewModel(
                 withContext(Dispatchers.Main) { onResult(emptyList()) }
             }
         }
-    }
-
-    private fun safUriToRelative(uri: Uri): String {
-        val rootUri = _folderState.value.folderUri ?: return ""
-        val rootDocId = try {
-            android.provider.DocumentsContract.getTreeDocumentId(rootUri)
-        } catch (_: Exception) { null } ?: return ""
-        val fileDocId = try {
-            android.provider.DocumentsContract.getDocumentId(uri)
-        } catch (_: Exception) { null } ?: return ""
-        return fileDocId.removePrefix(rootDocId.trimEnd('/') + "/")
     }
 
     val lastOpenedFolderUri: StateFlow<String?> = userPreferencesRepository.lastOpenedFolderUri
@@ -238,7 +213,6 @@ class HomeViewModel(
     fun getAbsolutePath(relativePath: String): String = fileManager.getAbsolutePath(relativePath)
 
     fun closeFolder() {
-        fileManager.clearProjectUri()
         _folderState.value = FolderState()
         _files.value = emptyList()
     }
@@ -266,21 +240,9 @@ class HomeViewModel(
     fun renameFile(relativePath: String, newName: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                if (isDirectAccessMode()) {
-                    val base = fileManager.projectDirPath.ifEmpty { fileManager.storageRootPath }
-                    val file = java.io.File(base, relativePath)
-                    file.renameTo(java.io.File(file.parentFile, newName))
-                } else {
-                    val nodes = fileManager.listFilesAsNodes(
-                        relativePath.substringBeforeLast('/')
-                    )
-                    val node = nodes.find { it.name == relativePath.substringAfterLast('/') }
-                    if (node != null) {
-                        android.provider.DocumentsContract.renameDocument(
-                            getApplication<Application>().contentResolver, node.uri, newName
-                        )
-                    }
-                }
+                val base = fileManager.projectDirPath.ifEmpty { fileManager.storageRootPath }
+                val file = java.io.File(base, relativePath)
+                file.renameTo(java.io.File(file.parentFile, newName))
                 refreshRootFiles()
             } catch (_: Exception) {}
         }

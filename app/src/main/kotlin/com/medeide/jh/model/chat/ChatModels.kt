@@ -70,7 +70,7 @@ data class ModelParams(
     val topP: Double = 0.7,
     val temperature: Double = 0.1,
     val seed: Int = 0,
-    val contextWindowTokens: Int = 4096,        // 默认 4K
+    val contextWindowTokens: Int = 32768,       // 默认 32K
     val enableSpeculativeDecoding: Boolean = false, // MTP 推测解码
     val backendType: BackendType = BackendType.GPU, // 推理后端
 ) {
@@ -126,7 +126,7 @@ data class CloudModelConfig(
     val apiEndpoint: String = "https://api.openai.com/v1",
     val apiKey: String = "",
     val modelName: String = "gpt-4o",
-    val maxTokens: Int = 8192,
+    val maxTokens: Int = 16000,
 )
 
 // 云端模型配置档案（可保存多个，自由切换）
@@ -136,8 +136,8 @@ data class CloudModelProfile(
     val apiEndpoint: String = "https://api.openai.com/v1",
     val apiKey: String = "",
     val modelName: String = "gpt-4o",
-    val contextWindow: Int = 128000,  // 模型上下文窗口大小（token），用于自适应压缩阈值
-    val maxTokens: Int = 8192,        // 模型输出最大 token 数
+    val contextWindow: Int = 184000,  // 模型上下文窗口大小（token），用于自适应压缩阈值
+    val maxTokens: Int = 16000,       // 模型输出最大 token 数
 )
 
 /** API 调用返回的用量信息 */

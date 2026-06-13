@@ -155,7 +155,7 @@
     <string name="rules_save">保存</string>
     <string name="rules_cancel">取消</string>
     <string name="rules_default_role_name">默认角色</string>
-    <string name="rules_default_role_desc">与你当前的 AI 助手角色一致</string>
+    <string name="rules_default_role_desc">智能编程助手</string>
     <string name="rules_default_role_hint">你是智能编程助手，使用内置工具协助用户完成文件操作、代码编辑、项目构建、网络搜索等开发任务。</string>
 
     <!-- 通用设置-对话配置 -->

@@ -90,7 +90,8 @@ private fun CloudModelCardContent(chatViewModel: ChatViewModel, chatState: ChatU
     var editEndpoint by remember { mutableStateOf("") }
     var editKey by remember { mutableStateOf("") }
     var editModel by remember { mutableStateOf("") }
-    var editContextWindow by remember { mutableIntStateOf(128000) }
+    var editContextWindow by remember { mutableIntStateOf(184000) }
+    var editMaxTokens by remember { mutableIntStateOf(16000) }
     var showKey by remember { mutableStateOf(false) }
     var isTesting by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<String?>(null) }
@@ -98,12 +99,9 @@ private fun CloudModelCardContent(chatViewModel: ChatViewModel, chatState: ChatU
     var availableModels by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val vendorPresets = listOf(
-        CloudVendorPreset("OpenAI", "https://api.openai.com/v1", listOf("gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"), defaultContextWindow = 128000),
-        CloudVendorPreset("DeepSeek", "https://api.deepseek.com/v1", listOf("deepseek-chat", "deepseek-reasoner"), defaultContextWindow = 128000),
-        CloudVendorPreset("智谱AI", "https://open.bigmodel.cn/api/paas/v4", listOf("glm-4-flash", "glm-4-plus"), defaultContextWindow = 128000),
-        CloudVendorPreset("通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1", listOf("qwen-plus", "qwen-turbo"), defaultContextWindow = 128000),
-        CloudVendorPreset("Moonshot", "https://api.moonshot.cn/v1", listOf("moonshot-v1-8k", "moonshot-v1-32k"), defaultContextWindow = 128000),
-        CloudVendorPreset("自定义", "", listOf(), defaultContextWindow = 128000),
+        CloudVendorPreset("DeepSeek", "https://api.deepseek.com/v1", listOf("deepseek-v4-pro", "deepseek-v4-flash"), defaultContextWindow = 1000000),
+        CloudVendorPreset("Kimi", "https://api.moonshot.cn/v1", listOf("kimi-k2.5", "kimi-k2.7-code"), defaultContextWindow = 262144),
+        CloudVendorPreset("自定义", "", listOf(), defaultContextWindow = 184000),
     )
 
     val verifyMsg = when {
@@ -166,6 +164,7 @@ private fun CloudModelCardContent(chatViewModel: ChatViewModel, chatState: ChatU
                                 editName = profile.name; editEndpoint = profile.apiEndpoint
                                 editKey = profile.apiKey; editModel = profile.modelName
                                 editContextWindow = profile.contextWindow
+                                editMaxTokens = profile.maxTokens
                                 editingProfile = profile; editStep = 1
                                 testResult = null
                                 availableModels = emptyList()
@@ -273,24 +272,30 @@ private fun CloudModelCardContent(chatViewModel: ChatViewModel, chatState: ChatU
                                 value = editModel,
                                 onValueChange = { editModel = it },
                                 label = { Text("模型名称") },
-                                placeholder = { Text("deepseek-chat") },
+                                placeholder = { Text("deepseek-v4-flash") },
                                 modifier = Modifier.weight(1f),
                                 singleLine = true,
                             )
-                            // 获取模型列表按钮
-                            if (availableModels.isNotEmpty()) {
-                                Box {
-                                    var showModelDropdown by remember { mutableStateOf(false) }
-                                    IconButton(onClick = { showModelDropdown = true }) {
-                                        Icon(Icons.Default.ArrowDropDown, "选择模型", tint = MaterialTheme.colorScheme.primary)
-                                    }
+                            // 预设模型 + API 获取模型下拉
+                            Box {
+                                var showModelDropdown by remember { mutableStateOf(false) }
+                                val presetModels = when {
+                                    editEndpoint.contains("deepseek.com") -> listOf("deepseek-v4-pro", "deepseek-v4-flash")
+                                    editEndpoint.contains("moonshot.cn") -> listOf("kimi-k2.5", "kimi-k2.7-code")
+                                    else -> emptyList()
+                                }
+                                val allModelOptions = (presetModels + availableModels).distinct()
+                                IconButton(onClick = { if (allModelOptions.isNotEmpty()) showModelDropdown = true }) {
+                                    Icon(Icons.Default.ArrowDropDown, "选择模型", tint = MaterialTheme.colorScheme.primary)
+                                }
+                                if (showModelDropdown && allModelOptions.isNotEmpty()) {
                                     val screenHeightDp = LocalConfiguration.current.screenHeightDp
                                     DropdownMenu(
-                                        expanded = showModelDropdown,
+                                        expanded = true,
                                         onDismissRequest = { showModelDropdown = false },
                                         modifier = Modifier.heightIn(max = (screenHeightDp * 0.75f).dp)
                                     ) {
-                                        availableModels.forEach { model ->
+                                        allModelOptions.forEach { model ->
                                             DropdownMenuItem(
                                                 text = { Text(model, style = MaterialTheme.typography.bodySmall) },
                                                 onClick = {
@@ -334,6 +339,19 @@ private fun CloudModelCardContent(chatViewModel: ChatViewModel, chatState: ChatU
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             supportingText = { Text("75% 用量自动触发上下文压缩", style = MaterialTheme.typography.labelSmall) },
+                        )
+
+                        // 输出最大 token 数
+                        OutlinedTextField(
+                            value = if (editMaxTokens == 0) "" else editMaxTokens.toString(),
+                            onValueChange = { v ->
+                                editMaxTokens = v.filter { it.isDigit() }.take(7).toIntOrNull()
+                                    ?: if (v.isEmpty()) 0 else editMaxTokens
+                            },
+                            label = { Text("输出最大 token") },
+                            placeholder = { Text("16000") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
                         )
 
                         // 测试连接和获取模型按钮
@@ -438,11 +456,12 @@ private fun CloudModelCardContent(chatViewModel: ChatViewModel, chatState: ChatU
                                             name = editName, apiEndpoint = editEndpoint,
                                             apiKey = editKey, modelName = editModel,
                                             contextWindow = editContextWindow,
+                                            maxTokens = editMaxTokens,
                                         )
                                         chatViewModel.updateCloudProfile(updated)
                                     }
                                 } else {
-                                    chatViewModel.addCloudProfile(editName, editEndpoint, editKey, editModel, editContextWindow)
+                                    chatViewModel.addCloudProfile(editName, editEndpoint, editKey, editModel, editContextWindow, editMaxTokens)
                                 }
                                 showEditDialog = false
                             }
