@@ -100,6 +100,7 @@ class ContextManager(
         activeFilePath: String,
         projectRootName: String,
         openedFilePaths: List<String>,
+        modifiedFilePaths: List<String> = emptyList(),
         fileManager: FileManager,
         aiToolSet: AIToolSet,
     ): String {
@@ -114,13 +115,20 @@ class ContextManager(
             ctx.appendLine("当前项目: $absoluteRoot")
         }
 
-        val active = activeFilePath.takeIf { it.isNotBlank() }
-        if (active != null) ctx.appendLine("活动标签: $active")
+        val modifiedSet = modifiedFilePaths.toSet()
 
         if (openedFilePaths.isNotEmpty()) {
-            ctx.appendLine("已打开:")
-            openedFilePaths.take(10).forEach { path -> ctx.appendLine("  $path") }
-            if (openedFilePaths.size > 10) ctx.appendLine("  ... 及 ${openedFilePaths.size - 10} 个")
+            openedFilePaths.take(15).forEach { path ->
+                val prefix = if (path in modifiedSet) "编辑中" else "已打开"
+                ctx.appendLine("$prefix: $path")
+            }
+            if (openedFilePaths.size > 15) ctx.appendLine("  ... 及 ${openedFilePaths.size - 15} 个")
+        }
+
+        // 若 activeFilePath 不在 openedFilePaths 中但仍需体现
+        val active = activeFilePath.takeIf { it.isNotBlank() && it !in openedFilePaths }
+        if (active != null) {
+            ctx.appendLine("${if (active in modifiedSet) "编辑中" else "已打开"}: $active")
         }
 
         if (ctx.length < 40) return ""

@@ -128,6 +128,7 @@ class ChatViewModel(
         activeFilePath = _state.value.activeFilePath,
         projectRootName = _state.value.projectRootName,
         openedFilePaths = _state.value.openedFilePaths,
+        modifiedFilePaths = _state.value.modifiedFilePaths,
         fileManager = fileManager,
         aiToolSet = aiToolSet,
     )
@@ -920,6 +921,26 @@ class ChatViewModel(
                 return
             }
 
+            // 设置工具调用统计回调，记录工具执行次数和耗时
+            toolCallHandler.callback = object : ToolExecutionCallback {
+                override fun onToolStart(name: String, args: Map<String, String>) {
+                    _toolStartTimes[name] = System.currentTimeMillis()
+                }
+                override fun onToolResult(name: String, args: Map<String, String>, result: String) {
+                    val startMs = _toolStartTimes.remove(name) ?: return
+                    val durationMs = System.currentTimeMillis() - startMs
+                    val success = !result.startsWith("Tool error:") && !result.startsWith("Error:")
+                    viewModelScope.launch {
+                        usageAnalyticsRepo.recordToolCall(
+                            ToolCallRecord(
+                                toolName = name,
+                                success = success,
+                                durationMs = durationMs,
+                            )
+                        )
+                    }
+                }
+            }
             val results = coroutineScope {
                 toolCalls.map { call ->
                     val funcName = call.second
@@ -931,6 +952,8 @@ class ChatViewModel(
                     }
                 }.map { it.await() }
             }
+            // 清除回调，避免影响后续操作
+            toolCallHandler.callback = null
 
             // 构建完整 tool_calls 信息列表（含 id、name、arguments），存入 assistant 消息
             val toolCallInfoList = toolCalls.map { (id, name, argsMap) ->
@@ -958,14 +981,16 @@ class ChatViewModel(
             }
             val hadModifyingTools = toolCalls.any { it.second in ChatConfig.MODIFYING_TOOLS }
 
-            val display = StringBuilder()
-            for (i in toolCalls.indices) {
-                val name = toolCalls[i].second
-                display.appendLine("[工具调用: $name]")
-                display.appendLine(results[i])
-                if (i < toolCalls.size - 1) display.appendLine()
+            // 清理消息内容中的工具调用 JSON，工具执行结果仅发给模型不显示到聊天界面
+            val cleanedContent = toolCallHandler.stripToolCallJson(cleanResponse)
+            if (cleanedContent != cleanResponse) {
+                _state.update { state ->
+                    val updatedMessages = state.messages.map { msg ->
+                        if (msg.id == currentMsgId) msg.copy(content = cleanedContent) else msg
+                    }
+                    state.copy(messages = updatedMessages)
+                }
             }
-            updateModelMessage(currentMsgId, "\n\n${display.toString().trimEnd()}", false)
             finalizeModelMessage(currentMsgId, channelContent = channelContent)
 
             if (hadModifyingTools || cloudRounds % 3 == 0) {
