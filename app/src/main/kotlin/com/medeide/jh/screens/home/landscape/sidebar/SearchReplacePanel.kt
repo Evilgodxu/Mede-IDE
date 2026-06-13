@@ -253,12 +253,12 @@ fun SearchReplacePanel(
             )
         }
 
-        // 工具栏 - 第二行：操作按钮
+        // 工具栏 - 第二行：操作按钮（居中显示）
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 1.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // 清空搜索（清空输入框、替换框和搜索结果）
