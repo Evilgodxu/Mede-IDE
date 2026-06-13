@@ -1,5 +1,6 @@
 package com.medeide.jh.screens.home.landscape.sidebar
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,14 +19,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FindReplace
+import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -77,6 +79,7 @@ fun SearchReplacePanel(
     var replaceText by remember { mutableStateOf(editorState.persistentReplaceText) }
     var isRegex by remember { mutableStateOf(editorState.persistentIsRegex) }
     var isCaseSensitive by remember { mutableStateOf(editorState.persistentIsCaseSensitive) }
+    var isWholeWord by remember { mutableStateOf(editorState.persistentIsWholeWord) }
     var isSearching by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -106,13 +109,18 @@ fun SearchReplacePanel(
         editorState.persistentReplaceText = replaceText
         editorState.persistentIsRegex = isRegex
         editorState.persistentIsCaseSensitive = isCaseSensitive
+        editorState.persistentIsWholeWord = isWholeWord
 
         val query = searchQuery
         val regex = isRegex
         val caseSensitive = isCaseSensitive
+        val wholeWord = isWholeWord
 
         scope.launch {
-            val pattern = if (regex) query else Regex.escape(query)
+            var pattern = if (regex) query else Regex.escape(query)
+            if (wholeWord) {
+                pattern = "\\b${pattern}\\b"
+            }
             val matches = withContext(Dispatchers.IO) {
                 fileManager.grepStructured(
                     pattern = pattern,
@@ -157,16 +165,6 @@ fun SearchReplacePanel(
                 focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
                 unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
             ),
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = {
-                        searchQuery = ""
-                        editorState.persistentSearchResults = emptyList()
-                    }) {
-                        Icon(Icons.Default.Close, "清空", modifier = Modifier.size(16.dp))
-                    }
-                }
-            },
         )
 
         // 替换输入框
@@ -189,57 +187,73 @@ fun SearchReplacePanel(
             ),
         )
 
-        // 工具栏
+        // 工具栏 - 第一行：匹配模式选项
+        val chipBorder = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                .padding(horizontal = 8.dp, vertical = 1.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FilledIconButton(
-                onClick = { performSearch() },
-                modifier = Modifier.size(28.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                ),
-            ) {
-                Icon(Icons.Default.Refresh, "搜索", modifier = Modifier.size(16.dp))
-            }
+            FilterChip(
+                selected = isRegex,
+                onClick = { isRegex = !isRegex },
+                label = { Text("正则", fontSize = 10.sp) },
+                modifier = Modifier.height(24.dp),
+                border = if (isRegex) chipBorder else null,
+            )
+            FilterChip(
+                selected = isWholeWord,
+                onClick = { isWholeWord = !isWholeWord },
+                label = { Text("全词", fontSize = 10.sp) },
+                modifier = Modifier.height(24.dp),
+                border = if (isWholeWord) chipBorder else null,
+            )
+            FilterChip(
+                selected = isCaseSensitive,
+                onClick = { isCaseSensitive = !isCaseSensitive },
+                label = { Text("大小", fontSize = 10.sp) },
+                modifier = Modifier.height(24.dp),
+                border = if (isCaseSensitive) chipBorder else null,
+            )
+        }
 
+        // 工具栏 - 第二行：操作按钮
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 1.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 清空搜索（清空输入框、替换框和搜索结果）
             FilledIconButton(
-                onClick = { editorState.persistentSearchResults = emptyList() },
-                modifier = Modifier.size(28.dp),
+                onClick = {
+                    searchQuery = ""
+                    replaceText = ""
+                    editorState.persistentSearchResults = emptyList()
+                    editorState.persistentSearchQuery = ""
+                    editorState.persistentReplaceText = ""
+                    editorState.currentSearchQuery = ""
+                    editorState.currentReplaceText = ""
+                },
+                modifier = Modifier.size(26.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant,
                 ),
             ) {
-                Icon(Icons.Default.Close, "清空结果", modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.ClearAll, "清空搜索", modifier = Modifier.size(14.dp))
             }
-
-            Spacer(Modifier.width(4.dp))
-
-            FilterChip(
-                selected = isRegex,
-                onClick = { isRegex = !isRegex },
-                label = { Text(".*", fontSize = 11.sp) },
-                modifier = Modifier.height(26.dp),
-            )
-
-            FilterChip(
-                selected = isCaseSensitive,
-                onClick = { isCaseSensitive = !isCaseSensitive },
-                label = { Text("Aa", fontSize = 11.sp) },
-                modifier = Modifier.height(26.dp),
-            )
-
-            Spacer(Modifier.weight(1f))
 
             // 全部替换
             FilledIconButton(
                 onClick = {
                     if (searchQuery.isBlank() || editorState.persistentSearchResults.isEmpty()) return@FilledIconButton
-                    val pattern = if (isRegex) searchQuery else Regex.escape(searchQuery)
+                    var pattern = if (isRegex) searchQuery else Regex.escape(searchQuery)
+                    if (isWholeWord) {
+                        pattern = "\\b${pattern}\\b"
+                    }
                     val replacement = replaceText
                     val ignoreCase = !isCaseSensitive
 
@@ -267,12 +281,25 @@ fun SearchReplacePanel(
                         }
                     }
                 },
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(26.dp),
                 colors = IconButtonDefaults.filledIconButtonColors(
                     containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
                 ),
             ) {
-                Icon(Icons.Default.FindReplace, "全部替换", modifier = Modifier.size(16.dp))
+                Icon(Icons.Default.SwapHoriz, "全部替换", modifier = Modifier.size(14.dp))
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            // 搜索（刷新）
+            FilledIconButton(
+                onClick = { performSearch() },
+                modifier = Modifier.size(26.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                ),
+            ) {
+                Icon(Icons.Default.Search, "搜索内容", modifier = Modifier.size(14.dp))
             }
         }
 
@@ -292,57 +319,71 @@ fun SearchReplacePanel(
             )
         }
 
-        // 搜索结果列表
-        LazyColumn(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            items(fileGroupedResults, key = { it.filePath }) { fileResult ->
-                FileResultItem(
-                    fileResult = fileResult,
-                    searchQuery = searchQuery,
-                    onMatchClick = { match ->
-                        val absPath = if (match.filePath.startsWith("/")) match.filePath
-                            else "${fileManager.projectDirPath.trimEnd('/')}/${match.filePath}"
-                        editorState.openFileAtLine(absPath, match.lineNumber)
-                        // 保存当前搜索上下文供编辑器悬浮按钮使用
-                        editorState.currentSearchMatches = fileResult.matches.filter {
-                            it.filePath == match.filePath
-                        }
-                        editorState.currentSearchMatchIndex = fileResult.matches.indexOf(match).coerceAtLeast(0)
-                        editorState.currentSearchQuery = searchQuery
-                        editorState.currentReplaceText = replaceText
-                        editorState.isSearchToolbarVisible = true
-                        // 关闭面板
-                        onClosePanel()
-                    },
-                )
-            }
-        }
-
-        // 空状态
-        if (editorState.persistentSearchResults.isEmpty() && !isSearching && searchQuery.isNotEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
+        // 搜索结果列表 / 加载 / 空状态
+        Box(modifier = Modifier.fillMaxSize()) {
+            // 搜索结果列表
+            LazyColumn(
+                modifier = Modifier.fillMaxSize()
             ) {
-                Text(
-                    "未找到匹配内容",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                )
+                items(fileGroupedResults, key = { it.filePath }) { fileResult ->
+                    FileResultItem(
+                        fileResult = fileResult,
+                        searchQuery = searchQuery,
+                        onMatchClick = { match ->
+                            val absPath = if (match.filePath.startsWith("/")) match.filePath
+                                else "${fileManager.projectDirPath.trimEnd('/')}/${match.filePath}"
+                            editorState.openFileAtLine(absPath, match.lineNumber)
+                            // 保存当前搜索上下文供编辑器悬浮按钮使用
+                            editorState.currentSearchMatches = fileResult.matches.filter {
+                                it.filePath == match.filePath
+                            }
+                            editorState.currentSearchMatchIndex = fileResult.matches.indexOf(match).coerceAtLeast(0)
+                            editorState.currentSearchQuery = searchQuery
+                            editorState.currentReplaceText = replaceText
+                            editorState.isSearchToolbarVisible = true
+                            // 关闭面板
+                            onClosePanel()
+                        },
+                    )
+                }
             }
-        }
 
-        if (isSearching) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    "搜索中…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            // 搜索中状态
+            if (isSearching) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "搜索中…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            // 空状态（未搜索且无结果时不显示）
+            if (!isSearching && editorState.persistentSearchResults.isEmpty() && searchQuery.isNotEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "未找到匹配内容",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    )
+                }
             }
         }
     }

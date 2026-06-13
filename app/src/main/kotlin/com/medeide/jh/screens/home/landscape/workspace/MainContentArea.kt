@@ -1,6 +1,7 @@
 package com.medeide.jh.screens.home.landscape.workspace
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
@@ -39,8 +41,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +52,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -250,6 +252,46 @@ fun MainContentArea(
     }
 }
 
+// 紧凑型搜索输入框（无额外内边距，32dp高度下内容安全可视）
+@Composable
+private fun MiniSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .height(32.dp)
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
+                shape = RoundedCornerShape(4.dp),
+            )
+            .padding(horizontal = 8.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (value.isEmpty()) {
+            Text(
+                text = placeholder,
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            )
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodySmall.copy(
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+            ),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
 // 编辑器查找替换工具栏（右上角，双行）
 @Composable
 private fun EditorSearchOverlay(
@@ -282,18 +324,11 @@ private fun EditorSearchOverlay(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                OutlinedTextField(
+                MiniSearchField(
                     value = searchQuery,
                     onValueChange = onSearchQueryChange,
-                    placeholder = { Text("搜索…", fontSize = 12.sp) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    modifier = Modifier.width(140.dp).height(32.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                        cursorColor = MaterialTheme.colorScheme.primary,
-                    ),
+                    placeholder = "搜索…",
+                    modifier = Modifier.width(140.dp),
                 )
 
                 // 匹配计数
@@ -336,18 +371,11 @@ private fun EditorSearchOverlay(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                OutlinedTextField(
+                MiniSearchField(
                     value = replaceText,
                     onValueChange = onReplaceTextChange,
-                    placeholder = { Text("替换为…", fontSize = 12.sp) },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                    modifier = Modifier.width(140.dp).height(32.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
-                        cursorColor = MaterialTheme.colorScheme.primary,
-                    ),
+                    placeholder = "替换为…",
+                    modifier = Modifier.width(140.dp),
                 )
 
                 // 替换按钮

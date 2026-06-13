@@ -42,6 +42,7 @@ class EditorScreenState(
     var persistentReplaceText by mutableStateOf("")
     var persistentIsRegex by mutableStateOf(false)
     var persistentIsCaseSensitive by mutableStateOf(false)
+    var persistentIsWholeWord by mutableStateOf(false)
 
     // 撤销/重做历史栈（每个文件独立）
     private val undoHistory = mutableMapOf<String, MutableList<String>>()
