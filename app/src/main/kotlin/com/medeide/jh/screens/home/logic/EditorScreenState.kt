@@ -29,6 +29,85 @@ class EditorScreenState(
     val editorContent = mutableStateMapOf<String, TextFieldValue>()
     val originalContents = mutableStateMapOf<String, String>()
 
+    // 当前文件中的搜索匹配结果（用于编辑器悬浮定位/替换）
+    var currentSearchMatches by mutableStateOf<List<com.medeide.jh.screens.home.landscape.sidebar.SearchResultItem>>(emptyList())
+    var currentSearchMatchIndex by mutableIntStateOf(-1)
+    var currentSearchQuery by mutableStateOf("")
+    var currentReplaceText by mutableStateOf("")
+    var isSearchToolbarVisible by mutableStateOf(false)
+
+    // 撤销/重做历史栈（每个文件独立）
+    private val undoHistory = mutableMapOf<String, MutableList<String>>()
+    private val redoHistory = mutableMapOf<String, MutableList<String>>()
+    private val lastUndoPushTime = mutableMapOf<String, Long>()
+
+    /** 获取当前处于编辑中的文件路径，没有则返回 null */
+    fun getActiveFilePath(): String? {
+        val idx = activeTabIndex
+        if (idx !in tabs.indices) return null
+        val tab = tabs[idx]
+        return if (tab.type == TabType.File) tab.id else null
+    }
+
+    /** 保存当前内容到撤销栈（仅在文件编辑且内容有变化时推送） */
+    fun pushUndo(path: String) {
+        val current = editorContent[path]?.text ?: return
+        val now = System.currentTimeMillis()
+        // 节流：同一文件 300ms 内的连续编辑只记录一次
+        if (now - (lastUndoPushTime[path] ?: 0L) < 300L) {
+            // 更新栈顶而不是新增，保证撤销到上一个稳定状态
+            val stack = undoHistory.getOrPut(path) { mutableListOf() }
+            if (stack.isNotEmpty()) {
+                stack[stack.lastIndex] = current
+            }
+            return
+        }
+        lastUndoPushTime[path] = now
+        val stack = undoHistory.getOrPut(path) { mutableListOf() }
+        // 限制栈深度
+        if (stack.size >= 100) stack.removeFirst()
+        stack.add(current)
+        redoHistory[path]?.clear()
+    }
+
+    /** 撤销：还原到上一个编辑状态 */
+    fun handleUndo() {
+        val path = getActiveFilePath() ?: return
+        val undoStack = undoHistory[path] ?: return
+        if (undoStack.isEmpty()) return
+        val currentText = editorContent[path]?.text ?: return
+        val prevText = undoStack.removeLast()
+        // 将当前内容推入重做栈
+        redoHistory.getOrPut(path) { mutableListOf() }.add(currentText)
+        editorContent[path] = TextFieldValue(prevText)
+    }
+
+    /** 重做：恢复被撤销的内容 */
+    fun handleRedo() {
+        val path = getActiveFilePath() ?: return
+        val redoStack = redoHistory[path] ?: return
+        if (redoStack.isEmpty()) return
+        val currentText = editorContent[path]?.text ?: return
+        val nextText = redoStack.removeLast()
+        // 将当前内容推回撤销栈
+        undoHistory.getOrPut(path) { mutableListOf() }.add(currentText)
+        editorContent[path] = TextFieldValue(nextText)
+    }
+
+    /** 全文复制到剪贴板 */
+    fun copyAllText(context: android.content.Context) {
+        val path = getActiveFilePath() ?: return
+        val content = editorContent[path]?.text ?: return
+        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        val clip = android.content.ClipData.newPlainText("editor", content)
+        clipboard?.setPrimaryClip(clip)
+    }
+
+    /** 打开查找替换工具栏 */
+    fun openSearchToolbar() {
+        isSearchToolbarVisible = true
+    }
+
     /** 将路径转为相对路径（若为绝对路径则转换） */
     private fun toStoragePath(path: String): String {
         if (path.startsWith("/storage/") || path.startsWith("/data/")) {
@@ -159,6 +238,11 @@ class EditorScreenState(
 
     fun handleTextChange(path: String, newTextFieldValue: TextFieldValue) {
         editorContent[path] = newTextFieldValue
+    }
+
+    /** 外部调用：文本变更前调用此方法记录撤销快照 */
+    fun onBeforeTextChange(path: String) {
+        pushUndo(path)
     }
 
     // === Diff & Merge ===

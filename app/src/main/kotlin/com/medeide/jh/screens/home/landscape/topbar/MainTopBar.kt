@@ -7,10 +7,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -19,6 +22,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -54,6 +61,11 @@ fun MainTopBar(
     onScanMusic: () -> Unit = {},
     onPlayAudioTrack: (AudioTrack) -> Unit = {},
     onStopAudio: () -> Unit = {},
+    // 编辑菜单回调
+    onUndo: () -> Unit = {},
+    onRedo: () -> Unit = {},
+    onCopyAll: () -> Unit = {},
+    onFindReplace: () -> Unit = {},
 ) {
     val topBarInsets = if (!windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)) {
         WindowInsets(top = 0)
@@ -63,6 +75,8 @@ fun MainTopBar(
 
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val dropdownMaxHeight = (screenHeightDp * 0.75f).dp
+
+    var editMenuExpanded by remember { mutableStateOf(false) }
 
     Column {
         TopAppBar(
@@ -85,13 +99,40 @@ fun MainTopBar(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
 
-                    // 编辑（保留按钮，移除下拉菜单）
-                    Text(
-                        text = stringResource(R.string.menu_edit),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
+                    // 编辑下拉菜单
+                    Box {
+                        Text(
+                            text = stringResource(R.string.menu_edit),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .clickable { editMenuExpanded = true }
+                        )
+
+                        DropdownMenu(
+                            expanded = editMenuExpanded,
+                            onDismissRequest = { editMenuExpanded = false },
+                            modifier = Modifier.heightIn(max = dropdownMaxHeight)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("撤销") },
+                                onClick = { editMenuExpanded = false; onUndo() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("恢复") },
+                                onClick = { editMenuExpanded = false; onRedo() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("全文复制") },
+                                onClick = { editMenuExpanded = false; onCopyAll() },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("查找替换") },
+                                onClick = { editMenuExpanded = false; onFindReplace() },
+                            )
+                        }
+                    }
 
                     Text(
                         text = "丨",

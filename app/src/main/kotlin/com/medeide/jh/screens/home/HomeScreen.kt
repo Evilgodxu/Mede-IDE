@@ -50,6 +50,7 @@ import com.medeide.jh.screens.home.landscape.workspace.MainContentArea
 import com.medeide.jh.screens.home.landscape.topbar.MainTopBar
 import com.medeide.jh.screens.home.landscape.sidebar.Sidebar
 import com.medeide.jh.screens.home.landscape.sidebar.SidebarTab
+import com.medeide.jh.screens.home.landscape.sidebar.SearchReplacePanel
 import com.medeide.jh.screens.home.ThreeColumnLayout
 import com.medeide.jh.screens.home.landscape.workspace.editor.CodeEditor
 import com.medeide.jh.screens.home.landscape.sidebar.resourcepanel.ResourcePanel
@@ -333,6 +334,15 @@ fun HomeScreen(
                 },
                 onPlayAudioTrack = onPlayAudioTrack,
                 onStopAudio = onStopAudio,
+                // 编辑菜单
+                onUndo = { editorState.handleUndo() },
+                onRedo = { editorState.handleRedo() },
+                onCopyAll = { editorState.copyAllText(context) },
+                onFindReplace = {
+                    editorState.openSearchToolbar()
+                    // 如果侧栏搜索面板未打开，不自动切换（保持当前面板）
+                    // 查找替换工具栏已在编辑器右上角弹出
+                },
             )
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -352,6 +362,7 @@ fun HomeScreen(
                     viewModel = viewModel,
                     chatViewModel = chatViewModel,
                     editorState = editorState,
+                    fileManager = fileManager,
                     onFileClick = { fileItem ->
                         // 文本文件使用 filePath（相对/绝对均可，EditorScreenState 会处理)
                         // 非文本文件需要绝对路径或 content:// URI
@@ -474,6 +485,7 @@ fun HomeScreen(
                         CodeEditor(
                             text = tfv,
                             onTextChange = {
+                                editorState.onBeforeTextChange(path)
                                 editorState.handleTextChange(path, it)
                                 val modified = editorState.tabs.filter { t -> t.type == TabType.File && editorState.isFileModified(t.id) }.map { it.id }
                                 chatViewModel.setModifiedFilePaths(modified)
@@ -489,6 +501,60 @@ fun HomeScreen(
                             },
                         )
                     },
+                    // 搜索替换相关
+                    currentSearchMatches = editorState.currentSearchMatches,
+                    currentSearchMatchIndex = editorState.currentSearchMatchIndex,
+                    onSearchNavUp = {
+                        val matches = editorState.currentSearchMatches
+                        if (matches.isEmpty()) return@MainContentArea
+                        val currentIdx = editorState.currentSearchMatchIndex.coerceIn(0, matches.size - 1)
+                        val newIdx = if (currentIdx <= 0) matches.size - 1 else currentIdx - 1
+                        editorState.currentSearchMatchIndex = newIdx
+                        val match = matches[newIdx]
+                        val absPath = if (match.filePath.startsWith("/")) match.filePath
+                            else "${homeState.projectDirPath.trimEnd('/')}/${match.filePath}"
+                        editorState.openFileAtLine(absPath, match.lineNumber)
+                    },
+                    onSearchNavDown = {
+                        val matches = editorState.currentSearchMatches
+                        if (matches.isEmpty()) return@MainContentArea
+                        val currentIdx = editorState.currentSearchMatchIndex.coerceIn(0, matches.size - 1)
+                        val newIdx = if (currentIdx >= matches.size - 1) 0 else currentIdx + 1
+                        editorState.currentSearchMatchIndex = newIdx
+                        val match = matches[newIdx]
+                        val absPath = if (match.filePath.startsWith("/")) match.filePath
+                            else "${homeState.projectDirPath.trimEnd('/')}/${match.filePath}"
+                        editorState.openFileAtLine(absPath, match.lineNumber)
+                    },
+                    onReplaceCurrent = { filePath ->
+                        val matches = editorState.currentSearchMatches
+                        val idx = editorState.currentSearchMatchIndex
+                        if (idx !in matches.indices) return@MainContentArea
+                        val match = matches[idx]
+                        val absPath = if (match.filePath.startsWith("/")) match.filePath
+                            else "${homeState.projectDirPath.trimEnd('/')}/${match.filePath}"
+                        val content = editorState.editorContent[absPath]?.text ?: return@MainContentArea
+                        val lines = content.lines().toMutableList()
+                        if (match.lineNumber - 1 in lines.indices) {
+                            val lineIdx = match.lineNumber - 1
+                            val oldLine = lines[lineIdx]
+                            val searchQuery = editorState.currentSearchQuery
+                            val newLine = if (searchQuery.isNotEmpty()) {
+                                oldLine.replaceFirst(searchQuery, editorState.currentReplaceText, ignoreCase = true)
+                            } else oldLine
+                            lines[lineIdx] = newLine
+                            val newContent = lines.joinToString("\n")
+                            editorState.editorContent[absPath] = TextFieldValue(newContent)
+                            editorState.currentSearchMatchIndex = (idx + 1).coerceAtMost(matches.size - 1)
+                        }
+                    },
+                    // 查找替换工具栏参数
+                    isSearchToolbarVisible = editorState.isSearchToolbarVisible,
+                    toolbarSearchQuery = editorState.currentSearchQuery,
+                    toolbarReplaceText = editorState.currentReplaceText,
+                    onToolbarSearchQueryChange = { editorState.currentSearchQuery = it },
+                    onToolbarReplaceTextChange = { editorState.currentReplaceText = it },
+                    onCloseSearchToolbar = { editorState.isSearchToolbarVisible = false },
                 )
             },
             collabPanel = {
@@ -553,11 +619,13 @@ private fun LeftPanelContent(
     viewModel: HomeViewModel,
     chatViewModel: ChatViewModel,
     editorState: EditorScreenState,
+    fileManager: FileManager,
     onFileClick: (FileItem) -> Unit = {},
     onAddToConversation: (FileItem) -> Unit = {},
     onOpenFileTab: (String) -> Unit = {},
 ) {
     when (selectedTab) {
+        null -> {}
         SidebarTab.Explorer -> {
             ResourcePanel(
                 openedFolderName = homeState.openedFolderName,
@@ -597,6 +665,11 @@ private fun LeftPanelContent(
                 projectDirPath = homeState.projectDirPath,
             )
         }
-        else -> {}
+        SidebarTab.Search -> {
+            SearchReplacePanel(
+                fileManager = fileManager,
+                editorState = editorState,
+            )
+        }
     }
 }

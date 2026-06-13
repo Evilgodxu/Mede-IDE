@@ -97,7 +97,7 @@ fun ModelSelector(
         DropdownMenu(
             expanded = modelMenuExpanded,
             onDismissRequest = { modelMenuExpanded = false },
-            modifier = Modifier.widthIn(min = 220.dp).heightIn(max = dropdownMaxHeight)
+            modifier = Modifier.heightIn(max = dropdownMaxHeight)
         ) {
             // 头部：当前模型状态
             DropdownMenuItem(

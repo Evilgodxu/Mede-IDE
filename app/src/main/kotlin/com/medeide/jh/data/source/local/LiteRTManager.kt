@@ -193,8 +193,9 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         val modelDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "models")
         if (!modelDir.exists()) modelDir.mkdirs()
         val fileName = resolveUriFileName(uri) ?: "model.litertlm"
+        val modelLabel = fileName.removeSuffix(".litertlm")
         val destFile = File(modelDir, fileName)
-        _state.value = EngineState(status = EngineStatus.Loading, modelPath = destFile.absolutePath, modelName = fileName, progress = 0.05f)
+        _state.value = EngineState(status = EngineStatus.Loading, modelPath = destFile.absolutePath, modelName = modelLabel, progress = 0.05f)
         try {
             withContext(Dispatchers.IO) {
                 context.contentResolver.openInputStream(uri)?.use { input ->
@@ -212,7 +213,7 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
         } catch (e: Exception) {
             Log.e("LiteRTManager", "loadModelFromUri failed", e)
             FileLogger.e("LiteRTManager", "loadModelFromUri failed: ${e.message}", e)
-            _state.value = EngineState(status = EngineStatus.Error, modelPath = destFile.absolutePath, modelName = fileName, errorMessage = e.message ?: "文件复制失败")
+            _state.value = EngineState(status = EngineStatus.Error, modelPath = destFile.absolutePath, modelName = modelLabel, errorMessage = e.message ?: "文件复制失败")
         }
     }
 
@@ -231,16 +232,17 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
     // 加载本地模型
     suspend fun loadModel(modelPath: String) {
         val file = File(modelPath)
+        val modelLabel = file.nameWithoutExtension
         if (!file.exists()) { _state.value = EngineState(status = EngineStatus.Error, modelPath = modelPath, errorMessage = "模型文件不存在: $modelPath"); return }
         if (!file.canRead()) { _state.value = EngineState(status = EngineStatus.Error, modelPath = modelPath, errorMessage = "无法读取模型文件: $modelPath"); return }
 
         if (!isValidLitertlmFile(file)) {
-            _state.value = EngineState(status = EngineStatus.Error, modelPath = modelPath, modelName = file.name,
+            _state.value = EngineState(status = EngineStatus.Error, modelPath = modelPath, modelName = modelLabel,
                 errorMessage = "模型格式不兼容，需从 HuggingFace litert-community 下载专用 .litertlm 文件")
             return
         }
 
-        _state.value = EngineState(status = EngineStatus.Loading, modelPath = modelPath, modelName = file.name, progress = 0.1f)
+        _state.value = EngineState(status = EngineStatus.Loading, modelPath = modelPath, modelName = modelLabel, progress = 0.1f)
         try {
             withContext(Dispatchers.IO) {
                 closeEngine()
@@ -265,13 +267,13 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
                 engine = newEngine
                 isInitialized = true
             }
-            _state.value = EngineState(status = EngineStatus.Ready, modelPath = modelPath, modelName = file.name, progress = 1f,
+            _state.value = EngineState(status = EngineStatus.Ready, modelPath = modelPath, modelName = modelLabel, progress = 1f,
                 contextWindow = modelParams.contextWindowTokens)
         } catch (e: Exception) {
             Log.e("LiteRTManager", "loadModel failed", e)
             FileLogger.e("LiteRTManager", "loadModel failed: ${e.message}", e)
             engine = null; isInitialized = false
-            _state.value = EngineState(status = EngineStatus.Error, modelPath = modelPath, modelName = file.name, errorMessage = e.message ?: "未知错误")
+            _state.value = EngineState(status = EngineStatus.Error, modelPath = modelPath, modelName = modelLabel, errorMessage = e.message ?: "未知错误")
         }
     }
 

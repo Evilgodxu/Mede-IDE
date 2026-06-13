@@ -3,6 +3,7 @@ package com.medeide.jh.screens.home.landscape.workspace
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,11 +18,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.FindReplace
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
@@ -33,6 +38,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -47,6 +55,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.medeide.jh.R
 import com.medeide.jh.model.TabItem
 import com.medeide.jh.model.TabType
@@ -83,6 +92,18 @@ fun MainContentArea(
     onPreviewContentChange: (String, androidx.compose.ui.text.input.TextFieldValue) -> Unit = { _, _ -> },
 
     tabContent: @Composable (String) -> Unit = {},
+    // 搜索替换相关
+    currentSearchMatches: List<com.medeide.jh.screens.home.landscape.sidebar.SearchResultItem> = emptyList(),
+    currentSearchMatchIndex: Int = -1,
+    onSearchNavUp: () -> Unit = {},
+    onSearchNavDown: () -> Unit = {},
+    onReplaceCurrent: (String) -> Unit = {},
+    isSearchToolbarVisible: Boolean = false,
+    toolbarSearchQuery: String = "",
+    toolbarReplaceText: String = "",
+    onToolbarSearchQueryChange: (String) -> Unit = {},
+    onToolbarReplaceTextChange: (String) -> Unit = {},
+    onCloseSearchToolbar: () -> Unit = {},
 ) {
     val hasTabs = tabs.isNotEmpty()
 
@@ -150,7 +171,38 @@ fun MainContentArea(
                         )
                     }
                     TabType.File -> {
-                        tabContent(activeTab.id)
+                        // 获取当前文件路径以便过滤搜索匹配
+                        val fileMatches = remember(activeTab.id, currentSearchMatches) {
+                            currentSearchMatches.filter { m ->
+                                activeTab.id.endsWith(m.filePath) || m.filePath.endsWith(activeTab.id.substringAfterLast('/'))
+                            }
+                        }
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            tabContent(activeTab.id)
+
+                            // 编辑器右上角查找替换工具栏
+                            if (isSearchToolbarVisible) {
+                                val matchCount = fileMatches.size
+                                val currentIdx = if (currentSearchMatchIndex >= 0 &&
+                                    currentSearchMatchIndex < currentSearchMatches.size &&
+                                    (activeTab.id.endsWith(currentSearchMatches[currentSearchMatchIndex].filePath) ||
+                                     currentSearchMatches[currentSearchMatchIndex].filePath.endsWith(activeTab.id.substringAfterLast('/'))))
+                                    currentSearchMatchIndex else 0
+                                EditorSearchOverlay(
+                                    matchCount = matchCount,
+                                    currentIndex = currentIdx,
+                                    searchQuery = toolbarSearchQuery,
+                                    replaceText = toolbarReplaceText,
+                                    onSearchQueryChange = onToolbarSearchQueryChange,
+                                    onReplaceTextChange = onToolbarReplaceTextChange,
+                                    onNavUp = onSearchNavUp,
+                                    onNavDown = onSearchNavDown,
+                                    onReplaceCurrent = { onReplaceCurrent(activeTab.id) },
+                                    onClose = onCloseSearchToolbar,
+                                    modifier = Modifier.align(Alignment.TopEnd),
+                                )
+                            }
+                        }
                     }
                     TabType.Image -> {
                         ImagePreview(
@@ -189,6 +241,135 @@ fun MainContentArea(
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+// 编辑器查找替换工具栏（右上角，双行）
+@Composable
+private fun EditorSearchOverlay(
+    matchCount: Int,
+    currentIndex: Int,
+    searchQuery: String,
+    replaceText: String,
+    onSearchQueryChange: (String) -> Unit,
+    onReplaceTextChange: (String) -> Unit,
+    onNavUp: () -> Unit,
+    onNavDown: () -> Unit,
+    onReplaceCurrent: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .padding(6.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
+        shadowElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            // 第一行：搜索输入 + 上箭头 + 下箭头
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    placeholder = { Text("搜索…", fontSize = 12.sp) },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    modifier = Modifier.width(140.dp).height(32.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                        cursorColor = MaterialTheme.colorScheme.primary,
+                    ),
+                )
+
+                // 匹配计数
+                Text(
+                    text = "$currentIndex/$matchCount",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 2.dp),
+                )
+
+                // 上箭头
+                IconButton(
+                    onClick = onNavUp,
+                    modifier = Modifier.size(24.dp),
+                ) {
+                    Icon(
+                        Icons.Default.KeyboardArrowUp,
+                        contentDescription = "上一个匹配",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                // 下箭头
+                IconButton(
+                    onClick = onNavDown,
+                    modifier = Modifier.size(24.dp),
+                ) {
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription = "下一个匹配",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            // 第二行：替换输入 + 替换按钮 + 关闭按钮
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                OutlinedTextField(
+                    value = replaceText,
+                    onValueChange = onReplaceTextChange,
+                    placeholder = { Text("替换为…", fontSize = 12.sp) },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    modifier = Modifier.width(140.dp).height(32.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                        cursorColor = MaterialTheme.colorScheme.primary,
+                    ),
+                )
+
+                // 替换按钮
+                IconButton(
+                    onClick = onReplaceCurrent,
+                    modifier = Modifier.size(24.dp),
+                ) {
+                    Icon(
+                        Icons.Default.FindReplace,
+                        contentDescription = "替换当前匹配",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                }
+
+                // 关闭按钮
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier.size(24.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "关闭查找替换工具栏",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -50,6 +51,12 @@ fun Sidebar(
                 contentDescription = stringResource(R.string.resource_manager_title),
                 isSelected = selectedTab == SidebarTab.Explorer,
                 onClick = { onTabClick(SidebarTab.Explorer) }
+            )
+            SidebarItem(
+                icon = Icons.Default.Search,
+                contentDescription = "搜索替换",
+                isSelected = selectedTab == SidebarTab.Search,
+                onClick = { onTabClick(SidebarTab.Search) }
             )
         }
     }

@@ -283,7 +283,9 @@ class ChatViewModel(
                 val lastPath = preferencesRepo.lastModelPath.first()
                 val backend = preferencesRepo.backendType.first()
                 val npuDir = preferencesRepo.npuLibraryDir.first()
-                if (autoLoad && !lastPath.isNullOrEmpty()) {
+                val wasCloudEnabled = preferencesRepo.cloudModelEnabled.first()
+                // 上次使用的是云端模型时跳过加载本地模型
+                if (autoLoad && !wasCloudEnabled && !lastPath.isNullOrEmpty()) {
                     val file = java.io.File(lastPath)
                     if (file.exists()) {
                         liteRTManager.backendType = backend
