@@ -62,7 +62,7 @@ class HomeViewModel(
         }
         viewModelScope.launch {
             FileOperationEvents.events.collect { event ->
-                if (event.operation in listOf("create", "overwrite", "delete", "modify")) {
+                if (event.operation in listOf("create", "overwrite", "delete", "modify", "files_changed")) {
                     refreshRootFiles()
                 }
             }
@@ -296,7 +296,7 @@ class HomeViewModel(
                 val dstFile = java.io.File(dstDir, srcFile.name)
                 if (!dstDir.exists()) dstDir.mkdirs()
                 srcFile.copyRecursively(dstFile, overwrite = true)
-                FileOperationEvents.notify(dstFile.path.removePrefix(base).trimStart('/'), "create")
+                FileOperationEvents.notify(dstFile.path.removePrefix(base).trimStart('/'), "files_changed")
                 refreshRootFiles()
             } catch (_: Exception) {}
         }
@@ -311,8 +311,7 @@ class HomeViewModel(
                 val dstFile = java.io.File(dstDir, srcFile.name)
                 if (!dstDir.exists()) dstDir.mkdirs()
                 srcFile.renameTo(dstFile)
-                FileOperationEvents.notify(srcPath, "delete")
-                FileOperationEvents.notify(dstFile.path.removePrefix(base).trimStart('/'), "create")
+                FileOperationEvents.notify(dstFile.path.removePrefix(base).trimStart('/'), "files_changed")
                 refreshRootFiles()
             } catch (_: Exception) {}
         }

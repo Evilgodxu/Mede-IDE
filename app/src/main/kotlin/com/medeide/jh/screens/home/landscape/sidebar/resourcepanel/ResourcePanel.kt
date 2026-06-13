@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.SyncAlt
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
@@ -54,14 +55,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import com.medeide.jh.R
 import com.medeide.jh.model.FileItem
+import com.medeide.jh.screens.home.ai.FileOperationEvents
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * 双列文件管理器（始终显示左右两列）
- *
- * 点击目录在右侧新列显示，支持左右滑动选中文件及范围多选。
+ * 双列文件管理器
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -118,6 +118,15 @@ fun ResourcePanel(
     var createIsDir by remember { mutableStateOf(false) }
     var compressTargetPaths by remember { mutableStateOf<List<String>?>(null) }
     var infoTarget by remember { mutableStateOf<FileItem?>(null) }
+
+    // 复制/移动覆盖确认
+    data class PendingOverwrite(
+        val srcPath: String,
+        val dstDirPath: String,
+        val fileName: String,
+        val isMove: Boolean,
+    )
+    var pendingOverwrite by remember { mutableStateOf<PendingOverwrite?>(null) }
 
     fun pushLeftHistory(pane: Pane) {
         while (leftHistory.size > leftHistoryIdx + 1) leftHistory.removeLast()
@@ -206,10 +215,9 @@ fun ResourcePanel(
     LaunchedEffect(files, openedFolderName) {
         leftPane.value = Pane("", openedFolderName ?: "", files)
         leftHistory.clear()
-        rightHistory.clear()
         leftHistory.add(leftPane.value!!)
         leftHistoryIdx = 0
-        // 始终初始化右列为左列当前目录的内容
+        // 右列不跟随左列切换工作目录，保持独立浏览状态
         if (rightPane.value == null) {
             onListChildren("") { children ->
                 rightPane.value = Pane("", openedFolderName ?: "", children)
@@ -219,7 +227,26 @@ fun ResourcePanel(
     }
 
     LaunchedEffect(files) {
+        // 文件列表变化时刷新左列根目录（如有权限）
         leftPane.value = leftPane.value?.copy(files = files)
+    }
+
+    // 文件操作事件完成后即时刷新双栏当前目录（操作是异步的，事件在完成后触发）
+    LaunchedEffect(Unit) {
+        FileOperationEvents.events.collect {
+            val lp = leftPane.value
+            if (lp != null) {
+                onListChildren(lp.path) { children ->
+                    leftPane.value = lp.copy(files = children)
+                }
+            }
+            val rp = rightPane.value
+            if (rp != null) {
+                onListChildren(rp.path) { children ->
+                    rightPane.value = rp.copy(files = children)
+                }
+            }
+        }
     }
 
     // 切换选中状态
@@ -411,13 +438,27 @@ fun ResourcePanel(
                             },
                             onAddToConversation = onAddToConversation,
                             onRename = { renameTarget = it },
-                            onDelete = onDelete,
+                            onDelete = { path -> onDelete(path) },
                             onCreateFile = { createTarget = it; createIsDir = false },
                             onCreateDirectory = { createTarget = it; createIsDir = true },
                             onCopyToLeft = null,
-                            onCopyToRight = rightPane.value?.let { rp -> { path -> onCopy(path, rp.path) } },
+                            onCopyToRight = rightPane.value?.let { rp -> { path ->
+                                val name = path.substringAfterLast('/')
+                                if (rp.files.any { it.name == name }) {
+                                    pendingOverwrite = PendingOverwrite(path, rp.path, name, false)
+                                } else {
+                                    onCopy(path, rp.path)
+                                }
+                            } },
                             onMoveToLeft = null,
-                            onMoveToRight = rightPane.value?.let { rp -> { path -> onMove(path, rp.path) } },
+                            onMoveToRight = rightPane.value?.let { rp -> { path ->
+                                val name = path.substringAfterLast('/')
+                                if (rp.files.any { it.name == name }) {
+                                    pendingOverwrite = PendingOverwrite(path, rp.path, name, true)
+                                } else {
+                                    onMove(path, rp.path)
+                                }
+                            } },
                             onExtractToLeft = null,
                             onExtractToRight = if (lp.archivePath != null && rightPane.value != null) {
                                 { paths -> extractFiles(lp.archivePath, paths, rightPane.value!!.path) }
@@ -467,12 +508,26 @@ fun ResourcePanel(
                                 },
                                 onAddToConversation = onAddToConversation,
                                 onRename = { renameTarget = it },
-                                onDelete = onDelete,
+                                onDelete = { path -> onDelete(path) },
                                 onCreateFile = { createTarget = it; createIsDir = false },
                                 onCreateDirectory = { createTarget = it; createIsDir = true },
-                                onCopyToLeft = { path -> onCopy(path, lp.path) },
-                                onCopyToRight = null,
-                                onMoveToLeft = { path -> onMove(path, lp.path) },
+                                onCopyToLeft = { path ->
+                                     val name = path.substringAfterLast('/')
+                                     if (lp.files.any { it.name == name }) {
+                                         pendingOverwrite = PendingOverwrite(path, lp.path, name, false)
+                                     } else {
+                                         onCopy(path, lp.path)
+                                     }
+                                 },
+                                 onCopyToRight = null,
+                                 onMoveToLeft = { path ->
+                                     val name = path.substringAfterLast('/')
+                                     if (lp.files.any { it.name == name }) {
+                                         pendingOverwrite = PendingOverwrite(path, lp.path, name, true)
+                                     } else {
+                                         onMove(path, lp.path)
+                                     }
+                                 },
                                 onMoveToRight = null,
                                 onExtractToLeft = if (rp.archivePath != null) {
                                     { paths -> extractFiles(rp.archivePath, paths, lp.path) }
@@ -480,7 +535,7 @@ fun ResourcePanel(
                                 onExtractToRight = null,
                                 onViewInfo = { infoTarget = it },
                                 onCompress = { paths -> compressTargetPaths = paths },
-                                onOpenAsProject = onOpenAsProject,
+                                onOpenAsProject = null,
                                 projectDirPath = projectDirPath,
                                 modifier = Modifier.weight(1f),
                             )
@@ -765,6 +820,25 @@ fun ResourcePanel(
 
     infoTarget?.let { file ->
         FileInfoDialog(file = file, onDismiss = { infoTarget = null })
+    }
+
+    // 覆盖确认对话框
+    pendingOverwrite?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { pendingOverwrite = null },
+            title = { Text("文件已存在") },
+            text = { Text("目标目录中已存在文件「${pending.fileName}」，是否覆盖？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (pending.isMove) onMove(pending.srcPath, pending.dstDirPath)
+                    else onCopy(pending.srcPath, pending.dstDirPath)
+                    pendingOverwrite = null
+                }) { Text("覆盖") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingOverwrite = null }) { Text("取消") }
+            },
+        )
     }
 }
 
