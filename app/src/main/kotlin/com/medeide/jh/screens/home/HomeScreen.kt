@@ -49,7 +49,6 @@ import com.medeide.jh.screens.home.landscape.collab.chat.AIChatPanel
 import com.medeide.jh.screens.home.landscape.workspace.MainContentArea
 import com.medeide.jh.screens.home.landscape.topbar.MainTopBar
 import com.medeide.jh.screens.home.landscape.workspace.preview.PreviewPanel
-import com.medeide.jh.screens.home.landscape.topbar.search.SearchPanel
 import com.medeide.jh.screens.home.landscape.sidebar.Sidebar
 import com.medeide.jh.screens.home.landscape.sidebar.SidebarTab
 import com.medeide.jh.screens.home.ThreeColumnLayout
@@ -194,26 +193,6 @@ fun HomeScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let { chatViewModel.loadModelFromUri(it) } }
 
-    val fileOpenLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let { u ->
-            val path = u.toString()
-            val fileName = com.medeide.jh.model.displayNameFromPath(path)
-            when {
-                FileTypeUtil.isImageFile(fileName) ->
-                    editorState.openTab(TabItem(path, fileName, TabType.Image))
-                FileTypeUtil.isAudioFile(fileName) ->
-                    editorState.openTab(TabItem(path, fileName, TabType.Audio))
-                FileTypeUtil.isVideoFile(fileName) ->
-                    editorState.openTab(TabItem(path, fileName, TabType.Video))
-                FileTypeUtil.isArchiveFile(fileName) ->
-                    editorState.openTab(TabItem(path, fileName, TabType.Archive))
-                else -> editorState.openFileTab(path)
-            }
-        }
-    }
-
     val saveAsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("*/*")
     ) { uri: Uri? ->
@@ -260,22 +239,10 @@ fun HomeScreen(
     // 检查是否已经在直接访问模式下打开了存储
     val isStorageActive = homeState.openedFolderName != null
 
-    val closeFolder: () -> Unit = {
-        viewModel.openDirectStorage()
-        chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
-        editorState.closeAllTabs()
-        editorState.editorContent.clear()
-        isSettingsOpen = false
-        selectedTab = SidebarTab.Explorer
-    }
-
     var showNewFileDialog by remember { mutableStateOf(false) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var newFileName by remember { mutableStateOf("") }
     var newFolderName by remember { mutableStateOf("") }
-    // 最近文件/目录数据
-    val recentFiles by viewModel.recentFiles.collectAsState()
-    val recentFolders by viewModel.recentFolders.collectAsState()
     // 工具栏音乐播放
     var scannedAudioTracks by remember { mutableStateOf<List<com.medeide.jh.screens.home.landscape.topbar.audio.AudioTrack>>(emptyList()) }
     var audioScanRequested by remember { mutableStateOf(false) }
@@ -360,27 +327,6 @@ fun HomeScreen(
                 onLoadModel = { chatViewModel.loadModel(it) },
                 onBrowseModelFile = { filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
                 onSwitchCloudProfile = { chatViewModel.switchCloudProfile(it) },
-                onCloseFolder = closeFolder,
-                onOpenFile = { fileOpenLauncher.launch(arrayOf("*/*")) },
-                recentFiles = recentFiles,
-                recentFolders = recentFolders,
-                onOpenRecentFile = { path ->
-                    val fileName = path.substringAfterLast('/')
-                    when {
-                        FileTypeUtil.isImageFile(fileName) ->
-                            editorState.openTab(TabItem(path, fileName, TabType.Image))
-                        FileTypeUtil.isAudioFile(fileName) ->
-                            editorState.openTab(TabItem(path, fileName, TabType.Audio))
-                        FileTypeUtil.isVideoFile(fileName) ->
-                            editorState.openTab(TabItem(path, fileName, TabType.Video))
-                        FileTypeUtil.isArchiveFile(fileName) ->
-                            editorState.openTab(TabItem(path, fileName, TabType.Archive))
-                        else -> editorState.openFileTab(path, fileName)
-                    }
-                },
-                onOpenRecentFolder = { path -> viewModel.openAsProjectDirectory(path) },
-                onSaveAll = { editorState.tabs.filter { it.type == TabType.File }.forEach { editorState.saveFile(it.id) } },
-                projectDirPath = homeState.projectDirPath,
                 isTerminalTabOpen = editorState.isTerminalTabOpen,
                 onToggleTerminal = {
                     if (editorState.isTerminalTabOpen) editorState.closeTerminalTab()
@@ -652,19 +598,6 @@ private fun LeftPanelContent(
                 projectDirPath = homeState.projectDirPath,
             )
         }
-        SidebarTab.Search -> {
-            SearchPanel(
-                onSearch = { pattern, ext, ignoreCase ->
-                    viewModel.searchInFiles(pattern, ext, ignoreCase)
-                },
-                onReplaceAll = { pattern, replacement, ext, ignoreCase ->
-                    viewModel.replaceInFiles(pattern, replacement, ext, ignoreCase)
-                },
-                onOpenFileAtLine = { path, line ->
-                    editorState.openFileAtLine(path, line)
-                },
-            )
-        }
         SidebarTab.Preview -> {
             PreviewPanel(
                 projectDirPath = homeState.projectDirPath,
@@ -673,6 +606,6 @@ private fun LeftPanelContent(
                 },
             )
         }
-        null -> {}
+        else -> {}
     }
 }

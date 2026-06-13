@@ -1,6 +1,5 @@
 package com.medeide.jh.screens.home.landscape.sidebar
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,7 +10,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -52,12 +50,6 @@ fun Sidebar(
                 contentDescription = stringResource(R.string.resource_manager_title),
                 isSelected = selectedTab == SidebarTab.Explorer,
                 onClick = { onTabClick(SidebarTab.Explorer) }
-            )
-            SidebarItem(
-                icon = Icons.Default.Search,
-                contentDescription = "搜索",
-                isSelected = selectedTab == SidebarTab.Search,
-                onClick = { onTabClick(SidebarTab.Search) }
             )
             SidebarItem(
                 icon = Icons.Default.Language,

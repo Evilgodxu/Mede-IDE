@@ -1,6 +1,5 @@
 package com.medeide.jh.screens.home.landscape.topbar
 
-import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,21 +7,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -33,11 +29,9 @@ import com.medeide.jh.R
 import com.medeide.jh.model.chat.CloudModelProfile
 import com.medeide.jh.model.chat.EngineStatus
 import com.medeide.jh.model.chat.ModelInfo
-import com.medeide.jh.data.repository.RecentEntry
 import com.medeide.jh.screens.home.landscape.topbar.audio.AudioControl
 import com.medeide.jh.screens.home.landscape.topbar.audio.AudioPlaybackState
 import com.medeide.jh.screens.home.landscape.topbar.audio.AudioTrack
-import com.medeide.jh.screens.home.landscape.topbar.search.SearchBar
 
 // 主窗口顶部工具栏组件
 @OptIn(ExperimentalMaterial3Api::class)
@@ -54,14 +48,6 @@ fun MainTopBar(
     onLoadModel: (String) -> Unit = {},
     onBrowseModelFile: () -> Unit = {},
     onSwitchCloudProfile: (String) -> Unit = {},
-    onCloseFolder: () -> Unit = {},
-    onOpenFile: () -> Unit = {},
-    recentFiles: List<RecentEntry> = emptyList(),
-    recentFolders: List<RecentEntry> = emptyList(),
-    onOpenRecentFile: (String) -> Unit = {},
-    onOpenRecentFolder: (String) -> Unit = {},
-    onSaveAll: () -> Unit = {},
-    projectDirPath: String = "",
     // 终端
     isTerminalTabOpen: Boolean = false,
     onToggleTerminal: () -> Unit = {},
@@ -78,8 +64,6 @@ fun MainTopBar(
         WindowInsets(0, 0, 0, 0)
     }
 
-    var fileMenuExpanded by remember { mutableStateOf(false) }
-    var editMenuExpanded by remember { mutableStateOf(false) }
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val dropdownMaxHeight = (screenHeightDp * 0.75f).dp
 
@@ -90,50 +74,13 @@ fun MainTopBar(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 文件
-                    Box {
-                        Text(
-                            text = stringResource(R.string.menu_file),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier
-                                .clickable { fileMenuExpanded = true }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-
-                        DropdownMenu(
-                            expanded = fileMenuExpanded,
-                            onDismissRequest = { fileMenuExpanded = false },
-                            modifier = Modifier.heightIn(max = dropdownMaxHeight)
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.file_menu_close_folder)) },
-                                onClick = {
-                                    fileMenuExpanded = false
-                                    try { onCloseFolder() }
-                                    catch (e: Exception) { Log.e("MainTopBar", "close folder failed", e) }
-                                }
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.file_menu_open_file)) },
-                                onClick = {
-                                    fileMenuExpanded = false
-                                    try { onOpenFile() }
-                                    catch (e: Exception) { Log.e("MainTopBar", "open file failed", e) }
-                                }
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.file_menu_save_all)) },
-                                onClick = {
-                                    fileMenuExpanded = false
-                                    try { onSaveAll() }
-                                    catch (e: Exception) { Log.e("MainTopBar", "save all failed", e) }
-                                }
-                            )
-                        }
-                    }
+                    // 文件（保留按钮，移除下拉菜单）
+                    Text(
+                        text = stringResource(R.string.menu_file),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
 
                     Text(
                         text = "丨",
@@ -141,41 +88,13 @@ fun MainTopBar(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
 
-                    // 编辑
-                    Box {
-                        Text(
-                            text = stringResource(R.string.menu_edit),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier
-                                .clickable { editMenuExpanded = true }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-
-                        DropdownMenu(
-                            expanded = editMenuExpanded,
-                            onDismissRequest = { editMenuExpanded = false },
-                            modifier = Modifier.heightIn(max = dropdownMaxHeight)
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.edit_menu_undo)) },
-                                onClick = { editMenuExpanded = false }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.edit_menu_redo)) },
-                                onClick = { editMenuExpanded = false }
-                            )
-                            HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.edit_menu_find_in_files)) },
-                                onClick = { editMenuExpanded = false }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.edit_menu_replace_in_files)) },
-                                onClick = { editMenuExpanded = false }
-                            )
-                        }
-                    }
+                    // 编辑（保留按钮，移除下拉菜单）
+                    Text(
+                        text = stringResource(R.string.menu_edit),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
 
                     Text(
                         text = "丨",
@@ -201,14 +120,12 @@ fun MainTopBar(
                         color = MaterialTheme.colorScheme.outlineVariant
                     )
 
-                    // 搜索
-                    SearchBar(
-                        recentFiles = recentFiles,
-                        recentFolders = recentFolders,
-                        onOpenRecentFile = onOpenRecentFile,
-                        onOpenRecentFolder = onOpenRecentFolder,
-                        dropdownMaxHeight = dropdownMaxHeight,
-                        projectDirPath = projectDirPath,
+                    // 搜索（保留按钮图标，移除搜索功能）
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "搜索",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             },
