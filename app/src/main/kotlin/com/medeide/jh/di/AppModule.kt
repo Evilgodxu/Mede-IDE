@@ -1,10 +1,10 @@
 package com.medeide.jh.di
 
-import com.medeide.jh.screens.home.ai.AIToolSet
-import com.medeide.jh.screens.home.ai.InputOptimizer
-import com.medeide.jh.screens.home.ai.ToolCallHandler
-import com.medeide.jh.screens.home.memory.ContextManager
-import com.medeide.jh.screens.home.memory.ConversationMemory
+import com.medeide.jh.screens.home.landscape.collab.ai.AIToolSet
+import com.medeide.jh.screens.home.landscape.collab.ai.InputOptimizer
+import com.medeide.jh.screens.home.landscape.collab.ai.ToolCallHandler
+import com.medeide.jh.screens.home.landscape.collab.memory.ContextManager
+import com.medeide.jh.screens.home.landscape.collab.memory.ConversationMemory
 import com.medeide.jh.data.storage.FileManager
 import com.medeide.jh.data.utils.ImageProcessor
 import com.medeide.jh.data.repository.ConversationRepository
@@ -12,7 +12,7 @@ import com.medeide.jh.data.repository.UsageAnalyticsRepository
 import com.medeide.jh.data.repository.UserPreferencesRepository
 import com.medeide.jh.data.source.local.LiteRTManager
 import com.medeide.jh.data.source.remote.CloudLLMClient
-import com.medeide.jh.screens.home.ChatViewModel
+import com.medeide.jh.screens.home.landscape.collab.viewmodel.ChatViewModel
 import com.medeide.jh.screens.home.HomeViewModel
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel

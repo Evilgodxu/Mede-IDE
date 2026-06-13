@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.settings
+package com.medeide.jh.screens.home.landscape.collab.settings
 
 import android.util.Log
 import androidx.compose.foundation.clickable
@@ -57,8 +57,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.medeide.jh.data.utils.FileLogger
 import com.medeide.jh.model.chat.EngineStatus
-import com.medeide.jh.screens.home.ChatUiState
-import com.medeide.jh.screens.home.ChatViewModel
+import com.medeide.jh.screens.home.landscape.collab.viewmodel.ChatUiState
+import com.medeide.jh.screens.home.landscape.collab.viewmodel.ChatViewModel
+import com.medeide.jh.screens.home.settings.CategoryPlaceholder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch

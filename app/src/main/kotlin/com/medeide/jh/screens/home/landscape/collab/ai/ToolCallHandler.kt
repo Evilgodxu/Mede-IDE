@@ -1,7 +1,7 @@
-package com.medeide.jh.screens.home.ai
+package com.medeide.jh.screens.home.landscape.collab.ai
 
 import android.util.Log
-import com.medeide.jh.screens.home.config.ChatConfig
+import com.medeide.jh.screens.home.landscape.collab.config.ChatConfig
 import com.medeide.jh.data.storage.FileManager
 import com.medeide.jh.data.utils.FileLogger
 import kotlinx.coroutines.Dispatchers

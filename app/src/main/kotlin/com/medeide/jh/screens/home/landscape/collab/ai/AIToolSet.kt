@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.ai
+package com.medeide.jh.screens.home.landscape.collab.ai
 
 import android.content.Context
 import android.net.Uri
@@ -7,7 +7,8 @@ import com.google.ai.edge.litertlm.Tool
 import com.google.ai.edge.litertlm.ToolParam
 import com.google.ai.edge.litertlm.ToolSet
 import com.medeide.jh.screens.home.landscape.workspace.editor.CodeEditTool
-import com.medeide.jh.screens.home.memory.ConversationMemory
+import com.medeide.jh.screens.home.landscape.collab.memory.ConversationMemory
+import com.medeide.jh.screens.home.ai.FileOperationEvents
 import com.medeide.jh.data.storage.FileManager
 import com.medeide.jh.data.utils.FileLogger
 import java.io.File

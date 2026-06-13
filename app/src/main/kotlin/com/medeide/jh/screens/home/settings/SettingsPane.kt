@@ -32,7 +32,10 @@ import androidx.compose.ui.unit.dp
 import com.medeide.jh.R
 import com.medeide.jh.model.McpServer
 import com.medeide.jh.model.Rule
-import com.medeide.jh.screens.home.ChatViewModel
+import com.medeide.jh.screens.home.landscape.collab.viewmodel.ChatViewModel
+import com.medeide.jh.screens.home.landscape.collab.settings.CloudModelSettingsContent
+import com.medeide.jh.screens.home.landscape.collab.settings.LocalModelSettingsContent
+import com.medeide.jh.screens.home.landscape.collab.settings.McpSettingsContent
 import com.medeide.jh.screens.home.HomeUiState
 import com.medeide.jh.screens.home.HomeViewModel
 import org.koin.androidx.compose.koinViewModel

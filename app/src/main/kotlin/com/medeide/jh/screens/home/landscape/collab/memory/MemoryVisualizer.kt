@@ -1,6 +1,6 @@
-package com.medeide.jh.screens.home.memory
+package com.medeide.jh.screens.home.landscape.collab.memory
 
-import com.medeide.jh.screens.home.config.ChatConfig
+import com.medeide.jh.screens.home.landscape.collab.config.ChatConfig
 import com.medeide.jh.model.chat.ChatMessage
 import com.medeide.jh.model.chat.ChatRole
 

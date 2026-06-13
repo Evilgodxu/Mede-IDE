@@ -37,7 +37,7 @@ class FileManager(private val context: Context) {
     var storageRootPath: String = ""
         private set
 
-    /** 当前项目目录路径（资源管理器显示此目录内容，默认=存储根） */
+    /** 当前项目目录路径（双列文件管理器显示此目录内容，默认=存储根） */
     var projectDirPath: String = ""
         private set
 
@@ -81,7 +81,7 @@ class FileManager(private val context: Context) {
         rootDocFile = null
     }
 
-    /** 设置项目子目录（资源管理器将显示此目录内容） */
+    /** 设置项目子目录（双列文件管理器将显示此目录内容） */
     fun setProjectDir(absolutePath: String): Boolean {
         val dir = File(absolutePath)
         if (!dir.isDirectory) return false

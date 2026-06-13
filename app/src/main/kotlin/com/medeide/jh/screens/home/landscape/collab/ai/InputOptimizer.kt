@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.ai
+package com.medeide.jh.screens.home.landscape.collab.ai
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code

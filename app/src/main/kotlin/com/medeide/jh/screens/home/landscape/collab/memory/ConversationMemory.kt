@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.memory
+package com.medeide.jh.screens.home.landscape.collab.memory
 
 import android.content.Context
 import android.util.Log
@@ -61,7 +61,9 @@ class ConversationMemory(private val context: Context) {
         save()
     }
 
-    fun search(query: String, topK: Int = 5, conversationId: String? = null): List<Entry> {
+    internal fun search(
+        query: String, topK: Int = 5, conversationId: String? = null,
+    ): List<Entry> {
         if (query.isBlank()) return emptyList()
 
         val queryLower = query.lowercase()
@@ -107,7 +109,7 @@ class ConversationMemory(private val context: Context) {
         if (result.isEmpty()) return "暂无对话历史。"
 
         return buildString {
-            appendLine("最近 ${result.size} 条对话记忆:")
+            appendLine("最近 ${result.size} 条对话记忆")
             result.forEachIndexed { i, e ->
                 appendLine("--- ${e.role} ---")
                 appendLine(e.content)

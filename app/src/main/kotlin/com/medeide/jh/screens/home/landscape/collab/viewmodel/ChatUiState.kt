@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home
+package com.medeide.jh.screens.home.landscape.collab.viewmodel
 
 import android.net.Uri
 import com.medeide.jh.model.chat.AttachedFile

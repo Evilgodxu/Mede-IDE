@@ -42,13 +42,12 @@ import com.medeide.jh.R
 import com.medeide.jh.model.FileItem
 import com.medeide.jh.model.TabItem
 import com.medeide.jh.model.TabType
-import com.medeide.jh.screens.home.ChatViewModel
+import com.medeide.jh.screens.home.landscape.collab.viewmodel.ChatViewModel
 import com.medeide.jh.screens.home.ai.FileOperationEvents
 import com.medeide.jh.data.storage.FileManager
-import com.medeide.jh.screens.home.landscape.collab.chat.AIChatPanel
+import com.medeide.jh.screens.home.landscape.collab.chat.CollabPanel
 import com.medeide.jh.screens.home.landscape.workspace.MainContentArea
 import com.medeide.jh.screens.home.landscape.topbar.MainTopBar
-import com.medeide.jh.screens.home.landscape.workspace.preview.PreviewPanel
 import com.medeide.jh.screens.home.landscape.sidebar.Sidebar
 import com.medeide.jh.screens.home.landscape.sidebar.SidebarTab
 import com.medeide.jh.screens.home.ThreeColumnLayout
@@ -345,13 +344,13 @@ fun HomeScreen(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { innerPadding ->
         ThreeColumnLayout(
-            sidebar = {
+            sideIconBar = {
                 Sidebar(
                     selectedTab = selectedTab,
                     onTabClick = { tab -> selectedTab = if (selectedTab == tab) null else tab },
                 )
             },
-            leftPanel = {
+            sidePanel = {
                 LeftPanelContent(
                     selectedTab = selectedTab,
                     homeState = homeState,
@@ -368,6 +367,12 @@ fun HomeScreen(
                             else -> fileItem.uri.toString()
                         }
                         viewModel.recordRecentFile(filePath, fileItem.name)
+                        // Web 文件在工作区以编辑+预览模式打开
+                        val webExt = fileItem.name.substringAfterLast('.', "").lowercase()
+                        if (webExt in setOf("html", "htm", "xhtml")) {
+                            editorState.openPreviewTab(filePath, fileItem.name)
+                            return@LeftPanelContent
+                        }
                         when (FileTypeUtil.openMode(fileItem.name, fileItem.size)) {
                             FileOpenMode.IMAGE -> {
                                 val id = if (fileItem.filePath.isNotEmpty()) fileItem.filePath else fileItem.uri.toString()
@@ -412,9 +417,9 @@ fun HomeScreen(
                     onOpenFileTab = { editorState.openFileTab(it) },
                 )
             },
-            isLeftPanelVisible = selectedTab != null,
-            isLeftPanelExpanded = true,
-            centerContent = {
+            isSidePanelVisible = selectedTab != null,
+            isSidePanelExpanded = true,
+            workspaceContent = {
                 MainContentArea(
                     chatViewModel = chatViewModel,
                     audioPlaybackState = audioPlaybackState,
@@ -492,8 +497,8 @@ fun HomeScreen(
                     },
                 )
             },
-            rightPanel = {
-                AIChatPanel(
+            collabPanel = {
+                CollabPanel(
                     onSettingsClick = {
                         isSettingsOpen = true
                         editorState.openSettingsTab(settingsTabTitle)
@@ -596,14 +601,6 @@ private fun LeftPanelContent(
                     viewModel.openAsProjectDirectory(filePath)
                 },
                 projectDirPath = homeState.projectDirPath,
-            )
-        }
-        SidebarTab.Preview -> {
-            PreviewPanel(
-                projectDirPath = homeState.projectDirPath,
-                onPreviewFile = { path ->
-                    editorState.openPreviewTab(path)
-                },
             )
         }
         else -> {}

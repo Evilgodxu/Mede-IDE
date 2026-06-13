@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.landscape.collab.chat
+package com.medeide.jh.screens.home.landscape.collab.chat.utils
 
 import com.medeide.jh.model.chat.ChatMessage
 import com.medeide.jh.model.chat.ChatRole

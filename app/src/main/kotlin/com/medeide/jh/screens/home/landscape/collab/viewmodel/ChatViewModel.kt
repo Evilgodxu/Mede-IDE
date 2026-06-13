@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home
+package com.medeide.jh.screens.home.landscape.collab.viewmodel
 
 import android.app.Application
 import android.net.Uri
@@ -12,17 +12,16 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.tool
-import com.medeide.jh.screens.home.ai.AIToolSet
-import com.medeide.jh.screens.home.ai.FileOperationEvents
-import com.medeide.jh.screens.home.ai.ToolCallHandler
-import com.medeide.jh.screens.home.ai.ToolExecutionCallback
+import com.medeide.jh.screens.home.landscape.collab.ai.AIToolSet
+import com.medeide.jh.screens.home.landscape.collab.ai.ToolCallHandler
+import com.medeide.jh.screens.home.landscape.collab.ai.ToolExecutionCallback
 import com.medeide.jh.data.analytics.LlmCallRecord
 import com.medeide.jh.data.analytics.ToolCallRecord
 import com.medeide.jh.data.analytics.UsageStats
-import com.medeide.jh.screens.home.config.ChatConfig
-import com.medeide.jh.screens.home.memory.ChatMessageAdapter
-import com.medeide.jh.screens.home.memory.ContextManager
-import com.medeide.jh.screens.home.memory.ConversationMemory
+import com.medeide.jh.screens.home.landscape.collab.config.ChatConfig
+import com.medeide.jh.screens.home.landscape.collab.memory.ChatMessageAdapter
+import com.medeide.jh.screens.home.landscape.collab.memory.ContextManager
+import com.medeide.jh.screens.home.landscape.collab.memory.ConversationMemory
 import com.medeide.jh.data.storage.FileManager
 import com.medeide.jh.data.utils.FileLogger
 import com.medeide.jh.data.utils.ImageProcessor
@@ -44,7 +43,7 @@ import com.medeide.jh.model.chat.DisplayItem
 import com.medeide.jh.model.chat.EngineStatus
 import com.medeide.jh.model.chat.ModelParams
 import com.medeide.jh.model.chat.BackendType
-import com.medeide.jh.screens.home.landscape.collab.chat.toDisplayItems
+import com.medeide.jh.screens.home.landscape.collab.chat.utils.toDisplayItems
 import com.medeide.jh.screens.home.logic.utils.FileTypeUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -79,7 +78,7 @@ class ChatViewModel(
     private val toolCallHandler: ToolCallHandler,
     private val contextManager: ContextManager,
     private val imageProcessor: ImageProcessor,
-    private val inputOptimizer: com.medeide.jh.screens.home.ai.InputOptimizer,
+    private val inputOptimizer: com.medeide.jh.screens.home.landscape.collab.ai.InputOptimizer,
 ) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(ChatUiState())
@@ -162,14 +161,14 @@ class ChatViewModel(
     /** 构建上下文仪表板数据（在 Composable 中调用） */
     fun buildDashboardData(): DashboardData {
         val s = _state.value
-        val snapshot = com.medeide.jh.screens.home.memory.VisualizerEngine.buildSnapshot(
+        val snapshot = com.medeide.jh.screens.home.landscape.collab.memory.VisualizerEngine.buildSnapshot(
             messages = s.messages,
             maxTokens = s.contextMaxTokens,
             isCompressed = s.isContextCompressed,
             compressedTokens = s.contextCompressedTokens,
             compressedCount = s.contextCompressedCount,
         )
-        val breakdown = com.medeide.jh.screens.home.memory.VisualizerEngine.buildTokenBreakdown(
+        val breakdown = com.medeide.jh.screens.home.landscape.collab.memory.VisualizerEngine.buildTokenBreakdown(
             messages = s.messages,
             sysPromptTokens = contextManager.estimateSystemPromptTokens(contextManager.getSysPromptCache()),
         )
@@ -177,8 +176,8 @@ class ChatViewModel(
     }
 
     data class DashboardData(
-        val snapshot: com.medeide.jh.screens.home.memory.ContextSnapshot,
-        val breakdown: com.medeide.jh.screens.home.memory.TokenBreakdown,
+        val snapshot: com.medeide.jh.screens.home.landscape.collab.memory.ContextSnapshot,
+        val breakdown: com.medeide.jh.screens.home.landscape.collab.memory.TokenBreakdown,
         val usageStats: UsageStats = UsageStats(),
     )
 
@@ -563,10 +562,10 @@ class ChatViewModel(
 
     // ========== 输入优化（独立于推理工作流） ==========
 
-    private var _optimizeMode = com.medeide.jh.screens.home.ai.InputOptimizer.Mode.CODE
-    val optimizeMode: com.medeide.jh.screens.home.ai.InputOptimizer.Mode get() = _optimizeMode
+    private var _optimizeMode = com.medeide.jh.screens.home.landscape.collab.ai.InputOptimizer.Mode.CODE
+    val optimizeMode: com.medeide.jh.screens.home.landscape.collab.ai.InputOptimizer.Mode get() = _optimizeMode
 
-    fun setOptimizeMode(mode: com.medeide.jh.screens.home.ai.InputOptimizer.Mode) {
+    fun setOptimizeMode(mode: com.medeide.jh.screens.home.landscape.collab.ai.InputOptimizer.Mode) {
         _optimizeMode = mode
     }
 

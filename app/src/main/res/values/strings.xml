@@ -1,8 +1,8 @@
 <resources>
     <string name="app_name">Mede IDE</string>
 
-    <!-- 资源管理器 -->
-    <string name="resource_manager_title">资源管理器</string>
+    <!-- 双列文件管理器 -->
+    <string name="resource_manager_title">双列文件管理器</string>
     <string name="no_folder_opened">尚未打开文件夹</string>
     <string name="add_to_conversation">添加到对话</string>
     

@@ -59,7 +59,7 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 资源管理器面板 - 双列文件管理器（始终显示左右两列）
+ * 双列文件管理器（始终显示左右两列）
  *
  * 点击目录在右侧新列显示，支持左右滑动选中文件及范围多选。
  */
@@ -316,7 +316,7 @@ fun ResourcePanel(
     val context = LocalContext.current
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 资源管理器顶部工具栏（面包屑 + 选择计数）
+        // 双列文件管理器顶部工具栏（面包屑 + 选择计数）
         if (openedFolderName != null) {
             val activePane = if (lastInteractedPane == 0) leftPane.value else rightPane.value
             Row(

@@ -1,5 +1,6 @@
 package com.medeide.jh.screens.home.landscape.sidebar
 
+// 侧栏区 - 图标导航组件
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,7 +10,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.medeide.jh.R
 
 enum class SidebarTab {
-    Explorer, Search, Preview
+    Explorer, Search
 }
 
 @Composable
@@ -51,14 +51,6 @@ fun Sidebar(
                 isSelected = selectedTab == SidebarTab.Explorer,
                 onClick = { onTabClick(SidebarTab.Explorer) }
             )
-            SidebarItem(
-                icon = Icons.Default.Language,
-                contentDescription = "Web 预览",
-                isSelected = selectedTab == SidebarTab.Preview,
-                onClick = { onTabClick(SidebarTab.Preview) }
-            )
-
-
         }
     }
 

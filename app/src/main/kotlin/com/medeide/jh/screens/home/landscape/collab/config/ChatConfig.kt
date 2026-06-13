@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.config
+package com.medeide.jh.screens.home.landscape.collab.config
 
 /** ChatViewModel 及相关模块的共享常量配置 */
 object ChatConfig {

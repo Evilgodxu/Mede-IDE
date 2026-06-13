@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.landscape.collab.chat
+package com.medeide.jh.screens.home.landscape.collab.chat.inputbar.toolbar
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.medeide.jh.data.analytics.ToolUsageStats
 import com.medeide.jh.data.analytics.UsageStats
-import com.medeide.jh.screens.home.memory.*
+import com.medeide.jh.screens.home.landscape.collab.memory.*
 
 @Composable
 fun ContextDashboard(

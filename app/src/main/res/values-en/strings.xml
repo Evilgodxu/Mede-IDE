@@ -1,8 +1,8 @@
 <resources>
     <string name="app_name">Mede IDE</string>
 
-    <!-- Explorer -->
-    <string name="resource_manager_title">Explorer</string>
+    <!-- Dual Pane File Manager -->
+    <string name="resource_manager_title">Dual Pane File Manager</string>
     <string name="no_folder_opened">No folder opened</string>
     <string name="add_to_conversation">Add to Conversation</string>
 

@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.settings
+package com.medeide.jh.screens.home.landscape.collab.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -6,29 +6,42 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -50,13 +63,14 @@ import com.medeide.jh.model.chat.BackendType
 import com.medeide.jh.model.chat.DownloadStatus
 import com.medeide.jh.model.chat.EngineStatus
 import com.medeide.jh.model.chat.ModelParams
-import com.medeide.jh.screens.home.ChatViewModel
+import com.medeide.jh.screens.home.landscape.collab.viewmodel.ChatViewModel
+import com.medeide.jh.screens.home.settings.CategoryPlaceholder
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-// 本地模型设置内容
+// 模型设置内容 - 本地模型和云端模型配置
 @Composable
-fun LocalModelSettingsContent(chatViewModel: ChatViewModel?) {
+fun ModelSettingsContent(chatViewModel: ChatViewModel?) {
     if (chatViewModel == null) { CategoryPlaceholder("模型管理不可用"); return }
     val chatState by chatViewModel.state.collectAsState()
     val context = LocalContext.current
@@ -185,6 +199,7 @@ fun LocalModelSettingsContent(chatViewModel: ChatViewModel?) {
                         isApplyingParams = true
                         val params = ModelParams(topK = topK, topP = topP.toDouble(), temperature = temperature.toDouble(), seed = seed, contextWindowTokens = ctxTokens, enableSpeculativeDecoding = mtpEnabled, backendType = backendType)
                         chatViewModel.setModelParams(params)
+                        // 防抖：1s 后可再次点击，同时监听 engineStatus 自动恢复
                         scope.launch { delay(1000); isApplyingParams = false }
                     }, modifier = Modifier.fillMaxWidth(), enabled = !isModelLoading) {
                         if (isModelLoading) {
@@ -223,6 +238,7 @@ fun LocalModelSettingsContent(chatViewModel: ChatViewModel?) {
         Text("推荐下载模型", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
 
         LiteRTManager.RECOMMENDED_MODELS.forEach { model ->
+            // 已下载/检测到的模型在已检测列表显示，隐藏下载卡
             val isDetected = chatState.availableModels.any { it.path.contains(model.fileName, ignoreCase = true) }
             val isCompleted = chatState.downloadStatus == DownloadStatus.Completed && chatState.downloadFileName == model.fileName
             if (isDetected || isCompleted) return@forEach
@@ -239,6 +255,7 @@ fun LocalModelSettingsContent(chatViewModel: ChatViewModel?) {
                             Text("${model.size}  |  ${model.description}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
+                    // 下载进度
                     if ((chatState.downloadStatus == DownloadStatus.Downloading || chatState.downloadStatus == DownloadStatus.Paused) && chatState.downloadFileName == model.fileName) {
                         LinearProgressIndicator(progress = { chatState.downloadProgress }, modifier = Modifier.fillMaxWidth())
                         val isPaused = chatState.downloadStatus == DownloadStatus.Paused
@@ -285,5 +302,6 @@ fun LocalModelSettingsContent(chatViewModel: ChatViewModel?) {
                 }
             }
         }
+
     }
 }

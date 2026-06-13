@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.settings
+package com.medeide.jh.screens.home.landscape.collab.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

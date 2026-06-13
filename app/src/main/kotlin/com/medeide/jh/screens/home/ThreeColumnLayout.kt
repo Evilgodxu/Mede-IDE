@@ -19,21 +19,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-// 三列布局组件，支持侧边栏+可展开面板
+// 三区布局：侧栏区（图标导航 + 可展开面板）+ 工作区 + 协作区
 @Composable
 fun ThreeColumnLayout(
-    sidebar: @Composable () -> Unit,
-    leftPanel: @Composable () -> Unit,
-    isLeftPanelVisible: Boolean,
-    isLeftPanelExpanded: Boolean = false,
-    centerContent: @Composable () -> Unit,
-    rightPanel: @Composable () -> Unit,
+    sideIconBar: @Composable () -> Unit,
+    sidePanel: @Composable () -> Unit,
+    isSidePanelVisible: Boolean,
+    isSidePanelExpanded: Boolean = false,
+    workspaceContent: @Composable () -> Unit,
+    collabPanel: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val leftPanelWidth by animateDpAsState(
-        targetValue = if (isLeftPanelExpanded) 360.dp else 180.dp,
+    val sidePanelWidth by animateDpAsState(
+        targetValue = if (isSidePanelExpanded) 360.dp else 180.dp,
         animationSpec = tween(durationMillis = 200),
-        label = "leftPanelWidth"
+        label = "sidePanelWidth"
     )
 
     Row(
@@ -41,12 +41,12 @@ fun ThreeColumnLayout(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // 侧边栏
-        sidebar()
+        // 侧栏区 - 图标导航
+        sideIconBar()
 
-        // 左侧面板（可展开/收起）
+        // 侧栏区 - 可展开面板
         AnimatedVisibility(
-            visible = isLeftPanelVisible,
+            visible = isSidePanelVisible,
             enter = expandHorizontally(
                 animationSpec = tween(durationMillis = 200)
             ),
@@ -56,14 +56,14 @@ fun ThreeColumnLayout(
         ) {
             Column(
                 modifier = Modifier
-                    .width(leftPanelWidth)
+                    .width(sidePanelWidth)
                     .fillMaxHeight()
             ) {
-                leftPanel()
+                sidePanel()
             }
         }
 
-        if (isLeftPanelVisible) {
+        if (isSidePanelVisible) {
             VerticalDivider(
                 modifier = Modifier.fillMaxHeight(),
                 thickness = 1.dp,
@@ -71,13 +71,13 @@ fun ThreeColumnLayout(
             )
         }
 
-        // 中间内容区
+        // 工作区
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
         ) {
-            centerContent()
+            workspaceContent()
         }
 
         VerticalDivider(
@@ -86,13 +86,13 @@ fun ThreeColumnLayout(
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         )
 
-        // 右侧面板（宽度 = 侧边栏48dp + 展开面板180dp = 228dp）
+        // 协作区（宽度 = 侧栏图标栏48dp + 侧栏面板180dp = 228dp）
         Column(
             modifier = Modifier
                 .width(228.dp)
                 .fillMaxHeight()
         ) {
-            rightPanel()
+            collabPanel()
         }
     }
 }

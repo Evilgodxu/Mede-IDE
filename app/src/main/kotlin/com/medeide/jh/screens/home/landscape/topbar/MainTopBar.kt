@@ -33,7 +33,7 @@ import com.medeide.jh.screens.home.landscape.topbar.audio.AudioControl
 import com.medeide.jh.screens.home.landscape.topbar.audio.AudioPlaybackState
 import com.medeide.jh.screens.home.landscape.topbar.audio.AudioTrack
 
-// 主窗口顶部工具栏组件
+// 顶栏区
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainTopBar(

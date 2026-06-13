@@ -51,7 +51,7 @@ import androidx.compose.ui.unit.dp
 import com.medeide.jh.R
 import com.medeide.jh.model.TabItem
 import com.medeide.jh.model.TabType
-import com.medeide.jh.screens.home.ChatViewModel
+import com.medeide.jh.screens.home.landscape.collab.viewmodel.ChatViewModel
 import com.medeide.jh.screens.home.landscape.topbar.audio.AudioPlaybackState
 import com.medeide.jh.screens.home.landscape.topbar.audio.AudioPlayer
 import com.medeide.jh.screens.home.landscape.workspace.preview.ImagePreview
@@ -62,7 +62,7 @@ import com.medeide.jh.screens.home.landscape.workspace.terminal.TerminalPanel
 import com.medeide.jh.screens.home.landscape.workspace.viewer.WebPreview
 import com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlaybackState
 
-// 中间主内容区
+// 工作区主内容
 @Composable
 fun MainContentArea(
     chatViewModel: ChatViewModel? = null,
@@ -136,7 +136,7 @@ fun MainContentArea(
             )
         }
 
-        // 主内容区
+        // 工作区
         Box(
             modifier = Modifier
                 .fillMaxWidth()

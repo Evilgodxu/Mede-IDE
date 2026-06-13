@@ -15,7 +15,7 @@ import com.medeide.jh.data.storage.FileManager
 import com.medeide.jh.model.TabItem
 import com.medeide.jh.model.TabType
 import com.medeide.jh.model.displayNameFromPath
-import com.medeide.jh.screens.home.ChatViewModel
+import com.medeide.jh.screens.home.landscape.collab.viewmodel.ChatViewModel
 
 class EditorScreenState(
     val chatViewModel: ChatViewModel,

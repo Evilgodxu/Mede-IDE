@@ -92,7 +92,7 @@ class HomeViewModel(
         }
     }
 
-    /** 以工作目录打开：将目录设为项目根，资源管理器聚焦到此目录 */
+    /** 以工作目录打开：将目录设为项目根，双列文件管理器聚焦到此目录 */
     fun openAsProjectDirectory(absolutePath: String): Boolean {
         val dir = File(absolutePath)
         if (!dir.isDirectory) return false
