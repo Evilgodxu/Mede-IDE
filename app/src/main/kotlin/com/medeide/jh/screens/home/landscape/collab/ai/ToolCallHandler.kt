@@ -43,34 +43,52 @@ class ToolCallHandler(
             parseBool(this[key] ?: aliases.firstNotNullOfOrNull { this[it] }, default)
 
         val result = when (name) {
-            "listFiles" -> aiToolSet.listFiles(args.g("subPath"))
+            "listFiles" -> aiToolSet.listFiles(
+                args.g("path", "subPath"), args.g("ignore"))
             "readFile" -> aiToolSet.readFile(
-                args.g("path"), args.gInt("offset", default = 1), args.gInt("limit", default = 1000))
+                args.g("file_path", "path"), args.gInt("offset", default = 0), args.gInt("limit", default = 1000))
             "writeFile" -> aiToolSet.writeFile(
-                args.g("path"), args.g("content"), args.gBool("overwrite", default = false))
+                args.g("file_path", "path"), args.g("content"), args.gBool("overwrite", default = false))
             "replaceInFile" -> aiToolSet.replaceInFile(
-                args.g("path"), args.g("old_string"), args.g("new_string"),
-                args.gInt("lineStart", default = 0), args.gInt("lineEnd", default = 0))
+                args.g("file_path", "path"), args.g("old_str", "old_string"), args.g("new_str", "new_string"))
             "batchReplaceInFile" -> aiToolSet.batchReplaceInFile(
                 args.g("path"), args.g("edits"))
             "grep" -> aiToolSet.grep(
-                args.g("pattern"), args.g("extension"), args.g("glob"),
-                args.gBool("ignoreCase"), args.gInt("contextLines", default = 2))
-            "searchCodebase" -> aiToolSet.searchCodebase(args.g("query"), args.g("targetDirectories"))
-            "glob" -> aiToolSet.glob(args.g("pattern"), args.gInt("maxResults", default = 100))
-            "runCommand" -> aiToolSet.runCommand(args.g("command"))
-            "searchWeb" -> aiToolSet.searchWeb(args.g("query"))
-            "deleteFile" -> aiToolSet.deleteFile(args.g("path"))
+                args.g("pattern"),
+                args.g("path"),
+                args.g("glob"),
+                args.g("output_mode").ifEmpty { "content" },
+                args.gBool("-n", "n", "lineNumber", default = false),
+                args.gBool("-i", "i", "ignoreCase", default = true),
+                args.g("type", "extension"),
+                args.gInt("head_limit", default = 100),
+                args.gInt("offset", default = 0),
+                args.gBool("multiline", default = false),
+                args.gInt("-C", "C", "contextLines", default = 2),
+                args.gInt("-B", "B", "contextBefore", default = 0),
+                args.gInt("-A", "A", "contextAfter", default = 0))
+            "searchCodebase" -> aiToolSet.searchCodebase(
+                args.g("information_request", "query"), args.g("target_directories", "targetDirectories"))
+            "glob" -> aiToolSet.glob(
+                args.g("pattern"), args.g("path"), args.gInt("maxResults", default = 100))
+            "runCommand" -> aiToolSet.runCommand(
+                args.g("command"),
+                args.g("target_terminal"),
+                args.g("command_type").ifEmpty { "other" },
+                args.g("cwd"),
+                args.gBool("blocking", default = true),
+                args.gBool("requires_approval", default = false),
+                args.gInt("wait_ms_before_async", default = 0))
+            "searchWeb" -> aiToolSet.searchWeb(
+                args.g("query"), args.gInt("num", default = 5), args.g("lr"))
+            "deleteFile" -> aiToolSet.deleteFile(args.g("file_paths", "path"))
             "createDirectory" -> aiToolSet.createDirectory(args.g("path"))
-            "readLints" -> aiToolSet.readLints()
+            "getDiagnostics" -> aiToolSet.getDiagnostics(args.g("uri"))
+            "readLints" -> aiToolSet.getDiagnostics(args.g("uri"))
             "searchConversationMemory" -> aiToolSet.searchConversationMemory(args.g("query"))
             "getRecentConversationMemory" -> aiToolSet.getRecentConversationMemory(args.gInt("count", default = 5))
-            "fileExists" -> aiToolSet.fileExists(args.g("path"))
-            "fileInfo" -> aiToolSet.fileInfo(args.g("path"))
             "moveFile" -> aiToolSet.moveFile(args.g("source"), args.g("destination"))
             "copyFile" -> aiToolSet.copyFile(args.g("source"), args.g("destination"))
-            "zipFiles" -> aiToolSet.zipFiles(args.g("source"), args.g("destination"))
-            "unzipFiles" -> aiToolSet.unzipFiles(args.g("source"), args.g("destination"))
             "visitWeb" -> aiToolSet.visitWeb(args.g("url"))
             "downloadFile" -> aiToolSet.downloadFile(args.g("url"), args.g("destination"))
             "httpRequest" -> aiToolSet.httpRequest(
@@ -107,9 +125,9 @@ class ToolCallHandler(
     /** 工具调用后自动注入 Lint 诊断（仅当有修改操作时） */
     suspend fun autoInjectLint(toolCalls: List<Triple<String?, String, Map<String, String>>>): String? {
         val modifyingTools = setOf("writeFile", "replaceInFile", "batchReplaceInFile", "deleteFile", "createDirectory",
-            "moveFile", "copyFile", "zipFiles", "unzipFiles", "downloadFile")
+            "moveFile", "copyFile", "downloadFile")
         if (toolCalls.none { it.second in modifyingTools }) return null
-        val result = withContext(Dispatchers.IO) { aiToolSet.readLints() }
+        val result = withContext(Dispatchers.IO) { aiToolSet.getDiagnostics() }
         return if (result.contains("No lint errors") || result.contains("读取诊断失败") || result.contains("No errors")) null
         else "[Lint 诊断]\n$result"
     }

@@ -44,10 +44,10 @@ import org.koin.androidx.compose.koinViewModel
 enum class SettingsCategory(val labelResId: Int) {
     General(R.string.settings_category_general),
     Environment(R.string.settings_category_environment),
-    MCP(R.string.settings_category_mcp),
     LocalModel(R.string.settings_category_local_model),
+    RoleDefinition(R.string.settings_category_rules),
+    MCP(R.string.settings_category_mcp),
     CloudModel(R.string.settings_category_cloud_model),
-    Rules(R.string.settings_category_rules)
 }
 
 // 双列设置面板
@@ -80,6 +80,7 @@ fun SettingsPane(
                 category = selectedCategory, state = state,
                 onSetThemeMode = { viewModel.setThemeMode(it) }, onSetLanguage = { viewModel.setLanguage(it) },
                 onSetRules = { viewModel.setRules(it) },
+                onSetActiveRoleId = { viewModel.setActiveRoleId(it) },
                 onSetMcpServers = { viewModel.setMcpServers(it) },
                 chatViewModel = chatViewModel,
             )
@@ -103,6 +104,7 @@ private fun SettingsCategoryItem(category: SettingsCategory, isSelected: Boolean
 private fun SettingsCategoryContent(
     category: SettingsCategory, state: HomeUiState, onSetThemeMode: (String) -> Unit, onSetLanguage: (String) -> Unit,
     onSetRules: (List<Rule>) -> Unit,
+    onSetActiveRoleId: (String) -> Unit,
     onSetMcpServers: (List<McpServer>) -> Unit,
     chatViewModel: ChatViewModel?,
 ) {
@@ -124,9 +126,14 @@ private fun SettingsCategoryContent(
             }
             SettingsCategory.Environment -> EnvironmentSettingsContent()
             SettingsCategory.LocalModel -> LocalModelSettingsContent(chatViewModel)
+            SettingsCategory.RoleDefinition -> RoleDefinitionSettingsContent(
+                rules = state.rules,
+                activeRoleId = state.activeRoleId,
+                onSetRules = onSetRules,
+                onSetActiveRoleId = onSetActiveRoleId,
+            )
             SettingsCategory.CloudModel -> CloudModelSettingsContent(chatViewModel)
             SettingsCategory.MCP -> McpSettingsContent(state.mcpServers, onSetMcpServers)
-            SettingsCategory.Rules -> RulesSettingsContent(state.rules, onSetRules)
         }
     }
 }

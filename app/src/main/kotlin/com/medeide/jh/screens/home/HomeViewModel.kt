@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.medeide.jh.screens.home.ai.FileOperationEvents
 import com.medeide.jh.data.storage.FileManager
+import com.medeide.jh.model.DEFAULT_ROLE_ID
 import com.medeide.jh.model.FileItem
 import com.medeide.jh.model.McpServer
 import com.medeide.jh.model.Rule
@@ -39,16 +40,18 @@ class HomeViewModel(
                 userPreferencesRepository.themeMode,
                 userPreferencesRepository.language,
                 userPreferencesRepository.rules,
+                userPreferencesRepository.activeRoleId,
                 userPreferencesRepository.mcpServers,
                 _folderState,
             ) { values: Array<Any?> ->
-                val fs = values[4] as? FolderState ?: FolderState()
+                val fs = values[5] as? FolderState ?: FolderState()
                 HomeUiState(
                     isLoading = false,
                     themeMode = values[0] as? String ?: "system",
                     language = values[1] as? String ?: "system",
                     rules = (values[2] as? List<Rule>) ?: emptyList(),
-                    mcpServers = (values[3] as? List<McpServer>) ?: emptyList(),
+                    activeRoleId = (values[3] as? String) ?: DEFAULT_ROLE_ID,
+                    mcpServers = (values[4] as? List<McpServer>) ?: emptyList(),
                     openedFolderName = fs.folderName,
                     openedFolderUri = fs.folderUri?.toString(),
                     storageRootPath = fs.storageRootPath,
@@ -250,6 +253,10 @@ class HomeViewModel(
 
     fun setRules(rules: List<Rule>) {
         viewModelScope.launch { userPreferencesRepository.setRules(rules) }
+    }
+
+    fun setActiveRoleId(id: String) {
+        viewModelScope.launch { userPreferencesRepository.setActiveRoleId(id) }
     }
 
     fun setMcpServers(servers: List<McpServer>) {

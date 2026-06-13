@@ -70,7 +70,7 @@
     <string name="settings_category_local_model">Local Model</string>
     <string name="settings_category_cloud_model">Cloud Model</string>
 
-    <string name="settings_category_rules">Rules</string>
+    <string name="settings_category_rules">Role</string>
     <string name="settings_tab_name">IDE Settings</string>
 
     <!-- Tab Actions -->
@@ -99,7 +99,7 @@
     <string name="settings_category_mcp_desc">MCP Server Configuration</string>
     <string name="settings_category_model_desc">Model Selection \&amp; Configuration</string>
     <string name="settings_category_conversation_desc">Conversation Settings</string>
-    <string name="settings_category_rules_desc">Rules Configuration</string>
+    <string name="settings_category_rules_desc">Role Definition &amp; Switching</string>
 
     <!-- Common -->
     <string name="back">Back</string>
@@ -134,16 +134,19 @@
     <string name="chat_clear">Clear Chat</string>
     <string name="chat_streaming">Generating…</string>
 
-    <!-- Rules -->
-    <string name="rules_title">System Rules</string>
-    <string name="rules_description">Create rules as context injected into conversations</string>
-    <string name="rules_add">Add Rule</string>
-    <string name="rules_edit">Edit Rule</string>
-    <string name="rules_name_hint">Rule Name</string>
-    <string name="rules_content_hint">Describe rule requirements…</string>
-    <string name="rules_count_hint">%d rule(s) enabled, will be injected as context reference</string>
+    <!-- Role Definition -->
+    <string name="rules_title">Role Definition</string>
+    <string name="rules_description">Select a role to define assistant behavior. Custom roles are injected as context.</string>
+    <string name="rules_add">Add Role</string>
+    <string name="rules_edit">Edit Role</string>
+    <string name="rules_name_hint">Role Name</string>
+    <string name="rules_content_hint">Describe role settings…</string>
+    <string name="rules_count_hint">%d role(s) enabled</string>
     <string name="rules_save">Save</string>
     <string name="rules_cancel">Cancel</string>
+    <string name="rules_default_role_name">Default Role</string>
+    <string name="rules_default_role_desc">Same as the current AI assistant role</string>
+    <string name="rules_default_role_hint">You are an intelligent programming assistant using built-in tools…</string>
 
     <!-- General - Chat Config -->
     <string name="general_chat_config">Chat Configuration</string>

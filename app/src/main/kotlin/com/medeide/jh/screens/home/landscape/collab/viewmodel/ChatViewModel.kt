@@ -31,6 +31,7 @@ import com.medeide.jh.data.repository.UserPreferencesRepository
 import com.medeide.jh.data.source.local.LiteRTManager
 import com.medeide.jh.data.source.local.toSamplerConfig
 import com.medeide.jh.data.source.remote.CloudLLMClient
+import com.medeide.jh.model.DEFAULT_ROLE_ID
 import com.medeide.jh.model.Rule
 import com.medeide.jh.model.chat.AttachedFile
 import com.medeide.jh.model.chat.ChatMessage
@@ -114,6 +115,7 @@ class ChatViewModel(
     // System prompt 依赖值缓存
     @Volatile private var sysPromptUserName: String = ""
     @Volatile private var sysPromptRules: List<Rule> = emptyList()
+    @Volatile private var sysPromptActiveRoleId: String = DEFAULT_ROLE_ID
     @Volatile private var sysPromptDeepThink: Boolean = false
     @Volatile private var sysPromptVersion: Int = 0
     @Volatile private var convSysPromptVersion: Int = -1
@@ -124,8 +126,8 @@ class ChatViewModel(
         sysPromptCache = contextManager.getSysPromptCache(),
         userName = sysPromptUserName,
         rules = sysPromptRules,
+        activeRoleId = sysPromptActiveRoleId,
         cloudModelEnabled = _state.value.cloudModelEnabled,
-        aiToolSet = aiToolSet,
     )
 
     private fun buildEditorContext(): String = contextManager.buildEditorContext(
@@ -247,11 +249,13 @@ class ChatViewModel(
                 preferencesRepo.deepThinkEnabled,
                 preferencesRepo.userName,
                 preferencesRepo.rules,
+                preferencesRepo.activeRoleId,
                 _state.map { it.cloudModelEnabled }.distinctUntilChanged(),
-            ) { think, name, rules, _ ->
+            ) { think, name, rules, activeRoleId, _ ->
                 sysPromptDeepThink = think
                 sysPromptUserName = name
                 sysPromptRules = rules
+                sysPromptActiveRoleId = activeRoleId
                 contextManager.invalidateSysPromptCache()
                 sysPromptVersion++
             }.collect {}
@@ -983,7 +987,7 @@ class ChatViewModel(
                     role = ChatRole.Tool,
                     content = lintBlock,
                     toolCallId = "lint_${java.util.UUID.randomUUID().toString().take(8)}",
-                    toolName = "readLints",
+                    toolName = "getDiagnostics",
                 ))
             }
 

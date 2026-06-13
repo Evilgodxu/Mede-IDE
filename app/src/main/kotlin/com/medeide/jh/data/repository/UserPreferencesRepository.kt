@@ -8,8 +8,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.medeide.jh.model.McpServer
+import com.medeide.jh.model.DEFAULT_ROLE_ID
 import com.medeide.jh.model.Rule
+import com.medeide.jh.model.McpServer
 import com.medeide.jh.model.chat.BackendType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -56,6 +57,8 @@ class UserPreferencesRepository(private val context: Context) {
         // 模型参数持久化（topK/topP/temperature/seed/contextWindow）
         val MODEL_PARAMS_JSON = stringPreferencesKey("model_params_json")
         val PERMISSION_GUIDE_SHOWN = booleanPreferencesKey("permission_guide_shown")
+        // 角色定义
+        val ACTIVE_ROLE_ID = stringPreferencesKey("active_role_id")
     }
 
     val themeMode: Flow<String> = context.dataStore.data
@@ -99,19 +102,26 @@ class UserPreferencesRepository(private val context: Context) {
 
     val rules: Flow<List<Rule>> = context.dataStore.data
         .map { prefs ->
-            val json = prefs[PreferencesKeys.RULES_JSON] ?: return@map emptyList<Rule>()
+            val json = prefs[PreferencesKeys.RULES_JSON] ?: return@map listOf(Rule.defaultRole())
             try {
                 val arr = JSONArray(json)
-                (0 until arr.length()).map { i ->
+                val customRoles = (0 until arr.length()).map { i ->
                     val obj = arr.getJSONObject(i)
                     Rule(
                         id = obj.optString("id"),
                         name = obj.optString("name"),
                         content = obj.optString("content"),
+                        isDefault = obj.optBoolean("isDefault", false),
                     )
                 }
-            } catch (_: Exception) { emptyList() }
+                // 确保默认角色始终存在（默认角色不持久化存储，由代码生成）
+                val hasDefault = customRoles.any { it.isDefault }
+                if (!hasDefault) listOf(Rule.defaultRole()) + customRoles else customRoles
+            } catch (_: Exception) { listOf(Rule.defaultRole()) }
         }
+
+    val activeRoleId: Flow<String> = context.dataStore.data
+        .map { it[PreferencesKeys.ACTIVE_ROLE_ID] ?: DEFAULT_ROLE_ID }
 
     val mcpServers: Flow<List<McpServer>> = context.dataStore.data
         .map { prefs ->
@@ -175,8 +185,13 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun setRules(rules: List<Rule>) {
         context.dataStore.edit { prefs ->
-            prefs[PreferencesKeys.RULES_JSON] = rulesToJson(rules)
+            // 默认角色由代码生成，不持久化存储
+            prefs[PreferencesKeys.RULES_JSON] = rulesToJson(rules.filter { !it.isDefault })
         }
+    }
+
+    suspend fun setActiveRoleId(id: String) {
+        context.dataStore.edit { it[PreferencesKeys.ACTIVE_ROLE_ID] = id }
     }
 
     suspend fun setMcpServers(servers: List<McpServer>) {
@@ -379,6 +394,7 @@ class UserPreferencesRepository(private val context: Context) {
             obj.put("id", r.id)
             obj.put("name", r.name)
             obj.put("content", r.content)
+            obj.put("isDefault", r.isDefault)
             arr.put(obj)
         }
         return arr.toString()

@@ -1,5 +1,6 @@
 package com.medeide.jh.screens.home
 
+import com.medeide.jh.model.DEFAULT_ROLE_ID
 import com.medeide.jh.model.McpServer
 import com.medeide.jh.model.Rule
 
@@ -11,6 +12,7 @@ data class HomeUiState(
     val openedFolderName: String? = null,
     val openedFolderUri: String? = null,
     val rules: List<Rule> = emptyList(),
+    val activeRoleId: String = DEFAULT_ROLE_ID,
     val mcpServers: List<McpServer> = emptyList(),
     /** 存储根路径（完整文件系统根） */
     val storageRootPath: String = "",

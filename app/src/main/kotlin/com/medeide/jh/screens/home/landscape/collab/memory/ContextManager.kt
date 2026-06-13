@@ -25,33 +25,28 @@ class ContextManager(
         sysPromptCache: String?,
         userName: String,
         rules: List<Rule>,
+        activeRoleId: String,
         cloudModelEnabled: Boolean,
-        aiToolSet: AIToolSet? = null,
     ): String {
         sysPromptCache?.let { return it }
         val sb = StringBuilder()
-        sb.appendLine("你是智能编程助手，使用内置工具协助用户完成文件操作、代码编辑、项目构建、网络搜索等开发任务。")
-        if (userName.isNotBlank()) sb.appendLine("用户: $userName")
 
-        if (rules.isNotEmpty()) {
-            sb.appendLine().appendLine("【系统规则】")
-            rules.forEach { r ->
-                sb.appendLine("- ${r.name}: ${r.content}")
-            }
-        }
+        // 查找当前激活的角色
+        val activeRole = rules.find { it.id == activeRoleId } ?: rules.firstOrNull { it.isDefault }
 
-        if (aiToolSet != null) {
-            val toolNames = aiToolSet.toolNames()
-            if (toolNames.isNotEmpty()) {
-                sb.appendLine().appendLine("【可用工具】")
-                sb.appendLine("你可以调用以下工具来协助完成任务：")
-                toolNames.chunked(5).forEach { chunk ->
-                    sb.appendLine("  ${chunk.joinToString(", ")}")
-                }
-                sb.appendLine()
-                sb.appendLine("当你需要执行操作时，框架会自动处理工具调用格式。")
-                sb.appendLine("请根据任务需求选择合适的工具，工具执行结果会自动返回给你。")
+        if (activeRole != null) {
+            // 使用激活角色的定义作为系统指令
+            sb.appendLine(activeRole.content)
+            if (userName.isNotBlank()) sb.appendLine("用户: $userName")
+            // 如果激活的是自定义角色（非默认），追加其详细设定
+            if (!activeRole.isDefault) {
+                sb.appendLine().appendLine("【角色设定】")
+                sb.appendLine("- ${activeRole.name}: ${activeRole.content}")
             }
+        } else {
+            // 兜底：使用默认系统指令
+            sb.appendLine("你是智能编程助手，使用内置工具协助用户完成文件操作、代码编辑、项目构建、网络搜索等开发任务。")
+            if (userName.isNotBlank()) sb.appendLine("用户: $userName")
         }
 
         _sysPromptCache = sb.toString()

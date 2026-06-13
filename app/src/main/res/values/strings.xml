@@ -80,8 +80,7 @@
     <string name="settings_category_mcp">MCP配置</string>
     <string name="settings_category_local_model">本地模型</string>
     <string name="settings_category_cloud_model">云端模型</string>
-    <string name="settings_category_rules">规则配置</string>
-
+    <string name="settings_category_rules">角色定义</string>
 
     <!-- Tab 操作 -->
     <string name="tab_close_all">不保存关闭</string>
@@ -110,7 +109,7 @@
     <string name="settings_category_mcp_desc">MCP 服务器配置</string>
     <string name="settings_category_model_desc">模型选择与配置</string>
     <string name="settings_category_conversation_desc">对话设置</string>
-    <string name="settings_category_rules_desc">规则配置</string>
+    <string name="settings_category_rules_desc">角色定义与切换</string>
 
     <!-- 通用 -->
     <string name="back">返回</string>
@@ -145,16 +144,19 @@
     <string name="chat_clear">清空对话</string>
     <string name="chat_streaming">生成中…</string>
 
-    <!-- 规则设置 -->
-    <string name="rules_title">系统规则</string>
-    <string name="rules_description">创建规则作为上下文注入对话，模型对话时自动引用</string>
-    <string name="rules_add">添加规则</string>
-    <string name="rules_edit">编辑规则</string>
-    <string name="rules_name_hint">规则名称</string>
-    <string name="rules_content_hint">描述规则要求…</string>
-    <string name="rules_count_hint">已启用 %d 条规则，对话时将自动注入为上下文参考</string>
+    <!-- 角色定义设置 -->
+    <string name="rules_title">角色定义</string>
+    <string name="rules_description">选择角色定义助手行为方式，自定义角色作为上下文注入对话</string>
+    <string name="rules_add">添加角色</string>
+    <string name="rules_edit">编辑角色</string>
+    <string name="rules_name_hint">角色名称</string>
+    <string name="rules_content_hint">描述角色设定…</string>
+    <string name="rules_count_hint">已启用 %d 个角色</string>
     <string name="rules_save">保存</string>
     <string name="rules_cancel">取消</string>
+    <string name="rules_default_role_name">默认角色</string>
+    <string name="rules_default_role_desc">与你当前的 AI 助手角色一致</string>
+    <string name="rules_default_role_hint">你是智能编程助手，使用内置工具协助用户完成文件操作、代码编辑、项目构建、网络搜索等开发任务。</string>
 
     <!-- 通用设置-对话配置 -->
     <string name="general_chat_config">对话配置</string>
