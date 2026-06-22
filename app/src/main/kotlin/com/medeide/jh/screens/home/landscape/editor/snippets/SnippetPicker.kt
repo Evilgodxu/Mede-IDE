@@ -1,9 +1,11 @@
 package com.medeide.jh.screens.home.landscape.editor.snippets
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -62,9 +64,11 @@ fun SnippetPicker(
 
                 Spacer(Modifier.height(8.dp))
 
-                // 分类筛选
+                // 分类筛选 - 使用可水平滚动的 Row
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     FilterChip(
@@ -132,6 +136,11 @@ fun SnippetPicker(
                 Text("关闭")
             }
         },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
     )
 }
 
@@ -154,12 +163,15 @@ private fun SnippetItem(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(
                         snippet.name,
                         style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
                     )
-                    Spacer(Modifier.width(8.dp))
                     AssistChip(
                         onClick = { },
                         label = { Text(snippet.language) },
