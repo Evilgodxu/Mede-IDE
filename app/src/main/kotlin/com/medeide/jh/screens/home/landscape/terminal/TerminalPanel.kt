@@ -606,7 +606,36 @@ fun TerminalPanel(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // 发送按钮
+                    // 在 Termux 中执行按钮（跳转到 Termux）
+                    IconButton(
+                        onClick = {
+                            if (commandInput.isNotBlank()) {
+                                val command = commandInput.trim()
+                                // 显示提示
+                                sessions = sessions.mapIndexed { index, session ->
+                                    if (index == currentSessionIndex) {
+                                        session.copy(output = session.output + "\n[提示] 命令已发送到 Termux，请在 Termux 中查看输出\n命令: $command\n")
+                                    } else session
+                                }
+                                // 跳转到 Termux
+                                openTermuxWithCommand(context, command)
+                            }
+                        },
+                        enabled = commandInput.isNotBlank()
+                    ) {
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            contentDescription = "在 Termux 中执行",
+                            tint = if (commandInput.isNotBlank())
+                                Color(0xFF4CAF50)
+                            else
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    // 发送按钮（在应用内执行）
                     IconButton(
                         onClick = {
                             if (commandInput.isNotBlank() && currentSession != null) {
@@ -813,6 +842,47 @@ private fun executeViaRunCommandService(
             }
         }
     }.start()
+}
+
+/**
+ * 打开 Termux 应用并执行命令
+ * 这是最可靠的方式，直接跳转到 Termux
+ */
+private fun openTermuxWithCommand(context: Context, command: String) {
+    try {
+        // 尝试使用 RUN_COMMAND Intent
+        val intent = Intent()
+        intent.setClassName("com.termux", "com.termux.app.RunCommandService")
+        intent.setAction("com.termux.RUN_COMMAND")
+        intent.putExtra("com.termux.RUN_COMMAND.command", command)
+        intent.putExtra("com.termux.RUN_COMMAND.background", false)
+
+        try {
+            context.startService(intent)
+            // 然后打开 Termux 界面
+            val openIntent = Intent()
+            openIntent.setClassName("com.termux", "com.termux.HomeActivity")
+            openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(openIntent)
+        } catch (e: Exception) {
+            Log.e(TAG, "RunCommandService 失败: ${e.message}")
+            // 直接打开 Termux
+            val openIntent = Intent()
+            openIntent.setClassName("com.termux", "com.termux.HomeActivity")
+            openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(openIntent)
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "打开 Termux 失败: ${e.message}")
+        // 尝试通过包名打开
+        try {
+            val intent = context.packageManager.getLaunchIntentForPackage("com.termux")
+            intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        } catch (e2: Exception) {
+            Log.e(TAG, "无法打开 Termux: ${e2.message}")
+        }
+    }
 }
 
 /**
