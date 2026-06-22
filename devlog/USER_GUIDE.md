@@ -352,21 +352,40 @@ echo "=== 配置完成 ==="
 
 ### 2026-06-22
 
+#### 新增功能
+
+- **公告面板**：侧边栏新增「用户说明」图标（喇叭图标），点击后显示完整的用户使用指南，包含环境配置、终端使用、开发工具命令、常见问题等内容
+- **转发功能**：终端输入框右侧添加绿色跳转按钮，支持将命令转发到 Termux 应用执行
+- **Termux 专用指令**：提供完整的 Termux 命令列表，支持直接在 Termux 中使用开发工具脚本
+- **别名设置**：支持在 Termux 中设置别名 `mede`，简化命令输入
+
 #### 终端功能
+
 - 使用 `am startservice` 调用 Termux `RunCommandService`
 - 命令输出写入公共存储 `/sdcard/mede_terminal/`
 - 需要配置 `allow-external-apps=true` 才能使用
+- 添加 Termux 安装检测（支持多个包名变体：com.termux、com.termux.stable、com.termux.beta、com.termux.debug）
+- 添加手动刷新按钮重新检测 Termux 安装状态
+- 注册广播接收器监听 Termux 安装/卸载事件
 
 #### 开发工具
+
 - 脚本改为命令行模式，不再支持交互式选择
 - 美化界面，添加彩色边框和分隔线
 - 使用 `[OK]`/`[FAIL]` 符号显示检测结果（替换之前的乱字符）
-- 支持直接调用功能：`check_env`、`create_project`、`build_debug` 等
+- 支持直接调用功能：`check_env`、`create_project`、`build_debug`、`build_release`、`quick_setup`、`setup_protection`、`list_projects`
 - 菜单改为显示命令列表和使用示例，不再显示数字选项
+- 脚本自动复制到多个位置：`/sdcard/Download/mede_ide/android_dev_toolkit.sh`、`/sdcard/mede_ide/android_dev_toolkit.sh`
+- 每次点击开发工具按钮都会覆盖复制最新版本的脚本
 
-#### 其他
+#### 修复优化
+
 - 修复 bash 脚本兼容性问题（替换 `[[ ]]` 语法为标准 sh）
 - 删除代码中的 emoji 图标
-- 简化用户使用指南
-- 修复脚本更新问题：移除脚本复制时的存在性检查，每次点击开发工具按钮都会覆盖复制最新版本
+- 修复脚本更新问题：移除脚本复制时的存在性检查
 - 修复脚本乱字符问题：将特殊字符（✓✗═─）替换为终端可识别的 ASCII 字符（[OK][FAIL]=-）
+- 修复脚本命令路径问题：所有命令示例改为使用完整绝对路径
+
+#### 构建发布
+
+- 发行版 APK 生成路径：`app/build/outputs/apk/release/app-release.apk`
