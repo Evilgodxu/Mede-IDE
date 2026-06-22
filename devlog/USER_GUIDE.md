@@ -66,6 +66,11 @@ pkg install git nodejs clang make vim
 4. **混淆保护** - 代码混淆和签名配置
 5. **项目切换** - 快速切换工作项目
 
+### 脚本路径
+脚本会自动复制到以下路径（按优先级）：
+- `/sdcard/Download/mede_ide/android_dev_toolkit.sh`
+- `/sdcard/mede_ide/android_dev_toolkit.sh`
+
 ### 自定义脚本
 用户可以将自己的 shell 脚本放入项目的 `app/src/main/assets/` 目录：
 1. 将 `.sh` 文件放入 assets 目录
@@ -114,6 +119,7 @@ pkg install git nodejs clang make vim
 **原因：**
 - 脚本复制失败
 - Termux bash 不存在
+- 脚本兼容性问题
 
 **解决方案：**
 1. 确认 Termux 已安装
@@ -127,6 +133,14 @@ pkg install git nodejs clang make vim
 
 **解决方案：**
 点击终端右上角的刷新按钮手动刷新
+
+### 问题 6：脚本显示「需要 bash 环境」或「语法错误」
+
+**原因：**
+脚本之前使用了 bash 特有语法，已修复为标准 sh 语法
+
+**解决方案：**
+更新到最新版本的应用即可，脚本已兼容所有 shell 环境
 
 ---
 
@@ -199,6 +213,7 @@ echo "=== 配置完成 ==="
 - 实现内置终端，直接调用 Termux bash 执行命令
 - 不再需要配置 `allow-external-apps=true`
 - 替换 Python 脚本为 bash 脚本，不需要 Python 环境
-- 修复 Termux 检测问题
+- 修复 bash 脚本兼容性问题（替换 `[[ ]]` 语法为标准 sh）
+- 修复脚本入口检查（移除 `$BASH_SOURCE` 依赖）
 - 删除代码中的 emoji 图标
 - 简化用户使用指南
