@@ -48,12 +48,13 @@ fun TerminalPanel(
         currentSession = session
         sessions = terminalManager.getActiveSessions()
 
-        // 显示欢迎信息和工具提示
+        // 显示欢迎信息
         outputText += "欢迎使用 Mede IDE 终端！\n"
         if (toolkitScriptPath != null) {
             outputText += "检测到开发工具脚本：$toolkitScriptPath\n"
             outputText += "运行命令：python3 android_dev_toolkit.py\n"
             outputText += "或点击工具栏的 🛠️ 按钮快速启动\n"
+            outputText += "（注：此脚本需要 Python 环境，如未安装请先运行：pkg install python）\n"
         }
         outputText += "\n"
 
@@ -117,7 +118,8 @@ fun TerminalPanel(
                     IconButton(onClick = {
                         currentSession?.let { session ->
                             scope.launch {
-                                terminalManager.executeCommand(session.id, "python3 $toolkitScriptPath")
+                                // 先检查 Python 是否安装
+                                terminalManager.executeCommand(session.id, "which python3 || which python")
                             }
                         }
                     }) {

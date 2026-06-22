@@ -441,6 +441,7 @@ fun HomeScreen(
                     },
                     onOpenFileTab = { editorState.openFileTab(it) },
                     onCloseSearchPanel = { selectedTab = null },
+                    onDismissSnippets = { selectedTab = null },
                 )
             },
             isSidePanelVisible = selectedTab != null,
@@ -736,6 +737,7 @@ private fun LeftPanelContent(
     onAddToConversation: (FileItem) -> Unit = {},
     onOpenFileTab: (String) -> Unit = {},
     onCloseSearchPanel: () -> Unit = {},
+    onDismissSnippets: () -> Unit = {},
 ) {
     when (selectedTab) {
         null -> {}
@@ -809,7 +811,7 @@ private fun LeftPanelContent(
                         editorState.editorContent[activePath] = TextFieldValue(newContent)
                     }
                 },
-                onDismiss = { /* handled by caller */ },
+                onDismiss = onDismissSnippets,
             )
         }
         SidebarTab.Bookmarks -> {
