@@ -846,35 +846,49 @@ private fun executeViaRunCommandService(
 
 /**
  * 打开 Termux 应用并执行命令
- * 这是最可靠的方式，直接跳转到 Termux
+ * 把命令作为 extra 参数传递，Termux 会自动填入并执行
  */
 private fun openTermuxWithCommand(context: Context, command: String) {
     try {
-        // 尝试使用 RUN_COMMAND Intent
-        val intent = Intent()
-        intent.setClassName("com.termux", "com.termux.app.RunCommandService")
-        intent.setAction("com.termux.RUN_COMMAND")
-        intent.putExtra("com.termux.RUN_COMMAND.command", command)
-        intent.putExtra("com.termux.RUN_COMMAND.background", false)
+        // 使用 RUN_COMMAND Intent 传递命令
+        // Termux 的 RunCommandService 会接收命令并执行
+        val serviceIntent = Intent()
+        serviceIntent.setClassName("com.termux", "com.termux.app.RunCommandService")
+        serviceIntent.setAction("com.termux.RUN_COMMAND")
+        serviceIntent.putExtra("com.termux.RUN_COMMAND.command", command)
+        serviceIntent.putExtra("com.termux.RUN_COMMAND.background", false)
+        serviceIntent.putExtra("com.termux.RUN_COMMAND.working_directory", "/data/data/com.termux/files/home")
+        serviceIntent.putExtra("com.termux.RUN_COMMAND.session_action", 0) // 0 = create new session
 
+        // 先启动服务执行命令
         try {
-            context.startService(intent)
-            // 然后打开 Termux 界面
-            val openIntent = Intent()
-            openIntent.setClassName("com.termux", "com.termux.HomeActivity")
-            openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(openIntent)
+            context.startService(serviceIntent)
+            Log.d(TAG, "已发送命令到 Termux RunCommandService")
         } catch (e: Exception) {
             Log.e(TAG, "RunCommandService 失败: ${e.message}")
-            // 直接打开 Termux
-            val openIntent = Intent()
-            openIntent.setClassName("com.termux", "com.termux.HomeActivity")
-            openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(openIntent)
         }
+
+        // 延迟一点再打开 Termux 界面，让命令先执行
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            try {
+                val openIntent = Intent()
+                openIntent.setClassName("com.termux", "com.termux.HomeActivity")
+                openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(openIntent)
+            } catch (e: Exception) {
+                // 如果 HomeActivity 失败，尝试通过包名打开
+                try {
+                    val pkgIntent = context.packageManager.getLaunchIntentForPackage("com.termux")
+                    pkgIntent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(pkgIntent)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "无法打开 Termux: ${e2.message}")
+                }
+            }
+        }, 500)
+
     } catch (e: Exception) {
         Log.e(TAG, "打开 Termux 失败: ${e.message}")
-        // 尝试通过包名打开
         try {
             val intent = context.packageManager.getLaunchIntentForPackage("com.termux")
             intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
