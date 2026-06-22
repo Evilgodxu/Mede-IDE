@@ -30,21 +30,21 @@ print_line() {
 }
 
 print_title() {
-    print_line '═' "$CYAN"
+    print_line '=' "$CYAN"
     echo -e "${CYAN}${BOLD}                      $1${RESET}"
-    print_line '═' "$CYAN"
+    print_line '=' "$CYAN"
 }
 
 print_subtitle() {
-    echo -e "\n${BLUE}${BOLD}  ── $1 ──${RESET}"
+    echo -e "\n${BLUE}${BOLD}  --- $1 ---${RESET}"
 }
 
 print_box() {
     local content="$1"
     local color="$2"
-    print_line '─' "$color"
+    print_line '-' "$color"
     echo -e "${color}${content}${RESET}"
-    print_line '─' "$color"
+    print_line '-' "$color"
 }
 
 info() { echo -e "${CYAN}${BOLD}[*]${RESET} ${CYAN}$1${RESET}"; }
@@ -86,10 +86,10 @@ check_env() {
         
         printf "  %-25s" "$name"
         if eval "$check_cmd"; then
-            echo -e "${GREEN}${BOLD}✓ $ok_msg${RESET}"
+            echo -e "${GREEN}${BOLD}[OK] $ok_msg${RESET}"
             pass=$((pass + 1))
         else
-            echo -e "${RED}${BOLD}✗ $err_msg${RESET}"
+            echo -e "${RED}${BOLD}[FAIL] $err_msg${RESET}"
         fi
     done
     
@@ -617,18 +617,23 @@ show_usage() {
 show_menu() {
     print_title "Android 开发工具"
     
-    echo -e "\n${WHITE}${BOLD}  请选择功能:${RESET}\n"
+    echo -e "\n${WHITE}${BOLD}  可用命令:${RESET}\n"
     
-    echo -e "    ${CYAN}${BOLD}[1]${RESET} ${WHITE}环境检测${RESET}"
-    echo -e "    ${CYAN}${BOLD}[2]${RESET} ${WHITE}列出项目${RESET}"
-    echo -e "    ${CYAN}${BOLD}[3]${RESET} ${WHITE}创建项目${RESET}"
-    echo -e "    ${CYAN}${BOLD}[4]${RESET} ${WHITE}编译 Debug${RESET}"
-    echo -e "    ${CYAN}${BOLD}[5]${RESET} ${WHITE}编译 Release${RESET}"
-    echo -e "    ${CYAN}${BOLD}[6]${RESET} ${WHITE}一键配置${RESET}"
-    echo -e "    ${CYAN}${BOLD}[7]${RESET} ${WHITE}混淆保护${RESET}"
-    echo -e "    ${CYAN}${BOLD}[0]${RESET} ${WHITE}退出${RESET}"
+    echo -e "    ${GREEN}${BOLD}check_env${RESET}       环境检测"
+    echo -e "    ${GREEN}${BOLD}list_projects${RESET}   列出项目"
+    echo -e "    ${GREEN}${BOLD}create_project${RESET}  创建项目"
+    echo -e "    ${GREEN}${BOLD}build_debug${RESET}     编译 Debug"
+    echo -e "    ${GREEN}${BOLD}build_release${RESET}   编译 Release"
+    echo -e "    ${GREEN}${BOLD}quick_setup${RESET}     一键配置"
+    echo -e "    ${GREEN}${BOLD}setup_protection${RESET} 混淆保护"
     
-    echo -e "\n${YELLOW}${BOLD}  提示: 请在终端输入对应的数字并按回车${RESET}"
+    echo -e "\n${YELLOW}${BOLD}  使用方式:${RESET}"
+    echo -e "    ${WHITE}bash android_dev_toolkit.sh <命令> [参数]${RESET}\n"
+    
+    echo -e "${YELLOW}${BOLD}  示例:${RESET}"
+    echo -e "    ${WHITE}bash android_dev_toolkit.sh check_env${RESET}"
+    echo -e "    ${WHITE}bash android_dev_toolkit.sh create_project MyApp com.example.myapp java${RESET}"
+    echo -e "    ${WHITE}bash android_dev_toolkit.sh build_debug MyApp${RESET}\n"
 }
 
 main() {
