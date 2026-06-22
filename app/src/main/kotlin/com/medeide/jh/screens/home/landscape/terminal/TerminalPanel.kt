@@ -40,7 +40,26 @@ import java.io.*
 import java.util.concurrent.Executors
 
 private const val TAG = "TerminalPanel"
-private const val TERMUX_PACKAGE = "com.termux"
+private val TERMUX_PACKAGES = arrayOf(
+    "com.termux",
+    "com.termux.stable",
+    "com.termux.beta",
+    "com.termux.debug"
+)
+
+private fun checkTermuxInstalled(context: Context): Boolean {
+    val pm = context.packageManager
+    for (packageName in TERMUX_PACKAGES) {
+        try {
+            pm.getPackageInfo(packageName, 0)
+            Log.d(TAG, "检测到 Termux: $packageName")
+            return true
+        } catch (_: PackageManager.NameNotFoundException) {
+        }
+    }
+    Log.d(TAG, "未检测到 Termux")
+    return false
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,24 +74,12 @@ fun TerminalPanel(
 
     // 检测 Termux 是否安装
     var isTermuxInstalled by remember {
-        mutableStateOf(
-            try {
-                context.packageManager.getPackageInfo(TERMUX_PACKAGE, 0)
-                true
-            } catch (e: PackageManager.NameNotFoundException) {
-                false
-            }
-        )
+        mutableStateOf(checkTermuxInstalled(context))
     }
 
     // 刷新 Termux 检测状态
     fun refreshTermuxStatus() {
-        isTermuxInstalled = try {
-            context.packageManager.getPackageInfo(TERMUX_PACKAGE, 0)
-            true
-        } catch (e: PackageManager.NameNotFoundException) {
-            false
-        }
+        isTermuxInstalled = checkTermuxInstalled(context)
     }
 
     // 监听应用安装/卸载广播
@@ -83,7 +90,7 @@ fun TerminalPanel(
                     intent?.action == Intent.ACTION_PACKAGE_REMOVED ||
                     intent?.action == Intent.ACTION_PACKAGE_CHANGED) {
                     val packageName = intent.data?.schemeSpecificPart
-                    if (packageName == TERMUX_PACKAGE) {
+                    if (packageName != null && TERMUX_PACKAGES.contains(packageName)) {
                         refreshTermuxStatus()
                     }
                 }
@@ -194,7 +201,7 @@ fun TerminalPanel(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        "⚠️ 需要安装 Termux",
+                        "[警告] 需要安装 Termux",
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFE65100)
                     )
