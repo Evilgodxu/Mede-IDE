@@ -442,6 +442,7 @@ fun HomeScreen(
                     onOpenFileTab = { editorState.openFileTab(it) },
                     onCloseSearchPanel = { selectedTab = null },
                     onDismissSnippets = { selectedTab = null },
+                    onCloseTerminal = { selectedTab = null },
                 )
             },
             isSidePanelVisible = selectedTab != null,
@@ -738,6 +739,7 @@ private fun LeftPanelContent(
     onOpenFileTab: (String) -> Unit = {},
     onCloseSearchPanel: () -> Unit = {},
     onDismissSnippets: () -> Unit = {},
+    onCloseTerminal: () -> Unit = {},
 ) {
     when (selectedTab) {
         null -> {}
@@ -794,10 +796,10 @@ private fun LeftPanelContent(
             )
         }
         SidebarTab.Terminal -> {
-            val terminalManager = com.medeide.jh.screens.home.landscape.terminal.TerminalManager()
             com.medeide.jh.screens.home.landscape.terminal.TerminalPanel(
-                terminalManager = terminalManager,
-                initialWorkingDirectory = homeState.projectDirPath ?: "/storage/emulated/0",
+                currentPath = homeState.projectDirPath ?: "/storage/emulated/0",
+                onNavigateToFile = { path -> editorState.openFileTab(path) },
+                onClosePanel = onCloseTerminal,
                 modifier = Modifier.fillMaxSize(),
             )
         }
