@@ -726,7 +726,8 @@ private fun isTermuxApiInstalled(context: Context): Boolean {
 }
 
 /**
- * 通过 Termux:API 的 RunCommandService 执行命令
+ * 通过 Termux:API 的命令行工具执行命令
+ * 使用 termux-api 命令在 Termux 环境中执行命令并获取输出
  */
 private fun executeViaTermuxApi(
     context: Context,
@@ -736,37 +737,59 @@ private fun executeViaTermuxApi(
 ) {
     Thread {
         try {
-            val resultReceiver = object : android.os.ResultReceiver(android.os.Handler(android.os.Looper.getMainLooper())) {
-                override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
-                    if (resultCode == 0) {
-                        val stdout = resultData?.getString("com.termux.api.RunCommandService.stdout") ?: ""
-                        val stderr = resultData?.getString("com.termux.api.RunCommandService.stderr") ?: ""
-                        val output = if (stderr.isNotEmpty()) "$stdout\n[Stderr]\n$stderr" else stdout
-                        onResult(output)
-                    } else {
-                        onError("Termux:API 执行失败，错误码: $resultCode")
-                    }
-                }
+            val commandEscaped = command.replace("\"", "\\\"").replace("\n", "\\n")
+            val termuxCommand = """am broadcast -a com.termux.api.RUN_COMMAND --es com.termux.api.RUN_COMMAND.command "$commandEscaped" --ez com.termux.api.RUN_COMMAND.background false --ez com.termux.api.RUN_COMMAND.ezout true"""
+
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", termuxCommand))
+            process.waitFor()
+
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val output = StringBuilder()
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                output.append(line).append("\n")
             }
-            val intent = Intent().apply {
-                setClassName("com.termux.api", "com.termux.api.RunCommandService")
-                putExtra("com.termux.api.RunCommandService.command", command)
-                putExtra("com.termux.api.RunCommandService.background", false)
-                putExtra("com.termux.api.RunCommandService.ezout", true)
-                putExtra("com.termux.api.RunCommandService.label", "Mede IDE")
-                putExtra("com.termux.api.RunCommandService.sessionAction", "0")
-                putExtra("com.termux.api.RunCommandService.resultReceiver", resultReceiver)
+            reader.close()
+
+            val result = output.toString()
+            if (result.contains("result=-1") || result.isEmpty()) {
+                throw Exception("Termux:API 执行失败")
             }
-            context.startService(intent)
+
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                onResult(parseTermuxApiOutput(result))
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Termux:API 执行失败: ${e.message}")
-            executeViaTermuxDirect(context, command, onResult, onError)
+            executeViaTermuxShell(context, command, onResult, onError)
         }
     }.start()
 }
 
 /**
- * 通过 Termux 应用的 RunCommandService 执行命令
+ * 解析 Termux:API 输出
+ */
+private fun parseTermuxApiOutput(output: String): String {
+    val stdoutStart = output.indexOf("stdout=")
+    val stderrStart = output.indexOf("stderr=")
+    val exitCodeStart = output.indexOf("exit-code=")
+
+    if (stdoutStart == -1) return output
+
+    val stdout = if (stderrStart > stdoutStart) {
+        output.substring(stdoutStart + 7, stderrStart).trim()
+    } else if (exitCodeStart > stdoutStart) {
+        output.substring(stdoutStart + 7, exitCodeStart).trim()
+    } else {
+        output.substring(stdoutStart + 7).trim()
+    }
+
+    return stdout.replace("\\n", "\n")
+}
+
+/**
+ * 通过 Termux shell 直接执行命令
+ * 使用 am start 启动 Termux 并执行命令，通过临时文件获取输出
  */
 private fun executeViaTermuxDirect(
     context: Context,
@@ -774,32 +797,53 @@ private fun executeViaTermuxDirect(
     onResult: (String) -> Unit,
     onError: (String) -> Unit
 ) {
+    executeViaTermuxShell(context, command, onResult, onError)
+}
+
+/**
+ * 使用 Termux shell 执行命令（通过临时文件获取输出）
+ */
+private fun executeViaTermuxShell(
+    context: Context,
+    command: String,
+    onResult: (String) -> Unit,
+    onError: (String) -> Unit
+) {
     Thread {
         try {
-            val resultReceiver = object : android.os.ResultReceiver(android.os.Handler(android.os.Looper.getMainLooper())) {
-                override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
-                    if (resultCode == 0) {
-                        val stdout = resultData?.getString("com.termux.app.RunCommandService.stdout") ?: ""
-                        val stderr = resultData?.getString("com.termux.app.RunCommandService.stderr") ?: ""
-                        val output = if (stderr.isNotEmpty()) "$stdout\n[Stderr]\n$stderr" else stdout
-                        onResult(output)
-                    } else {
-                        executeWithDirectProcess(command, onResult, onError)
-                    }
+            val outputFile = "/data/data/com.termux/files/home/mede_output_${System.currentTimeMillis()}.txt"
+            val errorFile = "/data/data/com.termux/files/home/mede_error_${System.currentTimeMillis()}.txt"
+
+            val termuxCommand = "$command > $outputFile 2> $errorFile"
+
+            val amCommand = "am start -n com.termux/com.termux.app.RunCommandService --es com.termux.app.RunCommandService.command '$termuxCommand' --ez com.termux.app.RunCommandService.background true"
+
+            Runtime.getRuntime().exec(arrayOf("sh", "-c", amCommand)).waitFor()
+
+            Thread.sleep(2000)
+
+            val readCommand = "cat $outputFile; cat $errorFile; rm -f $outputFile $errorFile"
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", readCommand))
+            process.waitFor()
+
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val output = StringBuilder()
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                output.append(line).append("\n")
+            }
+            reader.close()
+
+            val result = output.toString()
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (result.isNotEmpty()) {
+                    onResult(result)
+                } else {
+                    onError("命令执行无输出，可能需要安装 Termux:API")
                 }
             }
-            val intent = Intent().apply {
-                setClassName("com.termux", "com.termux.app.RunCommandService")
-                putExtra("com.termux.app.RunCommandService.command", command)
-                putExtra("com.termux.app.RunCommandService.background", false)
-                putExtra("com.termux.app.RunCommandService.ezout", true)
-                putExtra("com.termux.app.RunCommandService.label", "Mede IDE")
-                putExtra("com.termux.app.RunCommandService.sessionAction", "0")
-                putExtra("com.termux.app.RunCommandService.resultReceiver", resultReceiver)
-            }
-            context.startService(intent)
         } catch (e: Exception) {
-            Log.e(TAG, "Termux 直接执行失败: ${e.message}")
+            Log.e(TAG, "Termux shell 执行失败: ${e.message}")
             executeWithDirectProcess(command, onResult, onError)
         }
     }.start()
