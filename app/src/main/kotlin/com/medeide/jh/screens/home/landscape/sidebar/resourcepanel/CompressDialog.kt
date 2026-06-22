@@ -13,7 +13,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExposedDropdownMenu
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.OutlinedTextField
@@ -31,7 +31,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.material3.ExperimentalMaterial3Api
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,7 +111,7 @@ fun CompressDialog(
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = formatExpanded) },
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        ExposedDropdownMenu(
+                        androidx.compose.material3.DropdownMenu(
                             expanded = formatExpanded,
                             onDismissRequest = { formatExpanded = false },
                         ) {
@@ -140,7 +139,7 @@ fun CompressDialog(
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = levelExpanded) },
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        ExposedDropdownMenu(
+                        androidx.compose.material3.DropdownMenu(
                             expanded = levelExpanded,
                             onDismissRequest = { levelExpanded = false },
                         ) {
@@ -182,7 +181,7 @@ fun CompressDialog(
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = volumeExpanded) },
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        ExposedDropdownMenu(
+                        androidx.compose.material3.DropdownMenu(
                             expanded = volumeExpanded,
                             onDismissRequest = { volumeExpanded = false },
                         ) {
