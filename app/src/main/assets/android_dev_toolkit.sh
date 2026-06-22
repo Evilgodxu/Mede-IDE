@@ -629,7 +629,8 @@ setup_protection() {
         ok "build.gradle 混淆配置已更新"
     fi
 
-    local proguard_content="# 基础保留
+    local proguard_content=$(cat << 'PROGUARD_EOF'
+# 基础保留
 -keep class $package_name.MainActivity { *; }
 -keepattributes *Annotation*
 
@@ -671,7 +672,11 @@ setup_protection() {
 }
 
 # 字符串加密
--optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*,string/encryption"
+-optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*,string/encryption
+PROGUARD_EOF
+)
+    # 替换包名变量
+    proguard_content=$(echo "$proguard_content" | sed "s/\$package_name/$package_name/g")
 
     write_file "$project_path/app/proguard-rules.pro" "$proguard_content"
     ok "ProGuard 规则已写入"
@@ -683,7 +688,8 @@ setup_protection() {
     local guard_dir="$project_path/app/src/main/java/${package_name//./\/}/guard"
     mkdir -p "$guard_dir"
 
-    local anti_debug="package $package_name.guard;
+    local anti_debug=$(cat << 'JAVA_EOF'
+package $package_name.guard;
 
 import android.content.Context;
 import android.os.Debug;
@@ -700,12 +706,16 @@ public class AntiDebug {
     }
 
     private static boolean isEmulator() {
-        return android.os.Build.FINGERPRINT.startsWith(\"generic\")
-            || android.os.Build.FINGERPRINT.startsWith(\"unknown\")
-            || android.os.Build.MODEL.contains(\"Emulator\")
-            || android.os.Build.MODEL.contains(\"Android SDK\");
+        return android.os.Build.FINGERPRINT.startsWith("generic")
+            || android.os.Build.FINGERPRINT.startsWith("unknown")
+            || android.os.Build.MODEL.contains("Emulator")
+            || android.os.Build.MODEL.contains("Android SDK");
     }
-}"
+}
+JAVA_EOF
+)
+    # 替换包名变量
+    anti_debug=$(echo "$anti_debug" | sed "s/\$package_name/$package_name/g")
 
     write_file "$guard_dir/AntiDebug.java" "$anti_debug"
     ok "反调试类已生成：AntiDebug.java"
