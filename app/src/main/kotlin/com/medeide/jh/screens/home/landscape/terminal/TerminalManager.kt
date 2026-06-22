@@ -1,5 +1,7 @@
 package com.medeide.jh.screens.home.landscape.terminal
 
+import android.content.Context
+import android.content.pm.PackageManager
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -7,13 +9,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 
 /**
  * 终端管理器 - 负责执行命令、管理进程生命周期
  */
-class TerminalManager {
+class TerminalManager(private val context: Context?) {
 
     data class TerminalSession(
         val id: String,
@@ -37,6 +40,29 @@ class TerminalManager {
     private val sessions = mutableMapOf<String, TerminalSession>()
     private var sessionIdCounter = 0
 
+    private val TERMUX_PATHS = arrayOf(
+        "/data/data/com.termux/files/usr/bin/bash",
+        "/data/data/com.termux/files/usr/bin/zsh",
+        "/data/data/com.termux/files/usr/bin/sh"
+    )
+
+    private val TERMUX_HOME = "/data/data/com.termux/files/home"
+    private val TERMUX_PATH = "/data/data/com.termux/files/usr/bin:/data/data/com.termux/files/usr/local/bin"
+
+    private fun isTermuxInstalled(): Boolean {
+        if (context == null) return false
+        return try {
+            context.packageManager.getPackageInfo("com.termux", 0)
+            TERMUX_PATHS.any { File(it).exists() }
+        } catch (_: PackageManager.NameNotFoundException) {
+            false
+        }
+    }
+
+    private fun getTermuxShellPath(): String? {
+        return TERMUX_PATHS.firstOrNull { File(it).exists() }
+    }
+
     /**
      * 创建新的终端会话
      */
@@ -53,11 +79,21 @@ class TerminalManager {
                 Log.w("TerminalManager", "Working directory not valid: $workingDirectory, using /")
             }
 
-            val processBuilder = ProcessBuilder("sh")
-                .directory(workDir.takeIf { it.exists() && it.isDirectory } ?: java.io.File("/"))
+            val shellPath = getTermuxShellPath() ?: "sh"
+            val isTermux = shellPath != "sh"
+
+            val processBuilder = ProcessBuilder(shellPath)
+                .directory(if (isTermux) File(TERMUX_HOME) else (workDir.takeIf { it.exists() && it.isDirectory } ?: java.io.File("/")))
                 .redirectErrorStream(true)
 
-            Log.d("TerminalManager", "Starting shell process in: ${workDir.absolutePath}")
+            if (isTermux) {
+                processBuilder.environment()["HOME"] = TERMUX_HOME
+                processBuilder.environment()["PATH"] = "$TERMUX_PATH:${processBuilder.environment().getOrDefault("PATH", "")}"
+                processBuilder.environment()["TERM"] = "xterm"
+                Log.d("TerminalManager", "Using Termux shell: $shellPath")
+            }
+
+            Log.d("TerminalManager", "Starting shell process in: ${processBuilder.directory()?.absolutePath}")
             val process = processBuilder.start()
             val writer = OutputStreamWriter(process.outputStream)
 

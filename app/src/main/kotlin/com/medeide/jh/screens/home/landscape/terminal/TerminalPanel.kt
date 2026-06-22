@@ -692,9 +692,13 @@ fun TerminalPanel(
     }
 }
 
+private val TERMUX_BASH = "/data/data/com.termux/files/usr/bin/bash"
+private val TERMUX_PATH = "/data/data/com.termux/files/usr/bin:/data/data/com.termux/files/usr/local/bin"
+private val TERMUX_HOME = "/data/data/com.termux/files/home"
+
 /**
  * 通过 Termux API 执行命令
- * 优先使用 Termux:API 的 RunCommandService
+ * 优先使用 Termux 的 bash shell 直接执行
  */
 private fun executeInTermux(
     context: Context,
@@ -705,12 +709,67 @@ private fun executeInTermux(
     val cleanCommand = command.trim()
     Log.d(TAG, "执行命令: $cleanCommand")
 
-    if (isTermuxApiInstalled(context)) {
+    if (File(TERMUX_BASH).exists()) {
+        executeWithTermuxShell(cleanCommand, onResult, onError)
+    } else if (isTermuxApiInstalled(context)) {
         executeViaTermuxApi(context, cleanCommand, onResult, onError)
     } else {
-        Log.d(TAG, "Termux:API 未安装，尝试 Termux 直接执行")
-        executeViaTermuxDirect(context, cleanCommand, onResult, onError)
+        Log.d(TAG, "Termux bash 和 Termux:API 均不可用")
+        onError("需要安装 Termux:API 才能执行命令")
     }
+}
+
+/**
+ * 使用 Termux 的 bash shell 直接执行命令
+ */
+private fun executeWithTermuxShell(
+    command: String,
+    onResult: (String) -> Unit,
+    onError: (String) -> Unit
+) {
+    Thread {
+        try {
+            val processBuilder = ProcessBuilder(TERMUX_BASH, "-c", command)
+                .directory(File(TERMUX_HOME))
+                .redirectErrorStream(true)
+
+            val env = processBuilder.environment()
+            env["HOME"] = TERMUX_HOME
+            env["PATH"] = "$TERMUX_PATH:${env.getOrDefault("PATH", "")}"
+            env["TERM"] = "xterm"
+            env["LD_LIBRARY_PATH"] = "/data/data/com.termux/files/usr/lib"
+
+            val process = processBuilder.start()
+
+            val reader = BufferedReader(InputStreamReader(process.inputStream, "UTF-8"))
+            val output = StringBuilder()
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                output.append(line).append("\n")
+            }
+            reader.close()
+
+            val exitCode = process.waitFor()
+            val result = output.toString()
+
+            Log.d(TAG, "Termux shell 执行完成，退出码: $exitCode, 输出: ${result.take(100)}")
+
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (result.isNotEmpty()) {
+                    onResult(result)
+                } else if (exitCode == 0) {
+                    onResult("[命令执行成功，无输出]")
+                } else {
+                    onError("命令执行失败，退出码: $exitCode")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Termux shell 执行失败: ${e.message}", e)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                onError("执行失败: ${e.message}")
+            }
+        }
+    }.start()
 }
 
 /**
