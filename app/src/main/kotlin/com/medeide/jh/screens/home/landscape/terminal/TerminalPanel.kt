@@ -4,6 +4,8 @@ import android.content.*
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -52,12 +54,54 @@ fun TerminalPanel(
     val scope = rememberCoroutineScope()
 
     // 检测 Termux 是否安装
-    val isTermuxInstalled = remember {
-        try {
+    var isTermuxInstalled by remember {
+        mutableStateOf(
+            try {
+                context.packageManager.getPackageInfo(TERMUX_PACKAGE, 0)
+                true
+            } catch (e: PackageManager.NameNotFoundException) {
+                false
+            }
+        )
+    }
+
+    // 刷新 Termux 检测状态
+    fun refreshTermuxStatus() {
+        isTermuxInstalled = try {
             context.packageManager.getPackageInfo(TERMUX_PACKAGE, 0)
             true
         } catch (e: PackageManager.NameNotFoundException) {
             false
+        }
+    }
+
+    // 监听应用安装/卸载广播
+    val packageReceiver = remember {
+        object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_PACKAGE_ADDED ||
+                    intent?.action == Intent.ACTION_PACKAGE_REMOVED ||
+                    intent?.action == Intent.ACTION_PACKAGE_CHANGED) {
+                    val packageName = intent.data?.schemeSpecificPart
+                    if (packageName == TERMUX_PACKAGE) {
+                        refreshTermuxStatus()
+                    }
+                }
+            }
+        }
+    }
+
+    // 注册广播接收器
+    DisposableEffect(context) {
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addDataScheme("package")
+        }
+        context.registerReceiver(packageReceiver, filter)
+        onDispose {
+            context.unregisterReceiver(packageReceiver)
         }
     }
 
@@ -109,24 +153,31 @@ fun TerminalPanel(
                         }
                     )
                 } else {
-                    AssistChip(
-                        onClick = {
-                            // 打开 F-Droid 下载 Termux
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                data = Uri.parse("https://f-droid.org/packages/com.termux/")
+                    Row {
+                        AssistChip(
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    data = Uri.parse("https://f-droid.org/packages/com.termux/")
+                                }
+                                context.startActivity(intent)
+                                Handler(Looper.getMainLooper()).postDelayed({
+                                    refreshTermuxStatus()
+                                }, 5000)
+                            },
+                            label = { Text("安装 Termux", fontSize = 12.sp) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Warning,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = Color(0xFFFF9800)
+                                )
                             }
-                            context.startActivity(intent)
-                        },
-                        label = { Text("安装 Termux", fontSize = 12.sp) },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.Warning,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = Color(0xFFFF9800)
-                            )
+                        )
+                        IconButton(onClick = { refreshTermuxStatus() }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "刷新", modifier = Modifier.size(20.dp))
                         }
-                    )
+                    }
                 }
             }
         )
@@ -751,16 +802,11 @@ private fun executeWithDirectProcess(
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
 
             // 设置超时 30 秒
-            val future = executor.submit {
+            val future = executor.submit<String> {
                 val output = process.inputStream.bufferedReader().readText()
                 val error = process.errorStream.bufferedReader().readText()
-                val exitCode = process.waitFor()
-
-                if (error.isNotEmpty()) {
-                    "$output\n[Error]\n$error"
-                } else {
-                    output
-                }
+                process.waitFor()
+                if (error.isNotEmpty()) "$output\n[Error]\n$error" else output
             }
 
             try {
