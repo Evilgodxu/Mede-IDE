@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Announcement
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Folder
@@ -27,7 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.medeide.jh.R
 
 enum class SidebarTab {
-    Explorer, Search, Terminal, Snippets, Bookmarks, RecentFiles
+    Explorer, Search, Terminal, Snippets, Bookmarks, RecentFiles, Announcement
 }
 
 @Composable
@@ -84,6 +85,12 @@ fun Sidebar(
                 contentDescription = "最近文件",
                 isSelected = selectedTab == SidebarTab.RecentFiles,
                 onClick = { onTabClick(SidebarTab.RecentFiles) }
+            )
+            SidebarItem(
+                icon = Icons.Default.Announcement,
+                contentDescription = "用户说明",
+                isSelected = selectedTab == SidebarTab.Announcement,
+                onClick = { onTabClick(SidebarTab.Announcement) }
             )
         }
     }

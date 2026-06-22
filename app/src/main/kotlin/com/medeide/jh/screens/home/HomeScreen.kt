@@ -378,6 +378,7 @@ fun HomeScreen(
                     chatViewModel = chatViewModel,
                     editorState = editorState,
                     fileManager = fileManager,
+                    onTabChange = { selectedTab = it },
                     onFileClick = { fileItem ->
                         // 文本文件使用 filePath（相对/绝对均可，EditorScreenState 会处理)
                         // 非文本文件需要绝对路径或 content:// URI
@@ -734,6 +735,7 @@ private fun LeftPanelContent(
     chatViewModel: ChatViewModel,
     editorState: EditorScreenState,
     fileManager: FileManager,
+    onTabChange: (SidebarTab?) -> Unit = {},
     onFileClick: (FileItem) -> Unit = {},
     onAddToConversation: (FileItem) -> Unit = {},
     onOpenFileTab: (String) -> Unit = {},
@@ -839,6 +841,12 @@ private fun LeftPanelContent(
                         editorState.openFileTab(recentFile.path, recentFile.name)
                     }
                 },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        SidebarTab.Announcement -> {
+            com.medeide.jh.screens.home.landscape.sidebar.sidebar.AnnouncementPanel(
+                onBack = { onTabChange(null) },
                 modifier = Modifier.fillMaxSize(),
             )
         }
