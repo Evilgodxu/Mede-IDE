@@ -112,6 +112,23 @@ fun TerminalPanel(
         }
     }
 
+    // 将开发工具脚本复制到外部存储
+    fun copyToolkitToStorage(context: Context): String {
+        val outputDir = File(context.getExternalFilesDir(null), "tools")
+        outputDir.mkdirs()
+        val outputFile = File(outputDir, "android_dev_toolkit.py")
+
+        if (!outputFile.exists()) {
+            context.assets.open("android_dev_toolkit.py").use { inputStream ->
+                outputFile.outputStream().use { outputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            }
+        }
+
+        return outputFile.absolutePath
+    }
+
     // 终端会话列表
     var sessions by remember { mutableStateOf(listOf<TerminalSession>()) }
     var currentSessionIndex by remember { mutableIntStateOf(0) }
@@ -120,6 +137,59 @@ fun TerminalPanel(
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
     val currentSession = sessions.getOrNull(currentSessionIndex)
+
+    // 启动开发工具脚本
+    fun launchDevToolkit() {
+        if (sessions.isEmpty()) {
+            val newSession = TerminalSession(
+                id = System.currentTimeMillis().toString(),
+                title = "会话 ${sessions.size + 1}",
+                createdAt = System.currentTimeMillis()
+            )
+            sessions = sessions + newSession
+            currentSessionIndex = sessions.lastIndex
+        }
+
+        sessions = sessions.mapIndexed { index, session ->
+            if (index == currentSessionIndex) {
+                session.copy(output = session.output + "\n[开发工具] 正在启动 Android 开发工具箱...\n[注意] 此脚本需要 Python 3.8+\n")
+            } else session
+        }
+
+        Thread {
+            try {
+                val toolkitPath = copyToolkitToStorage(context)
+                android.os.Handler(Looper.getMainLooper()).post {
+                    executeInTermux(
+                        context = context,
+                        command = "python3 \"$toolkitPath\"",
+                        onResult = { output ->
+                            sessions = sessions.mapIndexed { index, session ->
+                                if (index == currentSessionIndex) {
+                                    session.copy(output = session.output + output + "\n")
+                                } else session
+                            }
+                        },
+                        onError = { error ->
+                            sessions = sessions.mapIndexed { index, session ->
+                                if (index == currentSessionIndex) {
+                                    session.copy(output = session.output + "[错误] $error\n[提示] 请先在 Termux 中执行: pkg install python\n")
+                                } else session
+                            }
+                        }
+                    )
+                }
+            } catch (e: Exception) {
+                android.os.Handler(Looper.getMainLooper()).post {
+                    sessions = sessions.mapIndexed { index, session ->
+                        if (index == currentSessionIndex) {
+                            session.copy(output = session.output + "[错误] 无法启动开发工具: ${e.message}\n")
+                        } else session
+                    }
+                }
+            }
+        }.start()
+    }
 
     Column(
         modifier = modifier
@@ -147,18 +217,25 @@ fun TerminalPanel(
             actions = {
                 // Termux 状态指示
                 if (isTermuxInstalled) {
-                    AssistChip(
-                        onClick = { },
-                        label = { Text("Termux", fontSize = 12.sp) },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = Color(0xFF4CAF50)
-                            )
+                    Row {
+                        AssistChip(
+                            onClick = { },
+                            label = { Text("Termux", fontSize = 12.sp) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = Color(0xFF4CAF50)
+                                )
+                            }
+                        )
+                        IconButton(
+                            onClick = { launchDevToolkit() }
+                        ) {
+                            Icon(Icons.Default.Build, contentDescription = "开发工具", modifier = Modifier.size(20.dp))
                         }
-                    )
+                    }
                 } else {
                     Row {
                         AssistChip(
@@ -638,18 +715,23 @@ private fun tryExecuteTermuxApi(
     onError: (String) -> Unit
 ) {
     try {
-        // 检查 Termux 包名
-        val termuxPackage = "com.termux"
-        val pm = context.packageManager
+            val pm = context.packageManager
+            var termuxFound = false
+            for (pkg in TERMUX_PACKAGES) {
+                try {
+                    pm.getPackageInfo(pkg, 0)
+                    termuxFound = true
+                    Log.d(TAG, "Termux 已安装: $pkg")
+                    break
+                } catch (_: PackageManager.NameNotFoundException) {
+                }
+            }
 
-        try {
-            pm.getPackageInfo(termuxPackage, 0)
-            Log.d(TAG, "Termux 已安装")
-        } catch (e: PackageManager.NameNotFoundException) {
-            Log.d(TAG, "Termux 未安装，使用备用方案")
-            executeWithDirectProcess(command, onResult, onError)
-            return
-        }
+            if (!termuxFound) {
+                Log.d(TAG, "Termux 未安装，使用备用方案")
+                executeWithDirectProcess(command, onResult, onError)
+                return
+            }
 
         // 创建临时文件来存储命令和输出
         val cacheDir = context.cacheDir
