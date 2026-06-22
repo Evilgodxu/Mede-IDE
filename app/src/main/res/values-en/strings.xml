@@ -1,0 +1,171 @@
+<resources>
+    <string name="app_name">Mede IDE</string>
+
+    <!-- Dual Pane File Manager -->
+    <string name="resource_manager_title">Dual Pane File Manager</string>
+    <string name="no_folder_opened">No folder opened</string>
+    <string name="add_to_conversation">Add to Conversation</string>
+
+    <!-- Center Panel -->
+    <string name="open_folder">Open Folder</string>
+
+    <!-- AI Collaboration -->
+    <string name="trae_title">Chat</string>
+    <string name="ai_collaboration_title">Collaborate with Agent</string>
+    <string name="ai_collaboration_subtitle">Write code and perform routine dev tasks with flexible MCP configuration</string>
+    <string name="chat_with_agent">Chat with Agent</string>
+
+    <!-- Menu -->
+    <string name="menu_file">File</string>
+    <string name="menu_edit">Edit</string>
+
+    <!-- File Menu -->
+    <string name="file_menu_new_file">New File</string>
+    <string name="file_menu_open_file">Open File</string>
+    <string name="file_menu_recent_files">Recent Files</string>
+    <string name="file_menu_save">Save</string>
+    <string name="file_menu_save_as">Save As</string>
+    <string name="file_menu_save_all">Save All</string>
+    <string name="file_menu_auto_save">Auto Save</string>
+
+    <!-- Edit Menu -->
+    <string name="edit_menu_undo">Undo</string>
+    <string name="edit_menu_redo">Redo</string>
+    <string name="edit_menu_cut">Cut</string>
+    <string name="edit_menu_copy">Copy</string>
+    <string name="edit_menu_paste">Paste</string>
+    <string name="edit_menu_find">Find</string>
+    <string name="edit_menu_replace">Replace</string>
+    <string name="edit_menu_find_in_files">Find in Files</string>
+    <string name="edit_menu_replace_in_files">Replace in Files</string>
+
+    <!-- Global Search Panel -->
+    <string name="global_search_title">Search</string>
+    <string name="global_search_refresh">Refresh</string>
+    <string name="global_search_clear">Clear Results</string>
+    <string name="global_search_replace_all">Replace All</string>
+    <string name="global_search_search_hint">Search</string>
+    <string name="global_search_replace_hint">Replace</string>
+
+    <!-- Settings -->
+
+    <string name="settings_theme_title">Theme</string>
+    <string name="settings_language_title">Language</string>
+
+    <!-- Theme Options -->
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+
+    <!-- Language Options -->
+    <string name="language_system">System</string>
+    <string name="language_chinese">简体中文</string>
+    <string name="language_english">English</string>
+
+    <!-- Settings Categories -->
+    <string name="settings_category_general">General</string>
+    <string name="settings_category_mcp">MCP</string>
+    <string name="settings_category_local_model">Local Model</string>
+    <string name="settings_category_cloud_model">Cloud Model</string>
+
+    <string name="settings_category_rules">Role</string>
+    <string name="settings_tab_name">IDE Settings</string>
+
+    <!-- Tab Actions -->
+    <string name="tab_close_all">Close Without Saving</string>
+    <string name="tab_save_and_close">Save and Close</string>
+    <string name="tab_more">More Actions</string>
+    <string name="tab_close">Close</string>
+
+    <!-- Sidebar -->
+    <string name="source_control">Source Control</string>
+    <string name="preview">Preview</string>
+    <string name="extensions">Extensions</string>
+
+    <!-- AI Actions -->
+    <string name="ai_new_task">New Task</string>
+    <string name="ai_history">History</string>
+    <string name="ai_ide_settings">IDE Settings</string>
+    <string name="ai_add_file">Add File</string>
+    <string name="ai_add_image">Add Image</string>
+    <string name="ai_optimize_input">Optimize Input</string>
+    <string name="ai_voice_input">Voice Input</string>
+    <string name="ai_send_message">Send Message</string>
+
+    <!-- Settings Panel -->
+    <string name="loading">Loading…</string>
+    <string name="settings_category_mcp_desc">MCP Server Configuration</string>
+    <string name="settings_category_model_desc">Model Selection \&amp; Configuration</string>
+    <string name="settings_category_conversation_desc">Conversation Settings</string>
+    <string name="settings_category_rules_desc">Role Definition &amp; Switching</string>
+
+    <!-- Common -->
+    <string name="back">Back</string>
+
+    <!-- Model Management -->
+    <string name="model_select_model">Select Model</string>
+    <string name="model_loading">Loading model…</string>
+    <string name="model_no_model">No model loaded</string>
+    <string name="model_load_local">Load Local Model</string>
+    <string name="model_no_models_found">No .litertlm model files found</string>
+    <string name="model_ready">Model ready</string>
+    <string name="model_error">Model load failed</string>
+    <string name="model_refresh">Refresh</string>
+    <string name="model_unload">Unload Model</string>
+    <string name="model_browse_file">Browse local file…</string>
+    <string name="model_recommended_section">▼ Recommended Downloads (download to system Downloads dir)</string>
+    <string name="model_params_title">Model Parameters</string>
+    <string name="model_params_topk">Top-K</string>
+    <string name="model_params_topp">Top-P</string>
+    <string name="model_params_temperature">Temperature</string>
+    <string name="model_params_seed">Seed</string>
+    <string name="model_params_apply">Apply Parameters</string>
+    <string name="model_download_progress">Downloading…</string>
+    <string name="model_download_complete">Download complete ✓</string>
+    <string name="model_download_error">Download failed</string>
+    <string name="model_download_retry">Retry</string>
+    <string name="model_download_scan">Scan downloaded model</string>
+    <string name="model_download_to_dir">Download to system Downloads</string>
+    <string name="model_scan_device">Scan device</string>
+    <string name="model_browse_file_btn">Browse files</string>
+    <string name="chat_cancel">Cancel</string>
+    <string name="chat_clear">Clear Chat</string>
+    <string name="chat_streaming">Generating…</string>
+
+    <!-- Role Definition -->
+    <string name="rules_title">Role Definition</string>
+    <string name="rules_description">Select a role to define assistant behavior. Custom roles are injected as context.</string>
+    <string name="rules_add">Add Role</string>
+    <string name="rules_edit">Edit Role</string>
+    <string name="rules_name_hint">Role Name</string>
+    <string name="rules_content_hint">Describe role settings…</string>
+    <string name="rules_count_hint">%d role(s) enabled</string>
+    <string name="rules_save">Save</string>
+    <string name="rules_cancel">Cancel</string>
+    <string name="rules_default_role_name">Default Role</string>
+    <string name="rules_default_role_desc">Same as the current AI assistant role</string>
+    <string name="rules_default_role_hint">You are an intelligent programming assistant using built-in tools…</string>
+
+    <!-- General - Chat Config -->
+    <string name="general_chat_config">Chat Configuration</string>
+    <string name="general_model_name">Model Name</string>
+    <string name="general_model_name_hint">e.g. Gemini 2.5 Pro</string>
+    <string name="general_user_name">User Name</string>
+    <string name="general_user_name_hint">Your name</string>
+
+    <!-- Skill -->
+    <string name="skill_title">Skill Management</string>
+    <string name="skill_desc">Enable or disable AI skills as conversation context</string>
+    <string name="skill_count">%d skill(s) enabled</string>
+
+    <!-- MCP -->
+    <string name="mcp_title">MCP Servers</string>
+    <string name="mcp_desc">Configure MCP servers to extend AI capabilities</string>
+    <string name="mcp_add">Add MCP Server</string>
+    <string name="mcp_edit">Edit MCP Server</string>
+    <string name="mcp_name">Server Name</string>
+    <string name="mcp_command">Command/Address</string>
+    <string name="mcp_args">Arguments</string>
+
+
+</resources>
