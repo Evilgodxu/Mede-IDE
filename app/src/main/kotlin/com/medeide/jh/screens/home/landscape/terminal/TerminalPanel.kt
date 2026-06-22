@@ -116,22 +116,23 @@ fun TerminalPanel(
     fun copyToolkitToStorage(context: Context): String {
         // 尝试多个位置，确保 Termux 可以访问
         val targetPaths = listOf(
-            File("/sdcard/Download/mede_ide", "android_dev_toolkit.py"),
-            File("/sdcard/mede_ide", "android_dev_toolkit.py"),
-            File(context.getExternalFilesDir(null), "tools/android_dev_toolkit.py")
+            File("/sdcard/Download/mede_ide", "android_dev_toolkit.sh"),
+            File("/sdcard/mede_ide", "android_dev_toolkit.sh"),
+            File(context.getExternalFilesDir(null), "tools/android_dev_toolkit.sh")
         )
 
         for (outputFile in targetPaths) {
             try {
                 outputFile.parentFile?.mkdirs()
                 if (!outputFile.exists()) {
-                    context.assets.open("android_dev_toolkit.py").use { inputStream ->
+                    context.assets.open("android_dev_toolkit.sh").use { inputStream ->
                         outputFile.outputStream().use { outputStream ->
                             inputStream.copyTo(outputStream)
                         }
                     }
                 }
                 if (outputFile.exists()) {
+                    Runtime.getRuntime().exec(arrayOf("chmod", "755", outputFile.absolutePath))
                     return outputFile.absolutePath
                 }
             } catch (e: Exception) {
@@ -165,7 +166,7 @@ fun TerminalPanel(
 
         sessions = sessions.mapIndexed { index, session ->
             if (index == currentSessionIndex) {
-                session.copy(output = session.output + "\n[开发工具] 正在启动 Android 开发工具箱...\n[注意] 此脚本需要 Python 3.8+\n")
+                session.copy(output = session.output + "\n[开发工具] 正在启动 Android 开发工具箱...\n[注意] 此脚本需要 bash 环境\n")
             } else session
         }
 
@@ -175,7 +176,7 @@ fun TerminalPanel(
                 android.os.Handler(Looper.getMainLooper()).post {
                     executeInTermux(
                         context = context,
-                        command = "python3 \"$toolkitPath\"",
+                        command = "bash \"$toolkitPath\"",
                         onResult = { output ->
                             sessions = sessions.mapIndexed { index, session ->
                                 if (index == currentSessionIndex) {
