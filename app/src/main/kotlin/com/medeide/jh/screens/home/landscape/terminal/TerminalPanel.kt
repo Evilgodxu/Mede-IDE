@@ -114,19 +114,32 @@ fun TerminalPanel(
 
     // 将开发工具脚本复制到外部存储
     fun copyToolkitToStorage(context: Context): String {
-        val outputDir = File(context.getExternalFilesDir(null), "tools")
-        outputDir.mkdirs()
-        val outputFile = File(outputDir, "android_dev_toolkit.py")
+        // 尝试多个位置，确保 Termux 可以访问
+        val targetPaths = listOf(
+            File("/sdcard/Download/mede_ide", "android_dev_toolkit.py"),
+            File("/sdcard/mede_ide", "android_dev_toolkit.py"),
+            File(context.getExternalFilesDir(null), "tools/android_dev_toolkit.py")
+        )
 
-        if (!outputFile.exists()) {
-            context.assets.open("android_dev_toolkit.py").use { inputStream ->
-                outputFile.outputStream().use { outputStream ->
-                    inputStream.copyTo(outputStream)
+        for (outputFile in targetPaths) {
+            try {
+                outputFile.parentFile?.mkdirs()
+                if (!outputFile.exists()) {
+                    context.assets.open("android_dev_toolkit.py").use { inputStream ->
+                        outputFile.outputStream().use { outputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    }
                 }
+                if (outputFile.exists()) {
+                    return outputFile.absolutePath
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "复制到 ${outputFile.parent} 失败: ${e.message}")
             }
         }
 
-        return outputFile.absolutePath
+        throw Exception("无法复制脚本到任何可访问的目录")
     }
 
     // 终端会话列表
