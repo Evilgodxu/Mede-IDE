@@ -48,10 +48,16 @@ class TerminalManager {
         val outputChannel = Channel<TerminalOutput>(Channel.UNLIMITED)
 
         try {
+            val workDir = java.io.File(workingDirectory)
+            if (!workDir.exists() || !workDir.isDirectory) {
+                Log.w("TerminalManager", "Working directory not valid: $workingDirectory, using /")
+            }
+
             val processBuilder = ProcessBuilder("sh")
-                .directory(java.io.File(workingDirectory).takeIf { it.exists() && it.isDirectory } ?: java.io.File("/"))
+                .directory(workDir.takeIf { it.exists() && it.isDirectory } ?: java.io.File("/"))
                 .redirectErrorStream(true)
 
+            Log.d("TerminalManager", "Starting shell process in: ${workDir.absolutePath}")
             val process = processBuilder.start()
             val writer = OutputStreamWriter(process.outputStream)
 
@@ -101,6 +107,7 @@ class TerminalManager {
     suspend fun executeCommand(sessionId: String, command: String): Boolean = withContext(Dispatchers.IO) {
         val session = sessions[sessionId] ?: return@withContext false
         try {
+            Log.d("TerminalManager", "Executing command in session $sessionId: $command")
             session.writer?.write("$command\n")
             session.writer?.flush()
             true
@@ -137,17 +144,18 @@ class TerminalManager {
     private fun startReadingOutput(session: TerminalSession) {
         Thread {
             try {
-                val reader = BufferedReader(InputStreamReader(session.process?.inputStream))
-                val buffer = CharArray(4096)
-                var read: Int
-                while (reader.read(buffer).also { read = it } != -1) {
-                    val output = String(buffer, 0, read)
-                    session.outputChannel.trySend(TerminalOutput.Stdout(output))
+                val process = session.process ?: return@Thread
+                val reader = BufferedReader(InputStreamReader(process.inputStream), 8192)
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    session.outputChannel.trySend(TerminalOutput.Stdout("$line\n"))
                 }
                 // 进程结束，等待退出码
-                val exitCode = session.process?.waitFor() ?: -1
+                val exitCode = process.waitFor()
                 session.outputChannel.trySend(TerminalOutput.Exit(exitCode))
+                Log.d("TerminalManager", "Process exited with code: $exitCode")
             } catch (e: Exception) {
+                Log.e("TerminalManager", "Read error", e)
                 session.outputChannel.trySend(TerminalOutput.Error("Read error: ${e.message}", e))
             }
         }.apply { isDaemon = true; start() }
