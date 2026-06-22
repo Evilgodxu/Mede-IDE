@@ -720,7 +720,7 @@ fun TerminalPanel(
                                 color = MaterialTheme.colorScheme.onErrorContainer
                             )
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             "请按以下步骤配置：",
                             fontSize = 12.sp,
@@ -730,12 +730,9 @@ fun TerminalPanel(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             "1. 安装 Termux: https://f-droid.org/packages/com.termux/\n" +
-                            "2. 打开 Termux，执行以下命令启用外部应用权限：\n" +
-                            "   mkdir -p ~/.termux\n" +
-                            "   echo 'allow-external-apps=true' >> ~/.termux/termux.properties\n" +
-                            "   termux-reload-settings\n" +
-                            "3. 安装 Python: pkg install python\n" +
-                            "4. 返回本应用，终端即可正常使用",
+                            "2. 打开 Termux，安装必要工具：\n" +
+                            "   pkg install openjdk-17 gradle wget unzip aapt2\n" +
+                            "3. 返回本应用，终端即可正常使用",
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
@@ -748,8 +745,9 @@ fun TerminalPanel(
 }
 
 /**
- * 通过 Termux RunCommandService 执行命令
- * 需要用户在 Termux 中配置 allow-external-apps=true
+ * 内置终端执行器 - 直接在应用内执行命令
+ * 如果 Termux 已安装，使用 Termux 的 bash 环境
+ * 否则使用系统 shell（功能有限）
  */
 private fun executeInTermux(
     context: Context,
@@ -757,102 +755,80 @@ private fun executeInTermux(
     onResult: (String) -> Unit,
     onError: (String) -> Unit
 ) {
-    val cleanCommand = command.trim()
-    Log.d(TAG, "执行命令: $cleanCommand")
-
-    // 使用 Termux 的 RunCommandService Intent 方式
-    executeViaRunCommandService(context, cleanCommand, onResult, onError)
-}
-
-/**
- * 通过 Termux RunCommandService 执行命令
- * 使用公共存储目录作为输出位置
- */
-private fun executeViaRunCommandService(
-    context: Context,
-    command: String,
-    onResult: (String) -> Unit,
-    onError: (String) -> Unit
-) {
     Thread {
         try {
-            // 使用公共存储目录（Termux 和应用都可以访问）
-            val outputDir = File("/sdcard/mede_terminal")
-            outputDir.mkdirs()
-            val timestamp = System.currentTimeMillis()
-            val outputFile = File(outputDir, "output_$timestamp.txt")
-            val errorFile = File(outputDir, "error_$timestamp.txt")
-            val doneFile = File(outputDir, "done_$timestamp.txt")
+            val termuxBash = "/data/data/com.termux/files/usr/bin/bash"
+            val termuxHome = "/data/data/com.termux/files/home"
+            val termuxPath = "/data/data/com.termux/files/usr/bin:/data/data/com.termux/files/usr/local/bin"
+            val termuxLib = "/data/data/com.termux/files/usr/lib"
 
-            // 清理可能存在的旧文件
-            outputFile.delete()
-            errorFile.delete()
-            doneFile.delete()
+            val process: Process
+            val env: Array<String>
 
-            // 构建完整命令，将输出重定向到公共目录
-            val fullCommand = """
-                $command > /sdcard/mede_terminal/output_$timestamp.txt 2> /sdcard/mede_terminal/error_$timestamp.txt
-                echo DONE > /sdcard/mede_terminal/done_$timestamp.txt
-            """.trimIndent()
-
-            Log.d(TAG, "执行命令: $command")
-            Log.d(TAG, "输出文件: ${outputFile.absolutePath}")
-
-            // 使用 am 命令调用 Termux RunCommandService（更可靠）
-            val amCommand = """
-                am startservice \
-                    -n com.termux/com.termux.app.RunCommandService \
-                    --es com.termux.RUN_COMMAND.command '$fullCommand' \
-                    --ez com.termux.RUN_COMMAND.background true \
-                    --es com.termux.RUN_COMMAND.working_directory '/sdcard'
-            """.trimIndent().replace("\n", " ")
-
-            Log.d(TAG, "am 命令: $amCommand")
-
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", amCommand))
-            process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
-
-            Log.d(TAG, "am 命令执行完成")
-
-            // 等待 Termux 执行完成
-            var waitCount = 0
-            val maxWait = 30
-            while (!doneFile.exists()) {
-                Thread.sleep(500)
-                waitCount++
-                if (waitCount >= maxWait * 2) {
-                    Log.d(TAG, "等待超时，done 文件不存在")
-                    break
-                }
+            // 检查 Termux bash 是否存在
+            if (java.io.File(termuxBash).exists()) {
+                Log.d(TAG, "使用 Termux bash 执行: $command")
+                env = arrayOf(
+                    "HOME=$termuxHome",
+                    "PATH=$termuxPath:/system/bin:/vendor/bin",
+                    "TERM=xterm",
+                    "LD_LIBRARY_PATH=$termuxLib",
+                    "LANG=C.UTF-8"
+                )
+                process = Runtime.getRuntime().exec(
+                    arrayOf(termuxBash, "-c", command),
+                    env,
+                    java.io.File(termuxHome)
+                )
+            } else {
+                Log.d(TAG, "使用系统 shell 执行: $command")
+                process = Runtime.getRuntime().exec(
+                    arrayOf("sh", "-c", command)
+                )
             }
 
             // 读取输出
-            val output = if (outputFile.exists()) outputFile.readText().trim() else ""
-            val error = if (errorFile.exists()) errorFile.readText().trim() else ""
+            val outputReader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream), 8192)
+            val errorReader = java.io.BufferedReader(java.io.InputStreamReader(process.errorStream), 8192)
 
-            Log.d(TAG, "输出内容: ${output.take(200)}")
-            Log.d(TAG, "错误内容: ${error.take(200)}")
+            val outputBuilder = StringBuilder()
+            val errorBuilder = StringBuilder()
 
-            // 清理临时文件
-            outputFile.delete()
-            errorFile.delete()
-            doneFile.delete()
+            var line: String?
+            while (outputReader.readLine().also { line = it } != null) {
+                outputBuilder.append(line).append("\n")
+            }
+
+            while (errorReader.readLine().also { line = it } != null) {
+                errorBuilder.append(line).append("\n")
+            }
+
+            outputReader.close()
+            errorReader.close()
+
+            val exitCode = process.waitFor()
+
+            val output = outputBuilder.toString()
+            val error = errorBuilder.toString()
+
+            Log.d(TAG, "命令执行完成，退出码: $exitCode, 输出长度: ${output.length}")
 
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 if (output.isNotEmpty()) {
                     onResult(output)
                 } else if (error.isNotEmpty()) {
                     onError(error)
-                } else if (!doneFile.exists()) {
-                    onError("[配置提示] Termux 未响应，请确认已配置外部应用权限\n\n在 Termux 中执行：\nmkdir -p ~/.termux\necho 'allow-external-apps=true' >> ~/.termux/termux.properties\ntermux-reload-settings")
+                } else if (exitCode == 0) {
+                    onResult("[命令执行成功]")
                 } else {
-                    onResult("[命令执行成功，无输出]")
+                    onError("命令执行失败（退出码: $exitCode）")
                 }
             }
+
         } catch (e: Exception) {
-            Log.e(TAG, "执行失败: ${e.message}", e)
+            Log.e(TAG, "执行命令失败: ${e.message}")
             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                onError("[执行失败] ${e.message}\n\n请确认：\n1. Termux 已安装\n2. 已配置 allow-external-apps=true\n3. 应用有存储权限")
+                onError("执行失败: ${e.message}")
             }
         }
     }.start()
