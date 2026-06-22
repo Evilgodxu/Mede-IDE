@@ -124,17 +124,13 @@ fun TerminalPanel(
         for (outputFile in targetPaths) {
             try {
                 outputFile.parentFile?.mkdirs()
-                if (!outputFile.exists()) {
-                    context.assets.open("android_dev_toolkit.sh").use { inputStream ->
-                        outputFile.outputStream().use { outputStream ->
-                            inputStream.copyTo(outputStream)
-                        }
+                context.assets.open("android_dev_toolkit.sh").use { inputStream ->
+                    outputFile.outputStream().use { outputStream ->
+                        inputStream.copyTo(outputStream)
                     }
                 }
-                if (outputFile.exists()) {
-                    Runtime.getRuntime().exec(arrayOf("chmod", "755", outputFile.absolutePath))
-                    return outputFile.absolutePath
-                }
+                Runtime.getRuntime().exec(arrayOf("chmod", "755", outputFile.absolutePath))
+                return outputFile.absolutePath
             } catch (e: Exception) {
                 Log.e(TAG, "复制到 ${outputFile.parent} 失败: ${e.message}")
             }

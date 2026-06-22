@@ -133,6 +133,8 @@ mede build_debug MyApp
 - `/sdcard/Download/mede_ide/android_dev_toolkit.sh`
 - `/sdcard/mede_ide/android_dev_toolkit.sh`
 
+**注意：** 每次点击开发工具按钮时，应用会自动覆盖复制最新版本的脚本，确保使用的是最新功能。
+
 ### 使用方式
 
 #### 启动方式
@@ -365,3 +367,4 @@ echo "=== 配置完成 ==="
 - 修复 bash 脚本兼容性问题（替换 `[[ ]]` 语法为标准 sh）
 - 删除代码中的 emoji 图标
 - 简化用户使用指南
+- 修复脚本更新问题：移除脚本复制时的存在性检查，每次点击开发工具按钮都会覆盖复制最新版本
