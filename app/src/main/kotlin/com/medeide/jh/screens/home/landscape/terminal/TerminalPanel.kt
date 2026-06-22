@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -49,7 +50,7 @@ fun TerminalPanel(
         sessions = terminalManager.getActiveSessions()
 
         // 显示欢迎信息
-        outputText += "欢迎使用 Mede IDE 终端！\n"
+        outputText = "欢迎使用 Mede IDE 终端！\n"
         if (toolkitScriptPath != null) {
             outputText += "检测到开发工具脚本：$toolkitScriptPath\n"
             outputText += "运行命令：python3 android_dev_toolkit.py\n"
@@ -57,24 +58,28 @@ fun TerminalPanel(
             outputText += "（注：此脚本需要 Python 环境，如未安装请先运行：pkg install python）\n"
         }
         outputText += "\n"
+    }
 
-        // 监听输出
-        terminalManager.getOutputFlow(session.id)?.collect { output ->
-            when (output) {
-                is TerminalManager.TerminalOutput.Stdout -> {
-                    outputText += output.text
-                }
-                is TerminalManager.TerminalOutput.Stderr -> {
-                    outputText += output.text
-                }
-                is TerminalManager.TerminalOutput.Error -> {
-                    outputText += "\n[错误] ${output.message}\n"
-                }
-                is TerminalManager.TerminalOutput.Started -> {
-                    outputText += "终端已启动 (PID: ${output.pid})\n"
-                }
-                is TerminalManager.TerminalOutput.Exit -> {
-                    outputText += "\n进程退出，代码: ${output.code}\n"
+    // 为当前会话启动输出收集
+    currentSession?.let { session ->
+        LaunchedEffect(session.id) {
+            session.outputChannel.receiveAsFlow().collect { output ->
+                when (output) {
+                    is TerminalManager.TerminalOutput.Stdout -> {
+                        outputText += output.text
+                    }
+                    is TerminalManager.TerminalOutput.Stderr -> {
+                        outputText += output.text
+                    }
+                    is TerminalManager.TerminalOutput.Error -> {
+                        outputText += "\n[错误] ${output.message}\n"
+                    }
+                    is TerminalManager.TerminalOutput.Started -> {
+                        outputText += "终端已启动 (PID: ${output.pid})\n"
+                    }
+                    is TerminalManager.TerminalOutput.Exit -> {
+                        outputText += "\n进程退出，代码: ${output.code}\n"
+                    }
                 }
             }
         }
