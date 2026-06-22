@@ -1,6 +1,5 @@
 package com.medeide.jh.screens.home.landscape.sidebar.sidebar
 
-// 侧栏区 - 图标导航组件
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,8 +8,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -24,7 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.medeide.jh.R
 
 enum class SidebarTab {
-    Explorer, Search
+    Explorer, Search, Terminal, Snippets, Bookmarks, RecentFiles
 }
 
 @Composable
@@ -57,6 +60,30 @@ fun Sidebar(
                 contentDescription = "搜索替换",
                 isSelected = selectedTab == SidebarTab.Search,
                 onClick = { onTabClick(SidebarTab.Search) }
+            )
+            SidebarItem(
+                icon = Icons.Default.Terminal,
+                contentDescription = "终端",
+                isSelected = selectedTab == SidebarTab.Terminal,
+                onClick = { onTabClick(SidebarTab.Terminal) }
+            )
+            SidebarItem(
+                icon = Icons.Default.Code,
+                contentDescription = "代码片段",
+                isSelected = selectedTab == SidebarTab.Snippets,
+                onClick = { onTabClick(SidebarTab.Snippets) }
+            )
+            SidebarItem(
+                icon = Icons.Default.Bookmarks,
+                contentDescription = "书签",
+                isSelected = selectedTab == SidebarTab.Bookmarks,
+                onClick = { onTabClick(SidebarTab.Bookmarks) }
+            )
+            SidebarItem(
+                icon = Icons.Default.History,
+                contentDescription = "最近文件",
+                isSelected = selectedTab == SidebarTab.RecentFiles,
+                onClick = { onTabClick(SidebarTab.RecentFiles) }
             )
         }
     }

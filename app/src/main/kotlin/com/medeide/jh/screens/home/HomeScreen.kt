@@ -370,6 +370,7 @@ fun HomeScreen(
             },
             sidePanel = {
                 LeftPanelContent(
+                    context = context,
                     selectedTab = selectedTab,
                     homeState = homeState,
                     files = files,
@@ -723,6 +724,7 @@ fun HomeScreen(
 
 @Composable
 private fun LeftPanelContent(
+    context: android.content.Context,
     selectedTab: SidebarTab?,
     homeState: HomeUiState,
     files: List<FileItem>,
@@ -787,6 +789,53 @@ private fun LeftPanelContent(
                 fileManager = fileManager,
                 editorState = editorState,
                 onClosePanel = onCloseSearchPanel,
+            )
+        }
+        SidebarTab.Terminal -> {
+            val terminalManager = com.medeide.jh.screens.home.landscape.terminal.TerminalManager()
+            com.medeide.jh.screens.home.landscape.terminal.TerminalPanel(
+                terminalManager = terminalManager,
+                initialWorkingDirectory = homeState.projectDirPath ?: "/storage/emulated/0",
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        SidebarTab.Snippets -> {
+            com.medeide.jh.screens.home.landscape.editor.snippets.SnippetPicker(
+                onSnippetSelected = { snippet ->
+                    val activePath = editorState.getActiveFilePath()
+                    if (activePath != null) {
+                        val currentContent = editorState.editorContent[activePath]?.text ?: ""
+                        val newContent = currentContent + "\n" + snippet.body
+                        editorState.editorContent[activePath] = TextFieldValue(newContent)
+                    }
+                },
+                onDismiss = { /* handled by caller */ },
+            )
+        }
+        SidebarTab.Bookmarks -> {
+            val bookmarkManager = com.medeide.jh.screens.home.landscape.editor.bookmarks.BookmarkManager(context)
+            com.medeide.jh.screens.home.landscape.editor.bookmarks.BookmarkPanel(
+                bookmarkManager = bookmarkManager,
+                editorState = editorState,
+                onNavigateToBookmark = { filePath, line ->
+                    editorState.openFileAtLine(filePath, line)
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        SidebarTab.RecentFiles -> {
+            val recentFilesManager = com.medeide.jh.screens.home.landscape.editor.recent.RecentFilesManager(context)
+            com.medeide.jh.screens.home.landscape.editor.recent.RecentFilesPanel(
+                recentFilesManager = recentFilesManager,
+                onOpenFile = { recentFile ->
+                    val file = java.io.File(recentFile.path)
+                    if (file.isDirectory()) {
+                        viewModel.openAsProjectDirectory(recentFile.path)
+                    } else {
+                        editorState.openFileTab(recentFile.path, recentFile.name)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
