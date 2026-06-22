@@ -745,9 +745,8 @@ fun TerminalPanel(
 }
 
 /**
- * 内置终端执行器 - 直接在应用内执行命令
- * 如果 Termux 已安装，使用 Termux 的 bash 环境
- * 否则使用系统 shell（功能有限）
+ * 内置终端执行器 - 使用 am startservice 调用 Termux RunCommandService
+ * 这是最可靠的方式，不需要直接访问 Termux 的私有目录
  */
 private fun executeInTermux(
     context: Context,
@@ -757,71 +756,43 @@ private fun executeInTermux(
 ) {
     Thread {
         try {
-            val termuxBash = "/data/data/com.termux/files/usr/bin/bash"
-            val termuxHome = "/data/data/com.termux/files/home"
-            val termuxPath = "/data/data/com.termux/files/usr/bin:/data/data/com.termux/files/usr/local/bin"
-            val termuxLib = "/data/data/com.termux/files/usr/lib"
+            val outputFile = File("/sdcard/mede_terminal/output_${System.currentTimeMillis()}.txt")
+            outputFile.parentFile?.mkdirs()
 
-            val process: Process
-            val env: Array<String>
+            val escapedCommand = command.replace("'", "'\\''")
+            val fullCommand = "bash -c '$escapedCommand' > ${outputFile.absolutePath} 2>&1"
 
-            // 检查 Termux bash 是否存在
-            if (java.io.File(termuxBash).exists()) {
-                Log.d(TAG, "使用 Termux bash 执行: $command")
-                env = arrayOf(
-                    "HOME=$termuxHome",
-                    "PATH=$termuxPath:/system/bin:/vendor/bin",
-                    "TERM=xterm",
-                    "LD_LIBRARY_PATH=$termuxLib",
-                    "LANG=C.UTF-8"
-                )
-                process = Runtime.getRuntime().exec(
-                    arrayOf(termuxBash, "-c", command),
-                    env,
-                    java.io.File(termuxHome)
-                )
-            } else {
-                Log.d(TAG, "使用系统 shell 执行: $command")
-                process = Runtime.getRuntime().exec(
-                    arrayOf("sh", "-c", command)
-                )
-            }
+            val amCommand = "am startservice " +
+                    "-n com.termux/com.termux.app.RunCommandService " +
+                    "--es com.termux.RUN_COMMAND.command '$fullCommand' " +
+                    "--ez com.termux.RUN_COMMAND.background false " +
+                    "--es com.termux.RUN_COMMAND.working_directory '/data/data/com.termux/files/home' " +
+                    "--ei com.termux.RUN_COMMAND.session_action 0"
 
-            // 读取输出
-            val outputReader = java.io.BufferedReader(java.io.InputStreamReader(process.inputStream), 8192)
-            val errorReader = java.io.BufferedReader(java.io.InputStreamReader(process.errorStream), 8192)
+            Log.d(TAG, "执行 am 命令: $amCommand")
 
-            val outputBuilder = StringBuilder()
-            val errorBuilder = StringBuilder()
-
-            var line: String?
-            while (outputReader.readLine().also { line = it } != null) {
-                outputBuilder.append(line).append("\n")
-            }
-
-            while (errorReader.readLine().also { line = it } != null) {
-                errorBuilder.append(line).append("\n")
-            }
-
-            outputReader.close()
-            errorReader.close()
-
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", amCommand))
             val exitCode = process.waitFor()
 
-            val output = outputBuilder.toString()
-            val error = errorBuilder.toString()
+            Log.d(TAG, "am 命令执行完成，退出码: $exitCode")
 
-            Log.d(TAG, "命令执行完成，退出码: $exitCode, 输出长度: ${output.length}")
+            Thread.sleep(2000)
 
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
+            if (outputFile.exists()) {
+                val output = outputFile.readText()
+                outputFile.delete()
                 if (output.isNotEmpty()) {
-                    onResult(output)
-                } else if (error.isNotEmpty()) {
-                    onError(error)
-                } else if (exitCode == 0) {
-                    onResult("[命令执行成功]")
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        onResult(output)
+                    }
                 } else {
-                    onError("命令执行失败（退出码: $exitCode）")
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        onError("命令执行完成，但无输出")
+                    }
+                }
+            } else {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    onError("命令执行无输出，可能需要配置 allow-external-apps=true")
                 }
             }
 

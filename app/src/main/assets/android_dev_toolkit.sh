@@ -868,6 +868,25 @@ main() {
     local current_project=""
     local current_path=""
 
+    if [ $# -gt 0 ]; then
+        case "$1" in
+            check_env) check_env ;;
+            create_project) create_project ;;
+            switch_project) switch_project ;;
+            quick_setup) quick_setup ;;
+            build_debug)
+                local projects=($(list_projects))
+                [ ${#projects[@]} -gt 0 ] && build_project "$PROJECTS_BASE/${projects[-1]}" "debug"
+                ;;
+            build_release)
+                local projects=($(list_projects))
+                [ ${#projects[@]} -gt 0 ] && build_project "$PROJECTS_BASE/${projects[-1]}" "release"
+                ;;
+            *) warn "未知命令: $1" ;;
+        esac
+        return 0
+    fi
+
     while true; do
         title "开发工具"
         if [ -n "$current_project" ]; then
@@ -877,6 +896,7 @@ main() {
         fi
 
         echo "
+
   1. 环境检测
   2. 生成项目模板
   3. 切换项目
