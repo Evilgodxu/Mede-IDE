@@ -166,7 +166,7 @@ fun TerminalPanel(
 
         sessions = sessions.mapIndexed { index, session ->
             if (index == currentSessionIndex) {
-                session.copy(output = session.output + "\n[开发工具] 正在启动 Android 开发工具箱...\n[注意] 此脚本需要 bash 环境\n")
+                session.copy(output = session.output + "\n[开发工具] 正在启动 Android 开发工具箱...\n")
             } else session
         }
 
@@ -176,7 +176,7 @@ fun TerminalPanel(
                 android.os.Handler(Looper.getMainLooper()).post {
                     executeInTermux(
                         context = context,
-                        command = "bash \"$toolkitPath\"",
+                        command = "bash \"$toolkitPath\" menu",
                         onResult = { output ->
                             sessions = sessions.mapIndexed { index, session ->
                                 if (index == currentSessionIndex) {
@@ -187,7 +187,7 @@ fun TerminalPanel(
                         onError = { error ->
                             sessions = sessions.mapIndexed { index, session ->
                                 if (index == currentSessionIndex) {
-                                    session.copy(output = session.output + "[错误] $error\n[提示] 请先在 Termux 中执行: pkg install python\n")
+                                    session.copy(output = session.output + "[错误] $error\n")
                                 } else session
                             }
                         }

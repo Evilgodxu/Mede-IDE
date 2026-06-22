@@ -1,6 +1,56 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Android 开发环境自动化管理脚本
-# 支持：环境检测、项目生成、编译、混淆保护、项目切换
+
+BLACK='\033[30m'
+RED='\033[31m'
+GREEN='\033[32m'
+YELLOW='\033[33m'
+BLUE='\033[34m'
+MAGENTA='\033[35m'
+CYAN='\033[36m'
+WHITE='\033[37m'
+BOLD='\033[1m'
+UNDERLINE='\033[4m'
+RESET='\033[0m'
+CLEAR='\033[2J\033[H'
+
+BG_BLACK='\033[40m'
+BG_RED='\033[41m'
+BG_GREEN='\033[42m'
+BG_YELLOW='\033[43m'
+BG_BLUE='\033[44m'
+BG_MAGENTA='\033[45m'
+BG_CYAN='\033[46m'
+BG_WHITE='\033[47m'
+
+print_line() {
+    local char="$1"
+    local color="$2"
+    local len=60
+    echo -e "${color}$(printf "%${len}s" | tr ' ' "$char")${RESET}"
+}
+
+print_title() {
+    print_line '═' "$CYAN"
+    echo -e "${CYAN}${BOLD}                      $1${RESET}"
+    print_line '═' "$CYAN"
+}
+
+print_subtitle() {
+    echo -e "\n${BLUE}${BOLD}  ── $1 ──${RESET}"
+}
+
+print_box() {
+    local content="$1"
+    local color="$2"
+    print_line '─' "$color"
+    echo -e "${color}${content}${RESET}"
+    print_line '─' "$color"
+}
+
+info() { echo -e "${CYAN}${BOLD}[*]${RESET} ${CYAN}$1${RESET}"; }
+ok() { echo -e "${GREEN}${BOLD}[+]${RESET} ${GREEN}$1${RESET}"; }
+warn() { echo -e "${YELLOW}${BOLD}[!]${RESET} ${YELLOW}$1${RESET}"; }
+err() { echo -e "${RED}${BOLD}[-]${RESET} ${RED}$1${RESET}"; }
 
 TERMUX_HOME="$HOME"
 ANDROID_SDK="$TERMUX_HOME/android-sdk"
@@ -10,195 +60,45 @@ GRADLE_PROPS="$TERMUX_HOME/.gradle/gradle.properties"
 AAPT2_PATH="/data/data/com.termux/files/usr/bin/aapt2"
 GRADLE_CMD="gradle"
 
-RED='\033[91m'
-GREEN='\033[92m'
-YELLOW='\033[93m'
-CYAN='\033[96m'
-BOLD='\033[1m'
-RESET='\033[0m'
-
-info() { echo -e "${CYAN}[*] $1${RESET}"; }
-ok() { echo -e "${GREEN}[+] $1${RESET}"; }
-warn() { echo -e "${YELLOW}[!] $1${RESET}"; }
-err() { echo -e "${RED}[-] $1${RESET}"; }
-title() { echo -e "${BOLD}\n========================================\n  $1\n========================================${RESET}"; }
-
-run() {
-    eval "$1"
-    return $?
-}
-
-run_quiet() {
-    eval "$1" > /dev/null 2>&1
-    return $?
-}
-
-run_output() {
-    eval "$1" 2>/dev/null
-}
-
-ask() {
-    local prompt="$1"
-    local default="$2"
-    local suffix=""
-    [ -n "$default" ] && suffix=" [$default]"
-    echo -ne "${YELLOW}  -> $prompt$suffix: ${RESET}"
-    read -r val
-    echo "${val:-$default}"
-}
-
-confirm() {
-    echo -ne "${YELLOW}  -> $1 (y/n): ${RESET}"
-    read -r val
-    [ "$val" = "y" ] || [ "$val" = "Y" ]
-}
-
-write_file() {
-    local path="$1"
-    local content="$2"
-    mkdir -p "$(dirname "$path")"
-    echo "$content" > "$path"
-}
-
-append_file() {
-    local path="$1"
-    local content="$2"
-    echo "$content" >> "$path"
-}
-
 check_env() {
-    title "环境检测"
-    local all_ok=1
-
+    print_title "环境检测"
+    
+    echo -e "\n${WHITE}${BOLD}  正在检测开发环境...${RESET}\n"
+    
     local checks=(
-        "Java (openjdk-17)" "java -version 2>&1 | grep -q '17\\.'" "pkg install -y openjdk-17"
-        "Gradle" "which gradle > /dev/null 2>&1" "pkg install -y gradle"
-        "wget" "which wget > /dev/null 2>&1" "pkg install -y wget"
-        "unzip" "which unzip > /dev/null 2>&1" "pkg install -y unzip"
-        "aapt2 (ARM)" "test -f $AAPT2_PATH" "pkg install -y aapt2"
+        "Java (openjdk-17)" "java -version 2>&1 | grep -q '17\\.'" "已安装" "需安装"
+        "Gradle" "which gradle > /dev/null 2>&1" "已安装" "需安装"
+        "wget" "which wget > /dev/null 2>&1" "已安装" "需安装"
+        "unzip" "which unzip > /dev/null 2>&1" "已安装" "需安装"
+        "aapt2" "test -f $AAPT2_PATH" "已安装" "需安装"
+        "git" "which git > /dev/null 2>&1" "已安装" "需安装"
     )
-
-    local missing_sdk=()
-
-    for ((i=0; i<${#checks[@]}; i+=3)); do
+    
+    local total=${#checks[@]}
+    local count=$((total / 4))
+    local pass=0
+    
+    for ((i=0; i<total; i+=4)); do
         local name="${checks[i]}"
         local check_cmd="${checks[i+1]}"
-        local fix_cmd="${checks[i+2]}"
-
+        local ok_msg="${checks[i+2]}"
+        local err_msg="${checks[i+3]}"
+        
+        printf "  %-25s" "$name"
         if eval "$check_cmd"; then
-            ok "$name"
+            echo -e "${GREEN}${BOLD}✓ $ok_msg${RESET}"
+            pass=$((pass + 1))
         else
-            err "$name"
-            if [ -n "$fix_cmd" ]; then
-                if confirm "是否安装 $name？"; then
-                    info "正在安装 $name..."
-                    run_quiet "$fix_cmd"
-                    if eval "$check_cmd"; then
-                        ok "$name 安装完成并验证通过"
-                    else
-                        err "$name 安装后仍未通过检测，请手动检查"
-                        all_ok=0
-                    fi
-                else
-                    all_ok=0
-                fi
-            else
-                missing_sdk+=("$name")
-                all_ok=0
-            fi
+            echo -e "${RED}${BOLD}✗ $err_msg${RESET}"
         fi
     done
-
-    if [ -d "$ANDROID_SDK/platforms/android-34" ]; then
-        ok "Android SDK"
+    
+    echo -e "\n  ${WHITE}${BOLD}检测完成: ${GREEN}${BOLD}$pass/${count}${RESET} ${WHITE}项通过${RESET}"
+    
+    if [ $pass -ne $count ]; then
+        warn "部分工具未安装，请执行: pkg install openjdk-17 gradle wget unzip aapt2 git"
     else
-        err "Android SDK"
-        missing_sdk+=("Android SDK")
-        all_ok=0
-    fi
-
-    if [ -d "$ANDROID_SDK/build-tools/34.0.0" ]; then
-        ok "SDK build-tools 34"
-    else
-        err "SDK build-tools 34"
-        missing_sdk+=("SDK build-tools 34")
-        all_ok=0
-    fi
-
-    if [ -d "$ANDROID_SDK/ndk/25.1.8937393" ]; then
-        ok "NDK 25"
-    else
-        err "NDK 25"
-        missing_sdk+=("NDK 25")
-        all_ok=0
-    fi
-
-    if [ ${#missing_sdk[@]} -gt 0 ]; then
-        warn "以下 SDK 组件需要手动安装："
-        for item in "${missing_sdk[@]}"; do
-            echo "    - $item"
-        done
-        echo -e "${CYAN}  运行：${RESET}"
-        echo '  sdkmanager --sdk_root=$HOME/android-sdk "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393"'
-    fi
-
-    check_gradle_props
-
-    if [ $all_ok -eq 1 ]; then
-        ok "环境检测全部通过！"
-    else
-        warn "部分组件缺失，请按提示处理后重试"
-    fi
-
-    return $all_ok
-}
-
-check_gradle_props() {
-    mkdir -p "$(dirname "$GRADLE_PROPS")"
-
-    local required=(
-        "org.gradle.jvmargs=-Xmx1024m -XX:MaxMetaspaceSize=256m"
-        "org.gradle.daemon=false"
-        "org.gradle.parallel=false"
-        "android.enableLint=false"
-        "android.aapt2FromMavenOverride=$AAPT2_PATH"
-    )
-
-    local changed=0
-    local existing=()
-
-    if [ -f "$GRADLE_PROPS" ]; then
-        while IFS= read -r line; do
-            if echo "$line" | grep -qE '^[^#].*='; then
-                existing+=("$line")
-            fi
-        done < "$GRADLE_PROPS"
-    fi
-
-    for req in "${required[@]}"; do
-        local key="${req%%=*}"
-        local found=0
-        for line in "${existing[@]}"; do
-            if echo "$line" | grep -q "^$key="; then
-                found=1
-                if [ "$line" != "$req" ]; then
-                    changed=1
-                fi
-                break
-            fi
-        done
-        if [ $found -eq 0 ]; then
-            existing+=("$req")
-            changed=1
-        fi
-    done
-
-    if [ $changed -eq 1 ]; then
-        > "$GRADLE_PROPS"
-        for line in "${existing[@]}"; do
-            echo "$line" >> "$GRADLE_PROPS"
-        done
-        ok "gradle.properties 已更新"
+        ok "开发环境已就绪！"
     fi
 }
 
@@ -215,118 +115,40 @@ list_projects() {
     printf "%s\n" "${projects[@]}" | sort
 }
 
-switch_project() {
-    title "切换项目"
-    local projects=($(list_projects))
-    if [ ${#projects[@]} -eq 0 ]; then
-        warn "没有找到任何项目"
-        return 1
-    fi
-
-    echo -e "${CYAN}  已有项目：${RESET}"
-    for i in "${!projects[@]}"; do
-        echo "    $((i+1)). ${projects[i]}"
-    done
-
-    local choice=$(ask "选择项目编号")
-    local idx=$((choice-1))
-    if [ $idx -ge 0 ] && [ $idx -lt ${#projects[@]} ]; then
-        local project_name="${projects[idx]}"
-        local project_path="$PROJECTS_BASE/$project_name"
-        ok "已切换到项目：$project_name"
-        echo "$project_name|$project_path"
-        return 0
-    else
-        err "编号无效"
-        return 1
-    fi
-}
-
 create_project() {
-    title "生成项目模板"
-
-    local templates=(
-        "1:java:Java Only"
-        "2:java_kotlin:Java + Kotlin"
-        "3:java_kotlin_lua:Java + Kotlin + Lua"
-        "4:lua:Lua Only"
-    )
-
-    echo -e "${CYAN}  选择模板：${RESET}"
-    for t in "${templates[@]}"; do
-        IFS=':' read -r num key name <<< "$t"
-        echo "    $num. $name"
-    done
-
-    local t_choice=$(ask "模板编号" "1")
-    local template_key=""
-    local template_name=""
-    for t in "${templates[@]}"; do
-        IFS=':' read -r num key name <<< "$t"
-        if [ "$num" = "$t_choice" ]; then
-            template_key="$key"
-            template_name="$name"
-            break
-        fi
-    done
-
-    if [ -z "$template_key" ]; then
-        err "无效选项"
+    print_title "生成项目模板"
+    
+    local app_name="${1:-MyApp}"
+    local package_name="${2:-com.example.myapp}"
+    local template="${3:-java}"
+    
+    echo -e "\n${WHITE}${BOLD}  项目信息:${RESET}"
+    echo -e "    应用名称: ${CYAN}$app_name${RESET}"
+    echo -e "    包名: ${CYAN}$package_name${RESET}"
+    echo -e "    模板类型: ${CYAN}$template${RESET}"
+    
+    local project_path="$PROJECTS_BASE/$app_name"
+    local package_path="${package_name//./\/}"
+    
+    if [ -d "$project_path" ]; then
+        err "项目已存在: $project_path"
         return 1
     fi
-
-    info "模板：$template_name"
-
-    echo -e "\n${CYAN}  选择 App 目标 Java 版本：${RESET}"
-    echo "    1. Java 17（推荐，新语法）"
-    echo "    2. Java 8（兼容写法，老设备/老库友好）"
-    local j_choice=$(ask "版本编号" "1")
-    local java_target="17"
-    [ "$j_choice" = "2" ] && java_target="8"
-    info "App 字节码目标：Java $java_target"
-    warn "注：Termux 官方源无 openjdk-8，Gradle 运行环境本身固定为 JDK17，此选项只影响 App 代码按哪种语法标准编译"
-
-    local app_name=$(ask "应用名称" "MyApp")
-    local package_name=$(ask "包名" "com.example.myapp")
-    local project_path="$PROJECTS_BASE/$app_name"
-    local link_path="$PROJECTS_LINK/$app_name"
-
-    if [ -d "$project_path" ]; then
-        if ! confirm "项目 $app_name 已存在，覆盖？"; then
-            return 1
-        fi
-        rm -rf "$project_path"
-    fi
-
-    info "正在生成项目：$app_name（$package_name）..."
-
-    local package_path="${package_name//./\/}"
-
-    local manifest='<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application
-        android:label="'$app_name'"
-        android:theme="@style/AppTheme">
-        <activity android:name=".MainActivity"
-                  android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
-    </application>
-</manifest>'
-
-    local styles='<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="AppTheme" parent="android:Theme.Material.Light"/>
-</resources>'
-
+    
+    info "正在创建项目目录..."
+    mkdir -p "$project_path/app/src/main/java/$package_path"
+    mkdir -p "$project_path/app/src/main/res/values"
+    mkdir -p "$project_path/app/src/main/res/drawable"
+    mkdir -p "$project_path/app/src/main/AndroidManifest.xml"
+    mkdir -p "$project_path/gradle/wrapper"
+    
+    info "正在生成项目文件..."
+    
     local settings="rootProject.name = '$app_name'
 include ':app'"
-
+    
     local root_gradle=''
-    if echo "$template_key" | grep -qE 'kotlin|lua'; then
+    if echo "$template" | grep -qE 'kotlin|lua'; then
         root_gradle='buildscript {
     repositories {
         maven { url "https://maven.aliyun.com/repository/google" }
@@ -354,7 +176,6 @@ allprojects {
     repositories {
         maven { url "https://maven.aliyun.com/repository/google" }
         maven { url "https://maven.aliyun.com/repository/public" }
-        maven { url "https://maven.aliyun.com/repository/gradle-plugin" }
         google()
         mavenCentral()
     }
@@ -366,38 +187,35 @@ allprojects {
     repositories {
         maven { url "https://maven.aliyun.com/repository/google" }
         maven { url "https://maven.aliyun.com/repository/public" }
-        maven { url "https://maven.aliyun.com/repository/gradle-plugin" }
         google()
         mavenCentral()
     }
 }'
     fi
-
+    
     local plugins='apply plugin: "com.android.application"
 '
     local deps=''
-    if echo "$template_key" | grep -qE 'kotlin|lua'; then
+    if echo "$template" | grep -qE 'kotlin|lua'; then
         plugins+='apply plugin: "org.jetbrains.kotlin.android"
 '
         deps='    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
 '
     fi
-    if echo "$template_key" | grep -q 'lua'; then
+    if echo "$template" | grep -q 'lua'; then
         deps+='    implementation "org.luaj:luaj-jse:3.0.1"
 '
     fi
-
+    
     local kotlin_opts=''
-    if echo "$template_key" | grep -qE 'kotlin|lua'; then
-        local kotlin_jvm="1.8"
-        [ "$java_target" = "17" ] && kotlin_jvm="17"
+    if echo "$template" | grep -qE 'kotlin|lua'; then
         kotlin_opts="
     kotlinOptions {
-        jvmTarget = '$kotlin_jvm'
+        jvmTarget = '1.8'
     }
 "
     fi
-
+    
     local app_gradle="$plugins"
     app_gradle+='android {
     compileSdk 34
@@ -405,230 +223,285 @@ allprojects {
 
     defaultConfig {
         applicationId "'$package_name'"
-        minSdk 21
+        minSdk 24
         targetSdk 34
         versionCode 1
         versionName "1.0"
     }
 
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_'$java_target'
-        targetCompatibility JavaVersion.VERSION_'$java_target'
-    }'
-    app_gradle+="$kotlin_opts"
-    app_gradle+='    aaptOptions {
-        cruncherEnabled false
-    }
-
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
+'$kotlin_opts'
 }
 
-dependencies {'
-    app_gradle+="$deps"
-    app_gradle+='}
+dependencies {
+    implementation "androidx.appcompat:appcompat:1.6.1"
+    implementation "com.google.android.material:material:1.11.0"
+    implementation "androidx.constraintlayout:constraintlayout:2.1.4"
+'$deps'}
+'
+    
+    local manifest='<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.'$app_name'">
+        <activity
+            android:name=".'$package_path'.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+'
+    
+    local main_activity="package $package_name;
 
-tasks.whenTaskAdded { task ->
-    if (task.name == "assembleDebug") {
-        task.doLast {
-            copy {
-                from "build/outputs/apk/debug/app-debug.apk"
-                into "/storage/emulated/0/"
-                rename { "'$app_name'-debug.apk" }
-            }
-        }
-    }
-    if (task.name == "assembleRelease") {
-        task.doLast {
-            copy {
-                from "build/outputs/apk/release/app-release.apk"
-                into "/storage/emulated/0/"
-                rename { "'$app_name'-release.apk" }
-            }
-        }
-    }
-}'
-
-    local main_activity=''
-    if [ "$template_key" = "java" ]; then
-        main_activity="package $package_name;
-
-import android.app.Activity;
+import androidx.appcompat.app.AppCompatActivity;
 import android.os.Bundle;
 import android.widget.TextView;
 
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        TextView tv = new TextView(this);
-        tv.setText(\"$app_name\");
-        tv.setTextSize(24);
-        setContentView(tv);
+        setContentView(R.layout.activity_main);
+        
+        TextView textView = findViewById(R.id.textView);
+        textView.setText(\"$app_name - Android Development\");
     }
-}"
-    elif [ "$template_key" = "java_kotlin" ]; then
-        main_activity="package $package_name;
+}
+"
+    
+    local activity_main='<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".'$package_path'.MainActivity">
 
-import android.app.Activity;
-import android.os.Bundle;
-import android.widget.TextView;
+    <TextView
+        android:id="@+id/textView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
-public class MainActivity extends Activity {
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        String msg = KotlinHelper.INSTANCE.getGreeting(\"$app_name\");
-        TextView tv = new TextView(this);
-        tv.setText(msg);
-        tv.setTextSize(24);
-        setContentView(tv);
-    }
-}"
-    elif [ "$template_key" = "java_kotlin_lua" ]; then
-        main_activity="package $package_name;
-
-import android.app.Activity;
-import android.os.Bundle;
-import android.widget.TextView;
-import org.luaj.vm2.LuaValue;
-import org.luaj.vm2.lib.jse.JsePlatform;
-
-public class MainActivity extends Activity {
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        String luaResult = runLua();
-        String kotlinMsg = KotlinHelper.INSTANCE.getGreeting(\"$app_name\");
-        TextView tv = new TextView(this);
-        tv.setText(kotlinMsg + \"\\n\" + luaResult);
-        tv.setTextSize(20);
-        setContentView(tv);
-    }
-
-    private String runLua() {
-        try {
-            org.luaj.vm2.Globals globals = JsePlatform.standardGlobals();
-            LuaValue chunk = globals.load(\"return 'Lua: Hello from LuaJ!'\");
-            return chunk.call().tojstring();
-        } catch (Exception e) {
-            return \"Lua 错误: \" + e.getMessage();
-        }
-    }
-}"
-    else
-        main_activity="package $package_name;
-
-import android.app.Activity;
-import android.os.Bundle;
-import android.widget.TextView;
-import org.luaj.vm2.LuaValue;
-import org.luaj.vm2.lib.jse.JsePlatform;
-
-public class MainActivity extends Activity {
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        String result = runLua();
-        TextView tv = new TextView(this);
-        tv.setText(result);
-        tv.setTextSize(20);
-        setContentView(tv);
-    }
-
-    private String runLua() {
-        try {
-            org.luaj.vm2.Globals globals = JsePlatform.standardGlobals();
-            LuaValue chunk = globals.load(
-                \"local msg = '$app_name - Lua Only\\\\n'\\n\" +
-                \"msg = msg .. 'LuaJ version: ' .. _VERSION\\n\" +
-                \"return msg\"
-            );
-            return chunk.call().tojstring();
-        } catch (Exception e) {
-            return \"Lua 错误: \" + e.getMessage();
-        }
-    }
-}"
-    fi
-
-    local kotlin_helper=''
-    if echo "$template_key" | grep -q 'kotlin'; then
-        kotlin_helper="package $package_name
-
-object KotlinHelper {
-    fun getGreeting(appName: String): String {
-        return \"\$appName - Kotlin + Java\"
-    }
-}"
-    fi
-
-    local proguard="# ProGuard 规则 - $app_name
--keep class $package_name.MainActivity { *; }
--keep class org.luaj.** { *; }
--dontwarn org.luaj.**
--keep class kotlin.** { *; }
--dontwarn kotlin.**
--optimizations \!code/simplification/arithmetic,\!code/simplification/cast,\!field/*,\!class/merging/*
--optimizationpasses 5
--allowaccessmodification"
-
+</androidx.constraintlayout.widget.ConstraintLayout>
+'
+    
+    local strings='<resources>
+    <string name="app_name">'$app_name'</string>
+</resources>
+'
+    
+    local themes='<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.'$app_name'" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/teal_200</item>
+        <item name="colorSecondaryVariant">@color/teal_700</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+    </style>
+</resources>
+'
+    
+    local colors='<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="purple_500">#7B1FA2</color>
+    <color name="purple_700">#5E1B89</color>
+    <color name="teal_200">#80CBC4</color>
+    <color name="teal_700">#00897B</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+</resources>
+'
+    
     local wrapper_props="distributionBase=GRADLE_USER_HOME
 distributionPath=wrapper/dists
 distributionUrl=https\\://mirrors.aliyun.com/gradle/distributions/gradle-8.7-bin.zip
 zipStoreBase=GRADLE_USER_HOME
 zipStorePath=wrapper/dists"
-
-    mkdir -p "$project_path/app/src/main/java/$package_path"
-    mkdir -p "$project_path/app/src/main/res/values"
-    mkdir -p "$project_path/gradle/wrapper"
-
+    
     write_file "$project_path/settings.gradle" "$settings"
     write_file "$project_path/build.gradle" "$root_gradle"
     write_file "$project_path/app/build.gradle" "$app_gradle"
-    write_file "$project_path/app/proguard-rules.pro" "$proguard"
-    write_file "$project_path/gradle/wrapper/gradle-wrapper.properties" "$wrapper_props"
     write_file "$project_path/app/src/main/AndroidManifest.xml" "$manifest"
-    write_file "$project_path/app/src/main/res/values/styles.xml" "$styles"
     write_file "$project_path/app/src/main/java/$package_path/MainActivity.java" "$main_activity"
-
-    if [ -n "$kotlin_helper" ]; then
-        write_file "$project_path/app/src/main/java/$package_path/KotlinHelper.kt" "$kotlin_helper"
-    fi
-
-    local jar_path="$project_path/gradle/wrapper/gradle-wrapper.jar"
-    if [ ! -f "$jar_path" ]; then
-        info "下载 gradle-wrapper.jar..."
-        wget -q "https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar" -O "$jar_path"
-    fi
-
+    write_file "$project_path/app/src/main/res/layout/activity_main.xml" "$activity_main"
+    write_file "$project_path/app/src/main/res/values/strings.xml" "$strings"
+    write_file "$project_path/app/src/main/res/values/themes.xml" "$themes"
+    write_file "$project_path/app/src/main/res/values/colors.xml" "$colors"
+    write_file "$project_path/gradle/wrapper/gradle-wrapper.properties" "$wrapper_props"
+    
+    cp /data/data/com.termux/files/usr/share/java/gradle/wrapper/gradle-wrapper.jar "$project_path/gradle/wrapper/" 2>/dev/null || true
+    
+    ok "项目创建完成！"
+    echo -e "\n${WHITE}${BOLD}  项目位置: ${CYAN}$project_path${RESET}"
+    echo -e "  包名: ${CYAN}$package_name${RESET}"
+    echo -e "  应用名称: ${CYAN}$app_name${RESET}"
+    
     mkdir -p "$PROJECTS_LINK"
-    [ -L "$link_path" ] && rm "$link_path"
-    ln -s "$project_path" "$link_path"
-
-    ok "项目已生成：$project_path"
-    ok "软链接：$link_path"
-
+    ln -s "$project_path" "$PROJECTS_LINK/$app_name" 2>/dev/null || true
+    
     return 0
+}
+
+switch_project() {
+    print_title "切换项目"
+    
+    local projects=($(list_projects))
+    if [ ${#projects[@]} -eq 0 ]; then
+        err "没有找到任何项目"
+        return 1
+    fi
+    
+    echo -e "\n${WHITE}${BOLD}  已有项目:${RESET}\n"
+    
+    for i in "${!projects[@]}"; do
+        echo -e "    ${CYAN}${BOLD}$((i+1)).${RESET} ${WHITE}${projects[i]}${RESET}"
+    done
+    
+    return 0
+}
+
+build_project() {
+    local project_name="$1"
+    local build_type="${2:-debug}"
+    
+    print_title "编译项目（$build_type）"
+    
+    local project_path="$PROJECTS_BASE/$project_name"
+    
+    if [ ! -d "$project_path" ]; then
+        err "项目不存在: $project_path"
+        return 1
+    fi
+    
+    info "项目位置: $project_path"
+    info "编译类型: $build_type"
+    
+    cd "$project_path" || return 1
+    
+    info "正在执行 Gradle 构建..."
+    local cmd="$GRADLE_CMD assemble${build_type^} --no-daemon"
+    
+    echo -e "\n${WHITE}${BOLD}  执行命令: ${CYAN}$cmd${RESET}\n"
+    
+    $cmd
+    
+    local exit_code=$?
+    
+    if [ $exit_code -eq 0 ]; then
+        ok "编译成功！"
+        
+        local apk_path="$project_path/app/build/outputs/apk/$build_type/app-$build_type.apk"
+        if [ -f "$apk_path" ]; then
+            echo -e "\n${WHITE}${BOLD}  APK 位置: ${GREEN}$apk_path${RESET}"
+            
+            local target_apk="/storage/emulated/0/${project_name}-${build_type}.apk"
+            cp "$apk_path" "$target_apk" 2>/dev/null
+            if [ $? -eq 0 ]; then
+                ok "APK 已复制到: $target_apk"
+            fi
+        fi
+    else
+        err "编译失败（退出码: $exit_code）"
+        return 1
+    fi
+    
+    return 0
+}
+
+quick_setup() {
+    print_title "一键配置"
+    
+    info "正在检查 gradle.properties..."
+    local required=(
+        "android.useAndroidX=true"
+        "android.enableJetifier=true"
+        "org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8"
+        "android.enableR8.fullMode=true"
+    )
+    
+    if [ -f "$GRADLE_PROPS" ]; then
+        local changed=0
+        local existing=()
+        while IFS= read -r line; do
+            if echo "$line" | grep -qE '^[^#].*='; then
+                existing+=("$line")
+            fi
+        done < "$GRADLE_PROPS"
+        
+        for req in "${required[@]}"; do
+            local key="${req%%=*}"
+            local found=0
+            for line in "${existing[@]}"; do
+                if echo "$line" | grep -q "^$key="; then
+                    found=1
+                    if [ "$line" != "$req" ]; then
+                        changed=1
+                    fi
+                    break
+                fi
+            done
+            if [ $found -eq 0 ]; then
+                existing+=("$req")
+                changed=1
+            fi
+        done
+        
+        if [ $changed -eq 1 ]; then
+            > "$GRADLE_PROPS"
+            for line in "${existing[@]}"; do
+                echo "$line" >> "$GRADLE_PROPS"
+            done
+            ok "gradle.properties 已更新"
+        else
+            ok "gradle.properties 配置正确"
+        fi
+    else
+        mkdir -p "$(dirname "$GRADLE_PROPS")"
+        printf "%s\n" "${required[@]}" > "$GRADLE_PROPS"
+        ok "gradle.properties 已创建"
+    fi
+    
+    ok "一键配置完成！"
 }
 
 setup_protection() {
     local project_path="$1"
-    local app_name="$2"
-    local package_name="$3"
-
-    title "配置混淆保护"
-    info "启用 R8 全模式 + 字符串加密 + 反调试..."
-
-    local app_gradle_path="$project_path/app/build.gradle"
-    if [ -f "$app_gradle_path" ]; then
-        sed -i 's/minifyEnabled false/minifyEnabled true\n            shrinkResources true\n            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"/g' "$app_gradle_path"
-        ok "build.gradle 混淆配置已更新"
+    local project_name="$2"
+    local package_name="${3:-com.example.app}"
+    
+    print_title "混淆保护配置"
+    
+    if [ ! -d "$project_path" ]; then
+        err "项目不存在: $project_path"
+        return 1
     fi
-
+    
+    info "正在配置混淆规则..."
+    
     local proguard_content=$(cat << 'PROGUARD_EOF'
 # 基础保留
 -keep class $package_name.MainActivity { *; }
@@ -650,11 +523,6 @@ setup_protection() {
 -dontskipnonpubliclibraryclasses
 -verbose
 
-# 类名/方法名完全随机化
--obfuscationdictionary /dev/urandom
--classobfuscationdictionary /dev/urandom
--packageobfuscationdictionary /dev/urandom
-
 # 合并包名
 -repackageclasses "x"
 -flattenpackagehierarchy "x"
@@ -675,19 +543,18 @@ setup_protection() {
 -optimizations \!code/simplification/arithmetic,\!code/simplification/cast,\!field/*,\!class/merging/*,string/encryption
 PROGUARD_EOF
 )
-    # 替换包名变量
     proguard_content=$(echo "$proguard_content" | sed "s/\$package_name/$package_name/g")
-
+    
     write_file "$project_path/app/proguard-rules.pro" "$proguard_content"
     ok "ProGuard 规则已写入"
-
+    
     local gradle_props_project="$project_path/gradle.properties"
     write_file "$gradle_props_project" "android.enableR8.fullMode=true\n"
     ok "R8 全模式已启用"
-
+    
     local guard_dir="$project_path/app/src/main/java/${package_name//./\/}/guard"
     mkdir -p "$guard_dir"
-
+    
     local anti_debug=$(cat << 'JAVA_EOF'
 package $package_name.guard;
 
@@ -714,261 +581,101 @@ public class AntiDebug {
 }
 JAVA_EOF
 )
-    # 替换包名变量
     anti_debug=$(echo "$anti_debug" | sed "s/\$package_name/$package_name/g")
-
+    
     write_file "$guard_dir/AntiDebug.java" "$anti_debug"
-    ok "反调试类已生成：AntiDebug.java"
-
-    ok "混淆保护配置完成！release 版本编译时生效"
-    info "编译 release：gradle assembleRelease --no-daemon"
+    ok "反调试代码已添加"
+    
+    ok "混淆保护配置完成！"
 }
 
-rename_project() {
-    local project_path="$1"
-    local old_app_name="$2"
-    local old_package="$3"
-
-    title "修改项目信息（改名 / 改包）"
-    warn "当前应用名：$old_app_name　当前包名：$old_package"
-
-    local new_app_name=$(ask "新应用名称（留空则不改）" "")
-    local new_package=$(ask "新包名（留空则不改）" "")
-
-    [ -z "$new_app_name" ] && new_app_name="$old_app_name"
-    [ -z "$new_package" ] && new_package="$old_package"
-
-    [ "$new_app_name" = "$old_app_name" ] && [ "$new_package" = "$old_package" ] && {
-        info "未做任何修改"
-        echo "$project_path|$old_app_name|$old_package"
-        return 0
-    }
-
-    local old_pkg_path="${old_package//./\/}"
-    local new_pkg_path="${new_package//./\/}"
-    local base_dir=$(dirname "$project_path")
-    local new_project_path="$base_dir/$new_app_name"
-
-    if [ "$new_app_name" != "$old_app_name" ]; then
-        if [ -d "$new_project_path" ]; then
-            err "目标目录已存在：$new_project_path，取消操作"
-            echo "$project_path|$old_app_name|$old_package"
-            return 1
-        fi
-        mv "$project_path" "$new_project_path"
-        ok "项目目录已重命名：$old_app_name -> $new_app_name"
-    else
-        new_project_path="$project_path"
-    fi
-
-    local java_root="$new_project_path/app/src/main/java"
-    local old_src_dir="$java_root/$old_pkg_path"
-    local new_src_dir="$java_root/$new_pkg_path"
-
-    if [ "$new_package" != "$old_package" ] && [ -d "$old_src_dir" ]; then
-        mkdir -p "$(dirname "$new_src_dir")"
-        mv "$old_src_dir" "$new_src_dir"
-        ok "源码包目录已迁移：$old_pkg_path -> $new_pkg_path"
-
-        local cleanup_dir=$(dirname "$old_src_dir")
-        while [ "$cleanup_dir" != "$java_root" ] && [ -d "$cleanup_dir" ] && [ -z "$(ls -A "$cleanup_dir")" ]; do
-            rmdir "$cleanup_dir"
-            cleanup_dir=$(dirname "$cleanup_dir")
-        done
-    fi
-
-    local target_src_dir="$new_src_dir"
-    [ ! -d "$new_src_dir" ] && target_src_dir="$java_root/$old_pkg_path"
-
-    if [ -d "$target_src_dir" ]; then
-        for fname in "$target_src_dir"/*.java "$target_src_dir"/*.kt; do
-            [ -f "$fname" ] || continue
-            sed -i "s/package $old_package;/package $new_package;/g" "$fname"
-            sed -i "s/package $old_package$/package $new_package/g" "$fname"
-        done
-        ok "源码文件 package 声明已更新"
-    fi
-
-    local gradle_path="$new_project_path/app/build.gradle"
-    if [ -f "$gradle_path" ]; then
-        sed -i "s/namespace '$old_package'/namespace '$new_package'/g" "$gradle_path"
-        sed -i "s/applicationId '$old_package'/applicationId '$new_package'/g" "$gradle_path"
-        sed -i "s/'$old_app_name-debug.apk'/'$new_app_name-debug.apk'/g" "$gradle_path"
-        sed -i "s/'$old_app_name-release.apk'/'$new_app_name-release.apk'/g" "$gradle_path"
-        ok "app/build.gradle 已更新"
-    fi
-
-    local settings_path="$new_project_path/settings.gradle"
-    if [ -f "$settings_path" ]; then
-        write_file "$settings_path" "rootProject.name = '$new_app_name'\ninclude ':app'\n"
-        ok "settings.gradle 已更新"
-    fi
-
-    local manifest_path="$new_project_path/app/src/main/AndroidManifest.xml"
-    if [ -f "$manifest_path" ]; then
-        sed -i "s/android:label=\"$old_app_name\"/android:label=\"$new_app_name\"/g" "$manifest_path"
-        ok "AndroidManifest.xml 已更新"
-    fi
-
-    local proguard_path="$new_project_path/app/proguard-rules.pro"
-    if [ -f "$proguard_path" ]; then
-        sed -i "s/$old_package/$new_package/g" "$proguard_path"
-        ok "proguard-rules.pro 已更新"
-    fi
-
-    local old_link="$PROJECTS_LINK/$old_app_name"
-    local new_link="$PROJECTS_LINK/$new_app_name"
-    [ -L "$old_link" ] && rm "$old_link"
-    [ -L "$new_link" ] && rm "$new_link"
-    ln -s "$new_project_path" "$new_link"
-    ok "软链接已更新：$new_link"
-
-    ok "项目信息修改完成！位置仍在：$new_project_path"
-    echo "$new_project_path|$new_app_name|$new_package"
-    return 0
+show_usage() {
+    print_title "Android 开发工具"
+    
+    echo -e "\n${WHITE}${BOLD}  使用方法:${RESET}\n"
+    echo -e "    ${CYAN}${BOLD}bash android_dev_toolkit.sh <命令> [参数]${RESET}\n"
+    
+    echo -e "${WHITE}${BOLD}  可用命令:${RESET}\n"
+    
+    echo -e "    ${GREEN}${BOLD}menu${RESET}              显示交互式菜单"
+    echo -e "    ${GREEN}${BOLD}check_env${RESET}         检测开发环境"
+    echo -e "    ${GREEN}${BOLD}list_projects${RESET}     列出所有项目"
+    echo -e "    ${GREEN}${BOLD}create_project${RESET}    创建项目"
+    echo -e "    ${GREEN}${BOLD}build_debug${RESET}       编译 Debug 版本"
+    echo -e "    ${GREEN}${BOLD}build_release${RESET}     编译 Release 版本"
+    echo -e "    ${GREEN}${BOLD}quick_setup${RESET}       一键配置环境"
+    echo -e "    ${GREEN}${BOLD}setup_protection${RESET}  配置混淆保护"
+    
+    echo -e "\n${WHITE}${BOLD}  示例:${RESET}\n"
+    echo -e "    ${CYAN}bash android_dev_toolkit.sh check_env${RESET}"
+    echo -e "    ${CYAN}bash android_dev_toolkit.sh create_project MyApp com.example.myapp java${RESET}"
+    echo -e "    ${CYAN}bash android_dev_toolkit.sh build_debug MyApp${RESET}"
+    
+    print_line '═' "$CYAN"
 }
 
-quick_setup() {
-    title "一键配置"
-    check_gradle_props
-
-    local sdk_cmake="$ANDROID_SDK/cmake/3.22.1/bin/cmake"
-    local termux_cmake="/data/data/com.termux/files/usr/bin/cmake"
-    if [ -f "$sdk_cmake" ] && [ ! -L "$sdk_cmake" ]; then
-        local bak="$sdk_cmake.bak"
-        [ ! -f "$bak" ] && mv "$sdk_cmake" "$bak"
-        ln -s "$termux_cmake" "$sdk_cmake"
-        ok "cmake 软链接已修复"
-    fi
-
-    local sdk_ninja="$ANDROID_SDK/cmake/3.22.1/bin/ninja"
-    local termux_ninja="/data/data/com.termux/files/usr/bin/ninja"
-    if [ -f "$sdk_ninja" ] && [ ! -L "$sdk_ninja" ]; then
-        local bak="$sdk_ninja.bak"
-        [ ! -f "$bak" ] && mv "$sdk_ninja" "$bak"
-        ln -s "$termux_ninja" "$sdk_ninja"
-        ok "ninja 软链接已修复"
-    fi
-
-    ok "一键配置完成"
-}
-
-build_project() {
-    local project_path="$1"
-    local build_type="${2:-debug}"
-
-    title "编译项目（$build_type）"
-    cd "$project_path" || return 1
-    local cmd="$GRADLE_CMD assemble${build_type^} --no-daemon"
-    info "执行：$cmd"
-    $cmd
+show_menu() {
+    print_title "Android 开发工具"
+    
+    echo -e "\n${WHITE}${BOLD}  请选择功能:${RESET}\n"
+    
+    echo -e "    ${CYAN}${BOLD}[1]${RESET} ${WHITE}环境检测${RESET}"
+    echo -e "    ${CYAN}${BOLD}[2]${RESET} ${WHITE}列出项目${RESET}"
+    echo -e "    ${CYAN}${BOLD}[3]${RESET} ${WHITE}创建项目${RESET}"
+    echo -e "    ${CYAN}${BOLD}[4]${RESET} ${WHITE}编译 Debug${RESET}"
+    echo -e "    ${CYAN}${BOLD}[5]${RESET} ${WHITE}编译 Release${RESET}"
+    echo -e "    ${CYAN}${BOLD}[6]${RESET} ${WHITE}一键配置${RESET}"
+    echo -e "    ${CYAN}${BOLD}[7]${RESET} ${WHITE}混淆保护${RESET}"
+    echo -e "    ${CYAN}${BOLD}[0]${RESET} ${WHITE}退出${RESET}"
+    
+    echo -e "\n${YELLOW}${BOLD}  提示: 请在终端输入对应的数字并按回车${RESET}"
 }
 
 main() {
-    local current_project=""
-    local current_path=""
-
-    if [ $# -gt 0 ]; then
-        case "$1" in
-            check_env) check_env ;;
-            create_project) create_project ;;
-            switch_project) switch_project ;;
-            quick_setup) quick_setup ;;
-            build_debug)
-                local projects=($(list_projects))
-                [ ${#projects[@]} -gt 0 ] && build_project "$PROJECTS_BASE/${projects[-1]}" "debug"
-                ;;
-            build_release)
-                local projects=($(list_projects))
-                [ ${#projects[@]} -gt 0 ] && build_project "$PROJECTS_BASE/${projects[-1]}" "release"
-                ;;
-            *) warn "未知命令: $1" ;;
-        esac
+    if [ $# -eq 0 ]; then
+        show_menu
         return 0
     fi
-
-    while true; do
-        title "开发工具"
-        if [ -n "$current_project" ]; then
-            echo -e "${GREEN}  当前项目：$current_project${RESET}"
-        else
-            echo -e "${YELLOW}  当前项目：未选择${RESET}"
-        fi
-
-        echo "
-
-  1. 环境检测
-  2. 生成项目模板
-  3. 切换项目
-  4. 一键配置
-  5. 混淆保护配置
-  6. 编译 Debug
-  7. 编译 Release
-  8. 修改项目信息（改名/改包）
-  0. 退出
-"
-        local choice=$(ask "选择功能" "0")
-
-        case "$choice" in
-            1) check_env ;;
-            2)
-                create_project
-                local projects=($(list_projects))
-                [ ${#projects[@]} -gt 0 ] && {
-                    current_project="${projects[-1]}"
-                    current_path="$PROJECTS_BASE/$current_project"
-                }
-                ;;
-            3)
-                local result=$(switch_project)
-                if [ $? -eq 0 ]; then
-                    IFS='|' read -r current_project current_path <<< "$result"
-                fi
-                ;;
-            4) quick_setup ;;
-            5)
-                if [ -z "$current_project" ]; then
-                    warn "请先选择项目（选项3）"
-                else
-                    local pkg=$(ask "包名" "com.example.app")
-                    setup_protection "$current_path" "$current_project" "$pkg"
-                fi
-                ;;
-            6)
-                if [ -z "$current_project" ]; then
-                    warn "请先选择项目（选项3）"
-                else
-                    build_project "$current_path" "debug"
-                fi
-                ;;
-            7)
-                if [ -z "$current_project" ]; then
-                    warn "请先选择项目（选项3）"
-                else
-                    build_project "$current_path" "release"
-                fi
-                ;;
-            8)
-                if [ -z "$current_project" ]; then
-                    warn "请先选择项目（选项3）"
-                else
-                    local old_pkg=$(ask "当前包名（用于定位源码目录）" "com.example.app")
-                    local result=$(rename_project "$current_path" "$current_project" "$old_pkg")
-                    if [ $? -eq 0 ]; then
-                        IFS='|' read -r current_path current_project _ <<< "$result"
-                    fi
-                fi
-                ;;
-            0)
-                echo -e "${CYAN}\n  再见！\n${RESET}"
-                exit 0
-                ;;
-            *) warn "无效选项" ;;
-        esac
-
-        echo -ne "${YELLOW}\n  按 Enter 继续...${RESET}"
-        read -r
-    done
+    
+    case "$1" in
+        menu)
+            show_menu
+            ;;
+        check_env)
+            check_env
+            ;;
+        list_projects)
+            list_projects
+            ;;
+        create_project)
+            create_project "$2" "$3" "$4"
+            ;;
+        switch_project)
+            switch_project
+            ;;
+        quick_setup)
+            quick_setup
+            ;;
+        build_debug)
+            build_project "$2" "debug"
+            ;;
+        build_release)
+            build_project "$2" "release"
+            ;;
+        setup_protection)
+            setup_protection "$2" "$3" "$4"
+            ;;
+        help|--help|-h)
+            show_usage
+            ;;
+        *)
+            err "未知命令: $1"
+            show_usage
+            return 1
+            ;;
+    esac
+    
+    return 0
 }
 
-main
+main "$@"
