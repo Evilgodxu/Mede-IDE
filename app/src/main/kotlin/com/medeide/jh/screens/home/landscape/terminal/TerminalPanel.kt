@@ -32,11 +32,30 @@ fun TerminalPanel(
     var sessions by remember { mutableStateOf(listOf<TerminalManager.TerminalSession>()) }
     var showSessions by remember { mutableStateOf(false) }
 
+    // 检测 py 脚本是否存在
+    val toolkitScriptPath = remember(initialWorkingDirectory) {
+        val possiblePaths = listOf(
+            File(initialWorkingDirectory, "android_dev_toolkit.py"),
+            File(initialWorkingDirectory, "android_dev_toolkit..py"),
+            File("/storage/emulated/0/Termux/Android/android_dev_toolkit.py"),
+        )
+        possiblePaths.find { it.exists() }?.absolutePath
+    }
+
     // 初始化第一个终端会话
     LaunchedEffect(Unit) {
         val session = terminalManager.createSession(initialWorkingDirectory)
         currentSession = session
         sessions = terminalManager.getActiveSessions()
+
+        // 显示欢迎信息和工具提示
+        outputText += "欢迎使用 Mede IDE 终端！\n"
+        if (toolkitScriptPath != null) {
+            outputText += "检测到开发工具脚本：$toolkitScriptPath\n"
+            outputText += "运行命令：python3 android_dev_toolkit.py\n"
+            outputText += "或点击工具栏的 🛠️ 按钮快速启动\n"
+        }
+        outputText += "\n"
 
         // 监听输出
         terminalManager.getOutputFlow(session.id)?.collect { output ->
@@ -92,6 +111,18 @@ fun TerminalPanel(
                     }
                 }) {
                     Icon(Icons.Default.Close, contentDescription = "关闭终端")
+                }
+                // 快速启动开发工具脚本
+                if (toolkitScriptPath != null) {
+                    IconButton(onClick = {
+                        currentSession?.let { session ->
+                            scope.launch {
+                                terminalManager.executeCommand(session.id, "python3 $toolkitScriptPath")
+                            }
+                        }
+                    }) {
+                        Icon(Icons.Default.Build, contentDescription = "运行开发工具")
+                    }
                 }
             }
             Text(
