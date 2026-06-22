@@ -51,6 +51,59 @@ pkg install git nodejs clang make vim
 3. 点击发送按钮或按回车执行
 4. 命令输出会在 2 秒后显示在终端窗口中
 
+### 转发功能（备用方案）
+如果应用内终端无法正常使用，可以使用转发功能：
+1. 在终端输入命令
+2. 点击输入框右侧的绿色跳转按钮
+3. 命令会自动发送到 Termux 应用执行
+4. 在 Termux 中查看命令输出
+
+**注意：** 如果转发功能也无法使用，请直接在 Termux 中执行以下命令：
+
+### Termux 专用指令
+在 Termux 中直接使用开发工具的完整命令：
+
+```bash
+# 查看菜单
+bash /sdcard/Download/mede_ide/android_dev_toolkit.sh menu
+
+# 环境检测
+bash /sdcard/Download/mede_ide/android_dev_toolkit.sh check_env
+
+# 列出项目
+bash /sdcard/Download/mede_ide/android_dev_toolkit.sh list_projects
+
+# 创建项目
+bash /sdcard/Download/mede_ide/android_dev_toolkit.sh create_project MyApp com.example.myapp java
+
+# 编译 Debug
+bash /sdcard/Download/mede_ide/android_dev_toolkit.sh build_debug MyApp
+
+# 编译 Release
+bash /sdcard/Download/mede_ide/android_dev_toolkit.sh build_release MyApp
+
+# 一键配置
+bash /sdcard/Download/mede_ide/android_dev_toolkit.sh quick_setup
+
+# 混淆保护配置
+bash /sdcard/Download/mede_ide/android_dev_toolkit.sh setup_protection <项目路径> <项目名称> <包名>
+```
+
+#### 设置别名（推荐）
+为了更方便地使用，可以设置别名：
+```bash
+echo "alias mede='bash /sdcard/Download/mede_ide/android_dev_toolkit.sh'" >> ~/.bashrc
+source ~/.bashrc
+```
+
+设置别名后可以直接使用：
+```bash
+mede menu
+mede check_env
+mede create_project MyApp com.example.myapp kotlin
+mede build_debug MyApp
+```
+
 ### 工作原理
 - 使用 `am startservice` 调用 Termux 的 `RunCommandService`
 - 命令输出写入公共存储 `/sdcard/mede_terminal/`
