@@ -169,7 +169,7 @@ check_gradle_props() {
 
     if [ -f "$GRADLE_PROPS" ]; then
         while IFS= read -r line; do
-            if [[ "$line" =~ ^[^#].*= ]]; then
+            if echo "$line" | grep -qE '^[^#].*='; then
                 existing+=("$line")
             fi
         done < "$GRADLE_PROPS"
@@ -179,9 +179,9 @@ check_gradle_props() {
         local key="${req%%=*}"
         local found=0
         for line in "${existing[@]}"; do
-            if [[ "$line" == "$key"=* ]]; then
+            if echo "$line" | grep -q "^$key="; then
                 found=1
-                if [[ "$line" != "$req" ]]; then
+                if [ "$line" != "$req" ]; then
                     changed=1
                 fi
                 break
@@ -326,7 +326,7 @@ create_project() {
 include ':app'"
 
     local root_gradle=''
-    if [[ "$template_key" == *"kotlin"* || "$template_key" == "lua" ]]; then
+    if echo "$template_key" | grep -qE 'kotlin|lua'; then
         root_gradle='buildscript {
     repositories {
         maven { url "https://maven.aliyun.com/repository/google" }
@@ -376,19 +376,19 @@ allprojects {
     local plugins='apply plugin: "com.android.application"
 '
     local deps=''
-    if [[ "$template_key" == *"kotlin"* || "$template_key" == "lua" ]]; then
+    if echo "$template_key" | grep -qE 'kotlin|lua'; then
         plugins+='apply plugin: "org.jetbrains.kotlin.android"
 '
         deps='    implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
 '
     fi
-    if [[ "$template_key" == *"lua"* ]]; then
+    if echo "$template_key" | grep -q 'lua'; then
         deps+='    implementation "org.luaj:luaj-jse:3.0.1"
 '
     fi
 
     local kotlin_opts=''
-    if [[ "$template_key" == *"kotlin"* || "$template_key" == "lua" ]]; then
+    if echo "$template_key" | grep -qE 'kotlin|lua'; then
         local kotlin_jvm="1.8"
         [ "$java_target" = "17" ] && kotlin_jvm="17"
         kotlin_opts="
@@ -556,7 +556,7 @@ public class MainActivity extends Activity {
     fi
 
     local kotlin_helper=''
-    if [[ "$template_key" == *"kotlin"* ]]; then
+    if echo "$template_key" | grep -q 'kotlin'; then
         kotlin_helper="package $package_name
 
 object KotlinHelper {
@@ -572,7 +572,7 @@ object KotlinHelper {
 -dontwarn org.luaj.**
 -keep class kotlin.** { *; }
 -dontwarn kotlin.**
--optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*
+-optimizations \!code/simplification/arithmetic,\!code/simplification/cast,\!field/*,\!class/merging/*
 -optimizationpasses 5
 -allowaccessmodification"
 
@@ -672,7 +672,7 @@ setup_protection() {
 }
 
 # 字符串加密
--optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*,string/encryption
+-optimizations \!code/simplification/arithmetic,\!code/simplification/cast,\!field/*,\!class/merging/*,string/encryption
 PROGUARD_EOF
 )
     # 替换包名变量
