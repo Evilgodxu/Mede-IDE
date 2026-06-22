@@ -1,6 +1,7 @@
 package com.medeide.jh.data.source.remote
 
 import android.content.Context
+import android.util.Log
 import com.medeide.jh.model.chat.ApiUsage
 import com.medeide.jh.model.chat.ChatMessage
 import com.medeide.jh.model.chat.ChatRole
@@ -8,6 +9,7 @@ import com.medeide.jh.model.chat.ToolCallInfo
 import com.medeide.jh.model.chat.CloudModelConfig
 import com.medeide.jh.model.chat.CloudToolCall
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
@@ -40,6 +42,39 @@ class CloudLLMClient(private val context: Context) {
             .writeTimeout(60, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .build()
+    }
+
+    // ============================================================
+    // 重试机制
+    // ============================================================
+
+    /** 重试配置 */
+    private data class RetryConfig(
+        val maxRetries: Int = 3,
+        val baseDelayMs: Long = 1000,
+        val maxDelayMs: Long = 30000,
+        val backoffMultiplier: Double = 2.0,
+    )
+
+    /** 计算重试延迟（指数退避 + 抖动） */
+    private fun calculateRetryDelay(attempt: Int, config: RetryConfig): Long {
+        val delay = (config.baseDelayMs * Math.pow(config.backoffMultiplier, attempt.toDouble())).toLong()
+        val jitter = (Math.random() * 1000).toLong()
+        return (delay + jitter).coerceAtMost(config.maxDelayMs)
+    }
+
+    /** 判断是否应该重试的错误 */
+    private fun shouldRetry(error: Throwable, attempt: Int, config: RetryConfig): Boolean {
+        if (attempt >= config.maxRetries) return false
+        val msg = error.message ?: ""
+        return msg.contains("timeout", ignoreCase = true) ||
+               msg.contains("connection", ignoreCase = true) ||
+               msg.contains("reset", ignoreCase = true) ||
+               msg.contains("refused", ignoreCase = true) ||
+               msg.contains("unreachable", ignoreCase = true) ||
+               error is java.net.SocketException ||
+               error is java.net.SocketTimeoutException ||
+               error is java.io.IOException
     }
 
     /** 将图片文件读为 base64 data URI */
@@ -156,6 +191,34 @@ class CloudLLMClient(private val context: Context) {
         toolsJson: String? = null,
         imagePaths: List<String> = emptyList(),
     ): Triple<String, ApiUsage, List<CloudToolCall>> = withContext(Dispatchers.IO) {
+        val retryConfig = RetryConfig()
+        var lastError: Throwable? = null
+
+        for (attempt in 0 until retryConfig.maxRetries) {
+            try {
+                return@withContext sendMessageInternal(config, systemPrompt, messages, onChunk, toolsJson, imagePaths)
+            } catch (e: Exception) {
+                lastError = e
+                if (!shouldRetry(e, attempt, retryConfig)) {
+                    throw e
+                }
+                val delay = calculateRetryDelay(attempt, retryConfig)
+                Log.w("CloudLLMClient", "请求失败，${delay}ms 后重试 (attempt ${attempt + 1}/${retryConfig.maxRetries}): ${e.message}")
+                delay(delay)
+            }
+        }
+        throw lastError ?: RuntimeException("Unknown error")
+    }
+
+    /** 内部实现：发送消息并流式收集响应 */
+    private suspend fun sendMessageInternal(
+        config: CloudModelConfig,
+        systemPrompt: String,
+        messages: List<ChatMessage>,
+        onChunk: (String) -> Unit,
+        toolsJson: String? = null,
+        imagePaths: List<String> = emptyList(),
+    ): Triple<String, ApiUsage, List<CloudToolCall>> {
         val endpoint = config.apiEndpoint.trimEnd('/') + "/chat/completions"
         val jsonBody = buildRequestBody(config, systemPrompt, messages, toolsJson, imagePaths)
 
@@ -240,7 +303,7 @@ class CloudLLMClient(private val context: Context) {
                     arguments = args.ifEmpty { "{}" },
                 ) else null
             }
-        Triple(fullText.toString(), usage, toolCalls)
+        return Triple(fullText.toString(), usage, toolCalls)
     }
 
     /** 验证 API 连接是否正常（非流式短请求） */
