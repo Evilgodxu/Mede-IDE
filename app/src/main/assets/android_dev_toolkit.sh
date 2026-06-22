@@ -593,7 +593,7 @@ show_usage() {
     print_title "Android 开发工具"
     
     echo -e "\n${WHITE}${BOLD}  使用方法:${RESET}\n"
-    echo -e "    ${CYAN}${BOLD}bash android_dev_toolkit.sh <命令> [参数]${RESET}\n"
+    echo -e "    ${CYAN}${BOLD}bash /sdcard/Download/mede_ide/android_dev_toolkit.sh <命令> [参数]${RESET}\n"
     
     echo -e "${WHITE}${BOLD}  可用命令:${RESET}\n"
     
@@ -607,11 +607,11 @@ show_usage() {
     echo -e "    ${GREEN}${BOLD}setup_protection${RESET}  配置混淆保护"
     
     echo -e "\n${WHITE}${BOLD}  示例:${RESET}\n"
-    echo -e "    ${CYAN}bash android_dev_toolkit.sh check_env${RESET}"
-    echo -e "    ${CYAN}bash android_dev_toolkit.sh create_project MyApp com.example.myapp java${RESET}"
-    echo -e "    ${CYAN}bash android_dev_toolkit.sh build_debug MyApp${RESET}"
+    echo -e "    ${CYAN}bash /sdcard/Download/mede_ide/android_dev_toolkit.sh check_env${RESET}"
+    echo -e "    ${CYAN}bash /sdcard/Download/mede_ide/android_dev_toolkit.sh create_project MyApp com.example.myapp java${RESET}"
+    echo -e "    ${CYAN}bash /sdcard/Download/mede_ide/android_dev_toolkit.sh build_debug MyApp${RESET}"
     
-    print_line '═' "$CYAN"
+    print_line '=' "$CYAN"
 }
 
 show_menu() {
@@ -628,12 +628,12 @@ show_menu() {
     echo -e "    ${GREEN}${BOLD}setup_protection${RESET} 混淆保护"
     
     echo -e "\n${YELLOW}${BOLD}  使用方式:${RESET}"
-    echo -e "    ${WHITE}bash android_dev_toolkit.sh <命令> [参数]${RESET}\n"
+    echo -e "    ${WHITE}bash /sdcard/Download/mede_ide/android_dev_toolkit.sh <命令> [参数]${RESET}\n"
     
     echo -e "${YELLOW}${BOLD}  示例:${RESET}"
-    echo -e "    ${WHITE}bash android_dev_toolkit.sh check_env${RESET}"
-    echo -e "    ${WHITE}bash android_dev_toolkit.sh create_project MyApp com.example.myapp java${RESET}"
-    echo -e "    ${WHITE}bash android_dev_toolkit.sh build_debug MyApp${RESET}\n"
+    echo -e "    ${WHITE}bash /sdcard/Download/mede_ide/android_dev_toolkit.sh check_env${RESET}"
+    echo -e "    ${WHITE}bash /sdcard/Download/mede_ide/android_dev_toolkit.sh create_project MyApp com.example.myapp java${RESET}"
+    echo -e "    ${WHITE}bash /sdcard/Download/mede_ide/android_dev_toolkit.sh build_debug MyApp${RESET}\n"
 }
 
 main() {
