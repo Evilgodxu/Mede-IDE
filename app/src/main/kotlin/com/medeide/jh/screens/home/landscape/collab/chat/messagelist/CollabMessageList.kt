@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,6 +43,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.luminance
@@ -269,35 +271,35 @@ private fun ModelItemView(
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
         )
 
-        // 思考内容（可展开+虚线分隔）
-        if (item.channelContent != null) {
-            var thinkExpanded by remember { mutableStateOf(false) }
+        // 思考内容（简化为 Thinking + 旋转图标）
+        if (item.channelContent != null || item.isStreaming) {
             val dividerColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
             Column(modifier = Modifier.widthIn(max = 360.dp)) {
                 Row(
-                    modifier = Modifier
-                        .clickable { thinkExpanded = !thinkExpanded }
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val infiniteTransition = rememberInfiniteTransition()
+                    val rotation by infiniteTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 360f,
+                        animationSpec = infiniteRepeatable(
+                            tween(1000, easing = androidx.compose.animation.core.LinearEasing),
+                            RepeatMode.Restart
+                        )
+                    )
+                    Box(modifier = Modifier.size(12.dp)) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.fillMaxSize().rotate(rotation),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
                     Text(
-                        if (thinkExpanded) "▼" else "▶",
+                        "Thinking",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.width(2.dp))
-                    Text(
-                        "思考",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                if (thinkExpanded) {
-                    Text(
-                        item.channelContent,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                     )
                 }
                 // 虚线分隔
