@@ -22,8 +22,8 @@ android {
         applicationId = "com.medeide.jh"
         minSdk = 32
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
