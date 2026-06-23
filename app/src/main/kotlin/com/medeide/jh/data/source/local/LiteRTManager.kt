@@ -412,6 +412,9 @@ class LiteRTManager(private val context: Context) : AutoCloseable {
             RecommendedModel("gemma-4-E4B-IT-多模态", "~5 GB",
                 "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm?download=true",
                 "Gemma4 多模态，支持图像理解，8GB+ RAM", "gemma-4-E4B-it.litertlm"),
+            RecommendedModel("Qwen2.5-1.5B-Instruct", "~1.5 GB",
+                "https://cas-bridge.xethub.hf.co/xet-bridge-us/681277ba9d9bef10660a5a0b/b3265a1aac578bc18155c6dfc1fed7319de489e1aadbd28c43478a6b87c8c4b9?Expires=1782220904&Policy=eyJTdGF0ZW1lbnQiOlt7IlJlc291cmNlIjoiaHR0cHM6Ly9jYXMtYnJpZGdlLnhldGh1Yi5oZi5jby94ZXQtYnJpZGdlLXVzLzY4MTI3N2JhOWQ5YmVmMTA2NjBhNWEwYi9iMzI2NWExYWFjNTc4YmMxODE1NWM2ZGZjMWZlZDczMTlkZTQ4OWUxYWFkYmQyOGM0MzQ3OGE2Yjg3YzhjNGI5KiIsIkNvbmRpdGlvbiI6eyJEYXRlTGVzc1RoYW4iOnsiQVdTOkVwb2NoVGltZSI6MTc4MjIyMDkwNH19fV19&Signature=MEYCIQCZtkhYLe3WzUfkLl2hoq4AWe9iqFYkrQBe9U5ZPxqIjwIhAPqD72iCrHrpNkxDPmZAAu6bl-IOF27DsY5idvfyPKL0&Key-Pair-Id=K1LYXO563TGWFU&response-content-disposition=inline%3B+filename*%3DUTF-8%27%27Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm%3B+filename%3D%22Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm%22%3B&X-Xet-Cas-Uid=62171e3b6a99db28e0b3159d&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=cas%2F20260623%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260623T122144Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=d693d1de5407c4fe485782f55ed67e9f002cd75420ad71682b5a22517064b59d",
+                "Qwen2.5 1.5B 指令模型，4096 上下文，轻量级，4GB+ RAM", "Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm"),
         )
 
         // 已知 NPU 驱动库文件（按优先级排列）
