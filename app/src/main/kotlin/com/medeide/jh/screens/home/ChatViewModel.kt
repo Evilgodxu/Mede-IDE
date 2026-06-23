@@ -1251,7 +1251,7 @@ class ChatViewModel(
             val updatedMessages = state.messages.map { msg ->
                 if (msg.id == msgId) {
                     val newContent = if (append) msg.content + chunk else chunk
-                    msg.copy(content = newContent, isStreaming = true)
+                    msg.copy(content = newContent, isStreaming = true, channelContent = msg.channelContent)
                 } else msg
             }
             state.copy(messages = updatedMessages)
