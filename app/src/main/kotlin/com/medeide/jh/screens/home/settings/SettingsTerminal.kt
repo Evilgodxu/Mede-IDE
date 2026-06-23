@@ -31,7 +31,7 @@ fun SettingsTerminal(viewModel: HomeViewModel) {
                     onValueChange = { viewModel.setTerminalHeight(it.toInt()) },
                     valueRange = 100f..500f,
                     steps = 7,
-                    modifier = Modifier.padding(top = 12.dp),
+                    modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
                 )
 
                 Row(modifier = Modifier.padding(top = 8.dp)) {
