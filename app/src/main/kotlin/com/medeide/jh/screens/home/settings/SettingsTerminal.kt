@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.medeide.jh.R
 import com.medeide.jh.screens.home.HomeViewModel
@@ -22,7 +23,7 @@ fun SettingsTerminal(viewModel: HomeViewModel) {
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Text(text = "终端设置", style = MaterialTheme.typography.titleMedium, fontWeight = MaterialTheme.typography.titleMedium.fontWeight, color = MaterialTheme.colorScheme.onSurface)
+        Text(text = "终端设置", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {

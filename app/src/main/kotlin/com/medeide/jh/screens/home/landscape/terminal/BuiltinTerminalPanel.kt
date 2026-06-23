@@ -1,20 +1,20 @@
 package com.medeide.jh.screens.home.landscape.terminal
 
 import android.content.Context
-import android.util.AttributeSet
-import android.util.Log
 import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
@@ -61,99 +61,41 @@ fun BuiltinTerminalPanel(
 
             override fun getTerminalCursorStyle(): Int = 0
 
-            override fun logError(tag: String, message: String) {
-                Log.e(tag, message)
-            }
-
-            override fun logWarn(tag: String, message: String) {
-                Log.w(tag, message)
-            }
-
-            override fun logInfo(tag: String, message: String) {
-                Log.i(tag, message)
-            }
-
-            override fun logDebug(tag: String, message: String) {
-                Log.d(tag, message)
-            }
-
-            override fun logVerbose(tag: String, message: String) {
-                Log.v(tag, message)
-            }
-
-            override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {
-                Log.e(tag, message, e)
-            }
-
-            override fun logStackTrace(tag: String, e: Exception) {
-                Log.e(tag, "", e)
-            }
+            override fun logError(tag: String, message: String) {}
+            override fun logWarn(tag: String, message: String) {}
+            override fun logInfo(tag: String, message: String) {}
+            override fun logDebug(tag: String, message: String) {}
+            override fun logVerbose(tag: String, message: String) {}
+            override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {}
+            override fun logStackTrace(tag: String, e: Exception) {}
         }
     }
 
     val viewClient = remember {
         object : TerminalViewClient {
-            override fun onScale(scale: Float): Float {
-                return scale.coerceIn(0.5f, 2.0f)
-            }
-
+            override fun onScale(scale: Float): Float = scale.coerceIn(0.5f, 2.0f)
             override fun onSingleTapUp(e: android.view.MotionEvent) {}
-
             override fun shouldBackButtonBeMappedToEscape(): Boolean = false
-
             override fun shouldEnforceCharBasedInput(): Boolean = false
-
             override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
-
             override fun isTerminalViewSelected(): Boolean = true
-
             override fun copyModeChanged(copyMode: Boolean) {}
-
             override fun onKeyDown(keyCode: Int, e: android.view.KeyEvent, session: TerminalSession): Boolean = false
-
             override fun onKeyUp(keyCode: Int, e: android.view.KeyEvent): Boolean = false
-
             override fun onLongPress(event: android.view.MotionEvent): Boolean = false
-
             override fun readControlKey(): Boolean = false
-
             override fun readAltKey(): Boolean = false
-
             override fun readShiftKey(): Boolean = false
-
             override fun readFnKey(): Boolean = false
-
             override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean = false
-
             override fun onEmulatorSet() {}
-
-            override fun logError(tag: String, message: String) {
-                Log.e(tag, message)
-            }
-
-            override fun logWarn(tag: String, message: String) {
-                Log.w(tag, message)
-            }
-
-            override fun logInfo(tag: String, message: String) {
-                Log.i(tag, message)
-            }
-
-            override fun logDebug(tag: String, message: String) {
-                Log.d(tag, message)
-            }
-
-            override fun logVerbose(tag: String, message: String) {
-                Log.v(tag, message)
-            }
-
-            override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {
-                Log.e(tag, message, e)
-            }
-
-            override fun logStackTrace(tag: String, e: Exception) {
-                Log.e(tag, "", e)
-            }
+            override fun logError(tag: String, message: String) {}
+            override fun logWarn(tag: String, message: String) {}
+            override fun logInfo(tag: String, message: String) {}
+            override fun logDebug(tag: String, message: String) {}
+            override fun logVerbose(tag: String, message: String) {}
+            override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {}
+            override fun logStackTrace(tag: String, e: Exception) {}
         }
     }
 
@@ -178,33 +120,39 @@ fun BuiltinTerminalPanel(
         view.setTerminalViewClient(viewClient)
         view.setTextSize(14)
         view.attachSession(session)
+        view.isFocusable = true
+        view.isFocusableInTouchMode = true
         terminalView = view
     }
 
-    fun showKeyboard() {
-        terminalView?.requestFocus()
+    fun showKeyboard(view: TerminalView) {
+        view.requestFocus()
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        imm.showSoftInput(terminalView, InputMethodManager.SHOW_IMPLICIT)
+        imm.showSoftInput(view, InputMethodManager.SHOW_FORCED)
     }
 
-    Box(
-        modifier = modifier.fillMaxSize()
-    ) {
-        if (terminalView != null) {
+    Box(modifier = modifier.fillMaxSize()) {
+        if (isSessionActive && terminalView != null) {
             AndroidView(
-                factory = { terminalView!! },
+                factory = {
+                    terminalView!!.apply {
+                        layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    }
+                },
                 modifier = Modifier.fillMaxSize(),
                 update = { view ->
-                    if (!isSessionActive) {
-                        initializeTerminal()
+                    if (!view.hasFocus()) {
+                        view.requestFocus()
                     }
-                }
+                },
+                onRelease = {}
             )
         } else {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black),
+                modifier = Modifier.fillMaxSize().background(Color.Black),
                 contentAlignment = Alignment.Center
             ) {
                 Text("点击启动终端", color = Color.Gray)
@@ -213,12 +161,15 @@ fun BuiltinTerminalPanel(
 
         if (!isSessionActive) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable {
-                        initializeTerminal()
-                        showKeyboard()
-                    }
+                modifier = Modifier.fillMaxSize().clickable {
+                    initializeTerminal()
+                }
+            )
+        } else {
+            Box(
+                modifier = Modifier.fillMaxSize().clickable {
+                    terminalView?.let { showKeyboard(it) }
+                }
             )
         }
     }
