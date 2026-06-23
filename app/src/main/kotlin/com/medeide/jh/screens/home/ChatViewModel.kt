@@ -863,6 +863,7 @@ class ChatViewModel(
 
         var currentMsgId = msgId
         var cloudRounds = 0
+        var channelContent: String? = null
 
         val historyMessages = mutableListOf<ChatMessage>()
         val lastUserIdx = _state.value.messages.indexOfLast { it.role == ChatRole.User && it.id != currentMsgId }
@@ -1072,7 +1073,7 @@ class ChatViewModel(
             if (cleanedContent != cleanResponse) {
                 _state.update { state ->
                     val updatedMessages = state.messages.map { msg ->
-                        if (msg.id == currentMsgId) msg.copy(content = cleanedContent) else msg
+                        if (msg.id == currentMsgId) msg.copy(content = cleanedContent, channelContent = channelContent) else msg
                     }
                     state.copy(messages = updatedMessages)
                 }
