@@ -87,6 +87,7 @@ fun HomeScreen(
     val audioPlaybackState = remember { com.medeide.jh.screens.home.audioplayer.AudioPlaybackState() }
     val videoPlaybackState = remember { com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlaybackState() }
     val allRecent by viewModel.allRecent.collectAsState()
+    val terminalHeight by viewModel.terminalHeight.collectAsState()
 
     // 每次启动时检测权限，已有权限则自动打开存储目录
     LaunchedEffect(Unit) {
@@ -687,6 +688,7 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxSize(),
                         )
                     },
+                    terminalHeight = terminalHeight,
                 )
             },
             collabPanel = {

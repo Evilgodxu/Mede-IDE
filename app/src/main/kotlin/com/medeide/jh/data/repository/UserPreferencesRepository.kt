@@ -59,6 +59,8 @@ class UserPreferencesRepository(private val context: Context) {
         val PERMISSION_GUIDE_SHOWN = booleanPreferencesKey("permission_guide_shown")
         // 角色定义
         val ACTIVE_ROLE_ID = stringPreferencesKey("active_role_id")
+        // 终端设置
+        val TERMINAL_HEIGHT = intPreferencesKey("terminal_height")
     }
 
     val themeMode: Flow<String> = context.dataStore.data
@@ -407,5 +409,13 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun setPermissionGuideShown(shown: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.PERMISSION_GUIDE_SHOWN] = shown }
+    }
+
+    // 终端高度设置（默认 200dp，范围 100-500）
+    val terminalHeight: Flow<Int> = context.dataStore.data
+        .map { (it[PreferencesKeys.TERMINAL_HEIGHT] ?: 200).coerceIn(100, 500) }
+
+    suspend fun setTerminalHeight(height: Int) {
+        context.dataStore.edit { it[PreferencesKeys.TERMINAL_HEIGHT] = height.coerceIn(100, 500) }
     }
 }

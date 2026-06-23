@@ -199,6 +199,14 @@ class HomeViewModel(
             .take(20)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    // 终端高度设置
+    val terminalHeight: StateFlow<Int> = userPreferencesRepository.terminalHeight
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 200)
+
+    fun setTerminalHeight(height: Int) {
+        viewModelScope.launch { userPreferencesRepository.setTerminalHeight(height) }
+    }
+
     fun recordRecentFile(path: String, name: String) {
         viewModelScope.launch { userPreferencesRepository.addRecentFile(path, name) }
     }

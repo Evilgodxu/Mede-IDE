@@ -79,6 +79,7 @@
     <string name="settings_category_local_model">本地模型</string>
     <string name="settings_category_cloud_model">云端模型</string>
     <string name="settings_category_rules">角色定义</string>
+    <string name="settings_category_terminal">终端设置</string>
 
     <!-- Tab 操作 -->
     <string name="tab_close_all">不保存关闭</string>

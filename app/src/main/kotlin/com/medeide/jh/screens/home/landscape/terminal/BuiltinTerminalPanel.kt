@@ -4,24 +4,17 @@ import android.content.Context
 import android.util.AttributeSet
 import android.util.Log
 import android.view.ViewGroup
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
@@ -30,7 +23,6 @@ import com.termux.view.TerminalViewClient
 
 private const val TAG = "BuiltinTerminalPanel"
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BuiltinTerminalPanel(
     currentPath: String,
@@ -41,7 +33,6 @@ fun BuiltinTerminalPanel(
     val context = LocalContext.current
     var terminalView by remember { mutableStateOf<TerminalView?>(null) }
     var terminalSession by remember { mutableStateOf<TerminalSession?>(null) }
-    var commandInput by remember { mutableStateOf("") }
     var isSessionActive by remember { mutableStateOf(false) }
 
     val sessionClient = remember {
@@ -190,106 +181,45 @@ fun BuiltinTerminalPanel(
         terminalView = view
     }
 
-    fun sendCommand(command: String) {
-        terminalSession?.let { session ->
-            session.write(command + "\n")
-        }
+    fun showKeyboard() {
+        terminalView?.requestFocus()
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(terminalView, InputMethodManager.SHOW_IMPLICIT)
     }
 
-    Column(
+    Box(
         modifier = modifier.fillMaxSize()
     ) {
-        TopAppBar(
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Terminal,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("内置终端")
-                }
-            },
-            navigationIcon = {
-                IconButton(onClick = onClosePanel) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "关闭")
-                }
-            },
-            actions = {
-                IconButton(onClick = { initializeTerminal() }) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = "启动终端")
-                }
-            }
-        )
-
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .background(Color.Black)
-        ) {
-            if (terminalView != null) {
-                AndroidView(
-                    factory = { terminalView!! },
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("点击右上角按钮启动终端", color = Color.Gray)
-                        Text("或使用下方输入框直接执行命令", color = Color.Gray, fontSize = 12.sp)
+        if (terminalView != null) {
+            AndroidView(
+                factory = { terminalView!! },
+                modifier = Modifier.fillMaxSize(),
+                update = { view ->
+                    if (!isSessionActive) {
+                        initializeTerminal()
                     }
                 }
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("点击启动终端", color = Color.Gray)
             }
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextField(
-                value = commandInput,
-                onValueChange = { commandInput = it },
+        if (!isSessionActive) {
+            Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .background(Color.Black, androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
-                    .padding(8.dp),
-                textStyle = TextStyle(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp,
-                    color = Color.White
-                ),
-                singleLine = true,
-                placeholder = {
-                    Text(
-                        "输入命令...",
-                        color = Color.Gray,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 14.sp
-                    )
-                }
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            IconButton(
-                onClick = {
-                    if (commandInput.isNotBlank()) {
-                        if (!isSessionActive) {
-                            initializeTerminal()
-                        }
-                        sendCommand(commandInput)
-                        commandInput = ""
+                    .fillMaxSize()
+                    .clickable {
+                        initializeTerminal()
+                        showKeyboard()
                     }
-                },
-                enabled = commandInput.isNotBlank()
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
-            }
+            )
         }
     }
 }

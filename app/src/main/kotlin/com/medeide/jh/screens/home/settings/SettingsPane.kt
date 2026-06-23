@@ -44,6 +44,7 @@ enum class SettingsCategory(val labelResId: Int) {
     LocalModel(R.string.settings_category_local_model),
     CloudModel(R.string.settings_category_cloud_model),
     MCP(R.string.settings_category_mcp),
+    Terminal(R.string.settings_category_terminal),
 }
 
 // 双列设置面板
@@ -79,6 +80,7 @@ fun SettingsPane(
                 onSetActiveRoleId = { viewModel.setActiveRoleId(it) },
                 onSetMcpServers = { viewModel.setMcpServers(it) },
                 chatViewModel = chatViewModel,
+                viewModel = viewModel,
             )
         }
     }
@@ -103,6 +105,7 @@ private fun SettingsCategoryContent(
     onSetActiveRoleId: (String) -> Unit,
     onSetMcpServers: (List<McpServer>) -> Unit,
     chatViewModel: ChatViewModel?,
+    viewModel: HomeViewModel,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -129,6 +132,7 @@ private fun SettingsCategoryContent(
             SettingsCategory.LocalModel -> SettingsLocalModel(chatViewModel)
             SettingsCategory.CloudModel -> SettingsCloudModel(chatViewModel)
             SettingsCategory.MCP -> SettingsMcp(state.mcpServers, onSetMcpServers)
+            SettingsCategory.Terminal -> SettingsTerminal(viewModel)
         }
     }
 }

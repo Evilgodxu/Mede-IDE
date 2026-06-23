@@ -114,6 +114,7 @@ fun MainContentArea(
     isTerminalVisible: Boolean = false,
     onToggleTerminal: () -> Unit = {},
     terminalContent: @Composable () -> Unit = {},
+    terminalHeight: Int = 200,
 ) {
     val hasTabs = tabs.isNotEmpty()
 
@@ -304,49 +305,44 @@ fun MainContentArea(
                 }
             }
 
-            // 终端面板 - 类似 VS Code 底部终端样式
+            // 终端面板 - 极简样式
             if (isTerminalVisible) {
                 HorizontalDivider(
                     thickness = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
                 )
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(200.dp)
+                        .height(terminalHeight.dp)
+                        .background(Color.Black)
                 ) {
-                    // 终端标题栏
-                    Row(
+                    // 极简终端名称标签
+                    Text(
+                        text = "Terminal",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = Color.DarkGray,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(28.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                        verticalAlignment = Alignment.CenterVertically
+                            .align(Alignment.TopStart)
+                            .padding(start = 8.dp, top = 2.dp)
+                    )
+                    // 关闭按钮
+                    IconButton(
+                        onClick = onToggleTerminal,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(20.dp)
                     ) {
-                        Text(
-                            text = "Terminal",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 12.dp)
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "关闭终端",
+                            modifier = Modifier.size(10.dp),
+                            tint = Color.DarkGray
                         )
-                        Spacer(modifier = Modifier.weight(1f))
-                        IconButton(
-                            onClick = onToggleTerminal,
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "关闭终端",
-                                modifier = Modifier.size(12.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
                     }
-                    // 终端内容区域
+                    // 终端内容区域（覆盖整个面板）
                     Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
+                        modifier = Modifier.fillMaxSize()
                     ) {
                         terminalContent()
                     }
