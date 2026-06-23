@@ -1,14 +1,46 @@
-*.iml
+# Gradle
 .gradle
-.kotlin
-Example
-/local.properties
-/.idea
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+build/
+app/build/
+*.iml
+
+# Android Studio / IDEA
+.idea/
+*.ipr
+*.iws
+.idea/
+*.iml
 local.properties
-/app/build
+
+# Kotlin
+.kotlin/
+
+# Local config (keystore, SDK path)
+local.properties
 jh.keystore
+*.jks
+
+# Generated files
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Termux modules build outputs
+termux-app/terminal-emulator/build/
+termux-app/terminal-view/build/
+
+# macOS
+.DS_Store
+
+# Application
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Logs
+*.log
+
+#备份文件
+*~
+*.bak

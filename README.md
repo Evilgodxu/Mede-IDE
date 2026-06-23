@@ -5,6 +5,7 @@
 ## 功能特性
 
 - **三栏 IDE 布局** — 侧边栏 + 代码编辑器 + AI 协作面板
+- **内置终端** — 基于 Termux 源码构建，集成在编辑器底部，类似 VS Code 终端体验
 - **本地 AI 推理** — 基于 LiteRT-LM（Google AI Edge）运行本地大模型
 - **云端 LLM 支持** — 兼容 OpenAI API 格式，支持 SSE 流式响应
 - **代码编辑器** — 行号、语法高亮、差异补丁审阅（create/modify/delete）
@@ -40,6 +41,7 @@
 | 压缩解压 | Zip4j 2.11.5 |
 | Markdown | Markwon 4.6.2 |
 | HTML 解析 | Jsoup 1.22.2 |
+| 终端模拟 | Termux Terminal Emulator（内置） |
 
 ## 环境要求
 
@@ -49,6 +51,97 @@
 - AGP 9.2.1
 - Gradle 9.5.1
 - 支持 arm64-v8a 架构
+
+## 用户使用说明
+
+### 快速开始
+
+1. **安装并启动应用**
+   - 安装 Debug APK 到 Android 设备
+   - 首次启动会请求存储权限，点击允许以访问文件
+
+2. **打开项目目录**
+   - 点击左侧资源管理器图标
+   - 选择"打开存储根目录"或"打开为项目目录"
+   - 浏览并选择项目文件夹
+
+3. **编辑代码**
+   - 点击文件即可在编辑器中打开
+   - 支持语法高亮、行号显示
+   - 修改后点击保存或使用 Ctrl+S
+
+4. **使用 AI 助手**
+   - 在右侧对话面板与 AI 交互
+   - 可以让 AI 帮你读写文件、执行命令、搜索代码
+   - 支持本地模型和云端 API
+
+### 内置终端
+
+点击左侧边栏的 **Terminal** 图标，终端面板将显示在编辑器底部。
+
+**终端功能**：
+- 基于 Termux 源码构建，兼容大多数 Linux 命令
+- 支持输入命令、查看输出
+- 可以执行编译、运行、Git 等操作
+- 再次点击 Terminal 图标或点击关闭按钮可隐藏终端
+
+**使用方式**：
+- 直接在终端输入框中输入命令
+- 点击发送按钮或按回车执行
+- AI 也可以自动执行终端命令
+
+### 侧边栏功能
+
+| 图标 | 功能 | 说明 |
+|------|------|------|
+| 文件夹 | 资源管理器 | 浏览、创建、删除文件/文件夹 |
+| 搜索 | 搜索替换 | 全局搜索和替换 |
+| 终端 | 内置终端 | 在编辑器下方打开终端 |
+| 代码 | 代码片段 | 插入预定义代码片段 |
+| 书签 | 书签管理 | 标记和跳转重要代码行 |
+| 历史 | 最近文件 | 快速打开最近编辑的文件 |
+| 公告 | 用户说明 | 查看应用使用指南 |
+
+### AI 工具集
+
+编辑器内置的 AI 代理可以通过工具调用执行以下操作：
+
+| 工具 | 说明 |
+|------|------|
+| `listFiles` | 列出目录内容，显示[FILE]/[DIR]前缀和文件大小 |
+| `readFile` | 读取文件内容，支持分页（offset/limit） |
+| `writeFile` | 创建新文件，支持覆盖选项 |
+| `replaceInFile` | 精确替换代码块，支持行范围限定 |
+| `batchReplaceInFile` | 批量编辑，一次替换多处不重叠代码 |
+| `deleteFile` | 删除文件或目录 |
+| `createDirectory` | 创建目录，自动创建父目录 |
+| `grep` | 正则搜索文件内容，返回匹配文件、行号和上下文 |
+| `glob` | 按文件名 glob 模式搜索 |
+| `searchCodebase` | 语义搜索代码库，按含义查找相关代码 |
+| `runCommand` | 执行 shell 命令（30s 超时，5000 字符上限） |
+| `searchWeb` | 联网搜索（DuckDuckGo） |
+| `readLints` | 读取构建/lint/编译错误 |
+| `searchConversationMemory` | 语义搜索对话历史 |
+| `getRecentConversationMemory` | 获取最近对话摘要 |
+
+### 模型配置
+
+**本地模型**：
+1. 进入设置 → 模型
+2. 点击"浏览模型文件"选择 .gguf 模型
+3. 模型加载后可与 AI 对话
+
+**云端模型**：
+1. 进入设置 → 模型
+2. 启用云端模型
+3. 配置 API Endpoint（OpenAI 兼容格式）
+4. 填入 API Key
+5. 选择或创建云端配置
+
+**MCP 服务器**：
+1. 进入设置 → MCP
+2. 添加 MCP 服务器配置
+3. 支持扩展 AI 能力的第三方服务
 
 ## 项目结构
 
@@ -149,6 +242,8 @@ app/src/main/kotlin/com/medeide/jh/
 │   │   │   │   │   └── LyricsParser.kt      # 歌词解析
 │   │   │   │   ├── MainTopBar.kt            # 顶部菜单栏
 │   │   │   │   └── ModelSelector.kt         # 模型选择器
+│   │   │   ├── terminal/
+│   │   │   │   └── BuiltinTerminalPanel.kt  # 内置终端面板（Termux）
 │   │   │   └── workspace/
 │   │   │       ├── editor/                  # 代码编辑器
 │   │   │       │   ├── CodeEditTool.kt      # 代码编辑工具
@@ -165,8 +260,8 @@ app/src/main/kotlin/com/medeide/jh/
 │   │   │       │       └── ZoomableImage.kt # 缩放/平移手势
 │   │   │       └── viewer/
 │   │   │           ├── ArchiveViewer.kt     # 压缩文件查看器
-│   │   │           ├── MarkdownPreview.kt   # Markdown 预览
-│   │   │           ├── VideoPlayer.kt       # 视频播放器
+│   │   │           ├── MarkdownPreview.kt    # Markdown 预览
+│   │   │           ├── VideoPlayer.kt        # 视频播放器
 │   │   │           └── WebPreview.kt        # Web 预览
 │   │   │   └── MainContentArea.kt           # 主内容区
 │   │   ├── logic/
@@ -193,29 +288,16 @@ app/src/main/kotlin/com/medeide/jh/
         ├── Color.kt                         # 主题色
         ├── Theme.kt                         # Material 3 主题
         └── Type.kt                          # 排版
+
+termux-app/                                   # Termux 源码（内置终端）
+├── terminal-emulator/                        # 终端模拟器核心
+│   └── src/main/java/com/termux/emulator/
+│       ├── TerminalActivity.java
+│       └── ...
+└── terminal-view/                            # 终端视图组件
+    └── src/main/java/com/termux/view/
+        └── ...
 ```
-
-## AI 工具集
-
-编辑器内置的 AI 代理可以通过工具调用执行以下操作：
-
-| 工具 | 说明 |
-|------|------|
-| `listFiles` | 列出目录内容，显示[FILE]/[DIR]前缀和文件大小 |
-| `readFile` | 读取文件内容，支持分页（offset/limit） |
-| `writeFile` | 创建新文件，支持覆盖选项 |
-| `replaceInFile` | 精确替换代码块，支持行范围限定 |
-| `batchReplaceInFile` | 批量编辑，一次替换多处不重叠代码 |
-| `deleteFile` | 删除文件或目录 |
-| `createDirectory` | 创建目录，自动创建父目录 |
-| `grep` | 正则搜索文件内容，返回匹配文件、行号和上下文 |
-| `glob` | 按文件名 glob 模式搜索 |
-| `searchCodebase` | 语义搜索代码库，按含义查找相关代码 |
-| `runCommand` | 执行 shell 命令（30s 超时，5000 字符上限） |
-| `searchWeb` | 联网搜索（DuckDuckGo） |
-| `readLints` | 读取构建/lint/编译错误 |
-| `searchConversationMemory` | 语义搜索对话历史 |
-| `getRecentConversationMemory` | 获取最近对话摘要 |
 
 ## 工具调用策略
 

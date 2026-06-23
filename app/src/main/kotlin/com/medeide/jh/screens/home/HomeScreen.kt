@@ -247,6 +247,7 @@ fun HomeScreen(
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var newFileName by remember { mutableStateOf("") }
     var newFolderName by remember { mutableStateOf("") }
+    var isTerminalVisible by remember { mutableStateOf(false) }
     // 工具栏音乐播放
     var scannedAudioTracks by remember { mutableStateOf<List<com.medeide.jh.screens.home.audioplayer.AudioTrack>>(emptyList()) }
     var audioScanRequested by remember { mutableStateOf(false) }
@@ -365,7 +366,13 @@ fun HomeScreen(
             sideIconBar = {
                 Sidebar(
                     selectedTab = selectedTab,
-                    onTabClick = { tab -> selectedTab = if (selectedTab == tab) null else tab },
+                    onTabClick = { tab ->
+                        if (tab == SidebarTab.Terminal) {
+                            isTerminalVisible = !isTerminalVisible
+                        } else {
+                            selectedTab = if (selectedTab == tab) null else tab
+                        }
+                    },
                 )
             },
             sidePanel = {
@@ -669,6 +676,17 @@ fun HomeScreen(
                         editorState.searchToolbarQuerySnapshot = ""
                         editorState.persistentSearchResults = emptyList()
                     },
+                    // 终端相关
+                    isTerminalVisible = isTerminalVisible,
+                    onToggleTerminal = { isTerminalVisible = !isTerminalVisible },
+                    terminalContent = {
+                        com.medeide.jh.screens.home.landscape.terminal.BuiltinTerminalPanel(
+                            currentPath = homeState.projectDirPath ?: "/storage/emulated/0",
+                            onNavigateToFile = { path -> editorState.openFileTab(path) },
+                            onClosePanel = { isTerminalVisible = false },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    },
                 )
             },
             collabPanel = {
@@ -798,7 +816,7 @@ private fun LeftPanelContent(
             )
         }
         SidebarTab.Terminal -> {
-            com.medeide.jh.screens.home.landscape.terminal.TerminalPanel(
+            com.medeide.jh.screens.home.landscape.terminal.BuiltinTerminalPanel(
                 currentPath = homeState.projectDirPath ?: "/storage/emulated/0",
                 onNavigateToFile = { path -> editorState.openFileTab(path) },
                 onClosePanel = onCloseTerminal,

@@ -141,6 +141,11 @@
     <string name="chat_clear">清空对话</string>
     <string name="chat_streaming">生成中…</string>
 
+    <!-- Termux 终端 -->
+    <string name="copy_text">复制</string>
+    <string name="paste_text">粘贴</string>
+    <string name="text_selection_more">更多…</string>
+
     <!-- 角色定义设置 -->
     <string name="rules_title">角色定义</string>
     <string name="rules_description">选择角色定义助手行为方式，自定义角色作为上下文注入对话</string>

@@ -26,3 +26,9 @@ dependencyResolutionManagement {
 
 rootProject.name = "Mede IDE"
 include(":app")
+
+include(":terminal-emulator")
+project(":terminal-emulator").projectDir = file("termux-app/terminal-emulator")
+
+include(":terminal-view")
+project(":terminal-view").projectDir = file("termux-app/terminal-view")

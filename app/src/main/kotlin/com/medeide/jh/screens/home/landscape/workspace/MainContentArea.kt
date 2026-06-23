@@ -110,6 +110,10 @@ fun MainContentArea(
     onToolbarReplaceTextChange: (String) -> Unit = {},
     onCloseSearchToolbar: () -> Unit = {},
     onClearSearch: () -> Unit = {},
+    // 终端相关
+    isTerminalVisible: Boolean = false,
+    onToggleTerminal: () -> Unit = {},
+    terminalContent: @Composable () -> Unit = {},
 ) {
     val hasTabs = tabs.isNotEmpty()
 
@@ -162,90 +166,132 @@ fun MainContentArea(
         }
 
         // 工作区
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
         ) {
-            if (activeTabIndex in tabs.indices) {
-                val activeTab = tabs[activeTabIndex]
-                when (activeTab.type) {
-                    TabType.Settings -> {
-                        SettingsPane(
-                            modifier = Modifier.fillMaxSize(),
-                            chatViewModel = chatViewModel,
-                        )
-                    }
-                    TabType.File -> {
-                        // 获取当前文件路径以便过滤搜索匹配
-                        val fileMatches = remember(activeTab.id, currentSearchMatches) {
-                            currentSearchMatches.filter { m ->
-                                activeTab.id.endsWith(m.filePath) || m.filePath.endsWith(activeTab.id.substringAfterLast('/'))
-                            }
+            // 编辑器区域
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                if (activeTabIndex in tabs.indices) {
+                    val activeTab = tabs[activeTabIndex]
+                    when (activeTab.type) {
+                        TabType.Settings -> {
+                            SettingsPane(
+                                modifier = Modifier.fillMaxSize(),
+                                chatViewModel = chatViewModel,
+                            )
                         }
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            tabContent(activeTab.id)
+                        TabType.File -> {
+                            // 获取当前文件路径以便过滤搜索匹配
+                            val fileMatches = remember(activeTab.id, currentSearchMatches) {
+                                currentSearchMatches.filter { m ->
+                                    activeTab.id.endsWith(m.filePath) || m.filePath.endsWith(activeTab.id.substringAfterLast('/'))
+                                }
+                            }
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                tabContent(activeTab.id)
 
-                            // 编辑器右上角查找替换工具栏
-                            if (isSearchToolbarVisible) {
-                                val matchCount = fileMatches.size
-                                val currentIdx = if (currentSearchMatchIndex >= 0 &&
-                                    currentSearchMatchIndex < currentSearchMatches.size &&
-                                    (activeTab.id.endsWith(currentSearchMatches[currentSearchMatchIndex].filePath) ||
-                                     currentSearchMatches[currentSearchMatchIndex].filePath.endsWith(activeTab.id.substringAfterLast('/'))))
-                                    currentSearchMatchIndex else 0
-                                EditorSearchOverlay(
-                                    matchCount = matchCount,
-                                    currentIndex = currentIdx,
-                                    searchQuery = toolbarSearchQuery,
-                                    replaceText = toolbarReplaceText,
-                                    onSearchQueryChange = onToolbarSearchQueryChange,
-                                    onReplaceTextChange = onToolbarReplaceTextChange,
-                                    onNavUp = onSearchNavUp,
-                                    onNavDown = onSearchNavDown,
-                                    onReplaceCurrent = { onReplaceCurrent(activeTab.id) },
-                                    onClose = onCloseSearchToolbar,
-                                    onClearSearch = onClearSearch,
-                                    modifier = Modifier.align(Alignment.TopEnd),
+                                // 编辑器右上角查找替换工具栏
+                                if (isSearchToolbarVisible) {
+                                    val matchCount = fileMatches.size
+                                    val currentIdx = if (currentSearchMatchIndex >= 0 &&
+                                        currentSearchMatchIndex < currentSearchMatches.size &&
+                                        (activeTab.id.endsWith(currentSearchMatches[currentSearchMatchIndex].filePath) ||
+                                         currentSearchMatches[currentSearchMatchIndex].filePath.endsWith(activeTab.id.substringAfterLast('/'))))
+                                        currentSearchMatchIndex else 0
+                                    EditorSearchOverlay(
+                                        matchCount = matchCount,
+                                        currentIndex = currentIdx,
+                                        searchQuery = toolbarSearchQuery,
+                                        replaceText = toolbarReplaceText,
+                                        onSearchQueryChange = onToolbarSearchQueryChange,
+                                        onReplaceTextChange = onToolbarReplaceTextChange,
+                                        onNavUp = onSearchNavUp,
+                                        onNavDown = onSearchNavDown,
+                                        onReplaceCurrent = { onReplaceCurrent(activeTab.id) },
+                                        onClose = onCloseSearchToolbar,
+                                        onClearSearch = onClearSearch,
+                                        modifier = Modifier.align(Alignment.TopEnd),
+                                    )
+                                }
+                            }
+                        }
+                        TabType.Image -> {
+                            ImagePreview(
+                                imagePath = activeTab.id,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                        TabType.Audio -> {
+                            AudioPlayer(
+                                audioPath = activeTab.id,
+                                state = audioPlaybackState ?: return@Box,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                        TabType.Video -> {
+                            VideoPlayer(
+                                videoPath = activeTab.id,
+                                state = videoPlaybackState ?: return@Box,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                        TabType.Archive -> {
+                            ArchiveViewer(
+                                archivePath = activeTab.id,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                        TabType.Markdown -> {
+                            val isPreview = activeTab.id in previewModeTabs
+                            val fileMatches = remember(activeTab.id, currentSearchMatches) {
+                                currentSearchMatches.filter { m ->
+                                    activeTab.id.endsWith(m.filePath) || m.filePath.endsWith(activeTab.id.substringAfterLast('/'))
+                                }
+                            }
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                MarkdownPreview(
+                                    filePath = activeTab.id,
+                                    isPreviewMode = isPreview,
+                                    onToggleMode = { onTogglePreviewMode(activeTab.id) },
+                                    textFieldValue = getEditorContent(activeTab.id),
+                                    onTextChange = { onPreviewContentChange(activeTab.id, it) },
+                                    modifier = Modifier.fillMaxSize(),
                                 )
+
+                                // 代码模式下显示查找替换工具栏
+                                if (!isPreview && isSearchToolbarVisible) {
+                                    val matchCount = fileMatches.size
+                                    val currentIdx = if (currentSearchMatchIndex >= 0 &&
+                                        currentSearchMatchIndex < currentSearchMatches.size &&
+                                        (activeTab.id.endsWith(currentSearchMatches[currentSearchMatchIndex].filePath) ||
+                                         currentSearchMatches[currentSearchMatchIndex].filePath.endsWith(activeTab.id.substringAfterLast('/'))))
+                                        currentSearchMatchIndex else 0
+                                    EditorSearchOverlay(
+                                        matchCount = matchCount,
+                                        currentIndex = currentIdx,
+                                        searchQuery = toolbarSearchQuery,
+                                        replaceText = toolbarReplaceText,
+                                        onSearchQueryChange = onToolbarSearchQueryChange,
+                                        onReplaceTextChange = onToolbarReplaceTextChange,
+                                        onNavUp = onSearchNavUp,
+                                        onNavDown = onSearchNavDown,
+                                        onReplaceCurrent = { onReplaceCurrent(activeTab.id) },
+                                        onClose = onCloseSearchToolbar,
+                                        onClearSearch = onClearSearch,
+                                        modifier = Modifier.align(Alignment.TopEnd),
+                                    )
+                                }
                             }
                         }
-                    }
-                    TabType.Image -> {
-                        ImagePreview(
-                            imagePath = activeTab.id,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                    TabType.Audio -> {
-                        AudioPlayer(
-                            audioPath = activeTab.id,
-                            state = audioPlaybackState ?: return@Box,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                    TabType.Video -> {
-                        VideoPlayer(
-                            videoPath = activeTab.id,
-                            state = videoPlaybackState ?: return@Box,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                    TabType.Archive -> {
-                        ArchiveViewer(
-                            archivePath = activeTab.id,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                    TabType.Markdown -> {
-                        val isPreview = activeTab.id in previewModeTabs
-                        val fileMatches = remember(activeTab.id, currentSearchMatches) {
-                            currentSearchMatches.filter { m ->
-                                activeTab.id.endsWith(m.filePath) || m.filePath.endsWith(activeTab.id.substringAfterLast('/'))
-                            }
-                        }
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            MarkdownPreview(
+                        TabType.Preview -> {
+                            val isPreview = activeTab.id in previewModeTabs
+                            WebPreview(
                                 filePath = activeTab.id,
                                 isPreviewMode = isPreview,
                                 onToggleMode = { onTogglePreviewMode(activeTab.id) },
@@ -253,42 +299,56 @@ fun MainContentArea(
                                 onTextChange = { onPreviewContentChange(activeTab.id, it) },
                                 modifier = Modifier.fillMaxSize(),
                             )
-
-                            // 代码模式下显示查找替换工具栏
-                            if (!isPreview && isSearchToolbarVisible) {
-                                val matchCount = fileMatches.size
-                                val currentIdx = if (currentSearchMatchIndex >= 0 &&
-                                    currentSearchMatchIndex < currentSearchMatches.size &&
-                                    (activeTab.id.endsWith(currentSearchMatches[currentSearchMatchIndex].filePath) ||
-                                     currentSearchMatches[currentSearchMatchIndex].filePath.endsWith(activeTab.id.substringAfterLast('/'))))
-                                    currentSearchMatchIndex else 0
-                                EditorSearchOverlay(
-                                    matchCount = matchCount,
-                                    currentIndex = currentIdx,
-                                    searchQuery = toolbarSearchQuery,
-                                    replaceText = toolbarReplaceText,
-                                    onSearchQueryChange = onToolbarSearchQueryChange,
-                                    onReplaceTextChange = onToolbarReplaceTextChange,
-                                    onNavUp = onSearchNavUp,
-                                    onNavDown = onSearchNavDown,
-                                    onReplaceCurrent = { onReplaceCurrent(activeTab.id) },
-                                    onClose = onCloseSearchToolbar,
-                                    onClearSearch = onClearSearch,
-                                    modifier = Modifier.align(Alignment.TopEnd),
-                                )
-                            }
                         }
                     }
-                    TabType.Preview -> {
-                        val isPreview = activeTab.id in previewModeTabs
-                        WebPreview(
-                            filePath = activeTab.id,
-                            isPreviewMode = isPreview,
-                            onToggleMode = { onTogglePreviewMode(activeTab.id) },
-                            textFieldValue = getEditorContent(activeTab.id),
-                            onTextChange = { onPreviewContentChange(activeTab.id, it) },
-                            modifier = Modifier.fillMaxSize(),
+                }
+            }
+
+            // 终端面板 - 类似 VS Code 底部终端样式
+            if (isTerminalVisible) {
+                HorizontalDivider(
+                    thickness = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                ) {
+                    // 终端标题栏
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(28.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Terminal",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 12.dp)
                         )
+                        Spacer(modifier = Modifier.weight(1f))
+                        IconButton(
+                            onClick = onToggleTerminal,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "关闭终端",
+                                modifier = Modifier.size(12.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    // 终端内容区域
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    ) {
+                        terminalContent()
                     }
                 }
             }
