@@ -787,7 +787,10 @@ class ChatViewModel(
                     updateModelMessage(msgId, c, true)
                 }
                 if (msg.channels.isNotEmpty()) {
-                    channelContent = (channelContent ?: "") + msg.channels.values.joinToString("\n")
+                    val channelValues = msg.channels.values.joinToString("\n")
+                    if (channelValues.isNotBlank()) {
+                        channelContent = (channelContent ?: "") + channelValues
+                    }
                 }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -818,7 +821,7 @@ class ChatViewModel(
                             .trim()
                         _state.update { state ->
                             val updatedMessages = state.messages.map {
-                                if (it.id == msgId) it.copy(content = cleaned) else it
+                                if (it.id == msgId) it.copy(content = cleaned, channelContent = channelContent) else it
                             }
                             state.copy(messages = updatedMessages)
                         }
@@ -973,7 +976,7 @@ class ChatViewModel(
                 // 用无 think 版本替换消息内容
                 _state.update { state ->
                     val updatedMessages = state.messages.map { msg ->
-                        if (msg.id == currentMsgId) msg.copy(content = cleanResponse) else msg
+                        if (msg.id == currentMsgId) msg.copy(content = cleanResponse, channelContent = channelContent) else msg
                     }
                     state.copy(messages = updatedMessages)
                 }
