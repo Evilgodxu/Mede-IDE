@@ -22,8 +22,8 @@ android {
         applicationId = "com.medeide.jh"
         minSdk = 32
         targetSdk = 37
-        versionCode = 6
-        versionName = "1.3.2"
+        versionCode = 7
+        versionName = "1.3.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -133,6 +133,9 @@ dependencies {
     // 自适应布局
     implementation(libs.androidx.material3.adaptive)
     implementation(libs.androidx.material3.adaptive.layout)
+
+    // Navigation Compose
+    implementation(libs.androidx.navigation.compose)
 
     // LiteRT-LM 本地大模型推理
     implementation(libs.litertlm.android)

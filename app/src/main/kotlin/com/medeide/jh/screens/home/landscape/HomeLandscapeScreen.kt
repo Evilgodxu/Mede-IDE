@@ -1,7 +1,6 @@
 package com.medeide.jh.screens.home.landscape
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
@@ -15,27 +14,21 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-// 三区布局：侧栏区（图标导航 + 可展开面板）+ 工作区 + 协作区
+// 四区布局：顶栏区 + 侧栏区（图标导航 + 可展开面板）+ 工作区 + 协作区
 @Composable
 fun HomeLandscapeScreen(
     sideIconBar: @Composable () -> Unit,
     sidePanel: @Composable () -> Unit,
     isSidePanelVisible: Boolean,
-    isSidePanelExpanded: Boolean = false,
     workspaceContent: @Composable () -> Unit,
     collabPanel: @Composable () -> Unit,
+    sidePanelWidth: Dp = 360.dp,
     modifier: Modifier = Modifier
 ) {
-    val sidePanelWidth by animateDpAsState(
-        targetValue = if (isSidePanelExpanded) 360.dp else 180.dp,
-        animationSpec = tween(durationMillis = 200),
-        label = "sidePanelWidth"
-    )
-
     Row(
         modifier = modifier
             .fillMaxSize()
@@ -47,12 +40,8 @@ fun HomeLandscapeScreen(
         // 侧栏区 - 可展开面板
         AnimatedVisibility(
             visible = isSidePanelVisible,
-            enter = expandHorizontally(
-                animationSpec = tween(durationMillis = 200)
-            ),
-            exit = shrinkHorizontally(
-                animationSpec = tween(durationMillis = 200)
-            )
+            enter = expandHorizontally(animationSpec = tween(durationMillis = 200)),
+            exit = shrinkHorizontally(animationSpec = tween(durationMillis = 200))
         ) {
             Column(
                 modifier = Modifier
@@ -86,7 +75,7 @@ fun HomeLandscapeScreen(
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         )
 
-        // 协作区（宽度 = 侧栏图标栏48dp + 侧栏面板180dp = 228dp）
+        // 协作区
         Column(
             modifier = Modifier
                 .width(228.dp)

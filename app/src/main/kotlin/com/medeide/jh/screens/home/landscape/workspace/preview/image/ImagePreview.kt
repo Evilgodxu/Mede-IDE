@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.io.File
 
+// 图片查看器
 @Composable
 fun ImagePreview(
     imagePath: String,
@@ -45,10 +46,7 @@ fun ImagePreview(
     var showInfo by remember { mutableStateOf(true) }
 
     LaunchedEffect(imagePath) {
-        bitmap = null
-        errorMsg = null
-        fileInfo = null
-        scale = 1f
+        bitmap = null; errorMsg = null; fileInfo = null; scale = 1f
         try {
             if (imagePath.startsWith("content://")) {
                 val uri = android.net.Uri.parse(imagePath)
@@ -67,94 +65,41 @@ fun ImagePreview(
             } else {
                 bitmap = BitmapFactory.decodeFile(imagePath)
                 val f = File(imagePath)
-                if (f.exists()) {
-                    fileInfo = f.name to f.length()
-                }
+                if (f.exists()) fileInfo = f.name to f.length()
             }
-            if (bitmap == null && errorMsg == null) {
-                errorMsg = "无法解码图片"
-            }
-        } catch (e: Exception) {
-            errorMsg = "加载失败: ${e.message}"
-        }
+            if (bitmap == null && errorMsg == null) errorMsg = "无法解码图片"
+        } catch (e: Exception) { errorMsg = "加载失败: ${e.message}" }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
         when {
             errorMsg != null -> ImageErrorPlaceholder(errorMsg!!, Modifier.fillMaxSize())
             bitmap != null -> ZoomableImage(
-                bitmap = bitmap!!.asImageBitmap(),
-                contentDescription = "预览图片",
-                onScaleChange = { scale = it },
-                modifier = Modifier.fillMaxSize(),
+                bitmap = bitmap!!.asImageBitmap(), contentDescription = "预览图片",
+                onScaleChange = { scale = it }, modifier = Modifier.fillMaxSize(),
             )
-            else -> LoadingPlaceholder(Modifier.fillMaxSize())
-        }
-
-        fileInfo?.let { (name, sizeBytes) ->
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(12.dp)
-            ) {
-                if (showInfo) {
-                    Column(modifier = Modifier.clickable { showInfo = false }) {
-                        Text(
-                            text = name,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFFEEEEEE),
-                        )
-                        Text(
-                            text = formatFileSize(sizeBytes),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFFBBBBBB),
-                        )
-                        Text(
-                            text = "${bitmap?.width ?: 0} × ${bitmap?.height ?: 0}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFFAAAAAA),
-                        )
-                        Text(
-                            text = "${"%.0f".format(scale * 100)}%",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF999999),
-                        )
-                    }
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "显示信息",
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clickable { showInfo = true },
-                        tint = Color(0xFFEEEEEE),
-                    )
+            else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Image, null, Modifier.size(48.dp), tint = Color(0xFF555555))
+                    Spacer(Modifier.height(8.dp))
+                    Text("加载中…", style = MaterialTheme.typography.bodySmall, color = Color(0xFF666666))
                 }
             }
         }
-    }
-}
 
-@Composable
-private fun LoadingPlaceholder(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                imageVector = Icons.Default.Image,
-                contentDescription = null,
-                modifier = Modifier.size(48.dp),
-                tint = Color(0xFF555555),
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "加载中…",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF666666),
-                textAlign = TextAlign.Center,
-            )
+        fileInfo?.let { (name, sizeBytes) ->
+            Box(modifier = Modifier.align(Alignment.TopStart).padding(12.dp)) {
+                if (showInfo) {
+                    Column(modifier = Modifier.clickable { showInfo = false }) {
+                        Text(name, style = MaterialTheme.typography.labelSmall, color = Color(0xFFEEEEEE))
+                        Text(formatFileSize(sizeBytes), style = MaterialTheme.typography.labelSmall, color = Color(0xFFBBBBBB))
+                        Text("${bitmap?.width ?: 0} × ${bitmap?.height ?: 0}", style = MaterialTheme.typography.labelSmall, color = Color(0xFFAAAAAA))
+                        Text("${"%.0f".format(scale * 100)}%", style = MaterialTheme.typography.labelSmall, color = Color(0xFF999999))
+                    }
+                } else {
+                    Icon(Icons.Default.Info, "显示信息", Modifier.size(20.dp).clickable { showInfo = true }, tint = Color(0xFFEEEEEE))
+                }
+            }
         }
     }
 }

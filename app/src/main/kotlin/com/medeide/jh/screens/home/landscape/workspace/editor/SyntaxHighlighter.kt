@@ -27,7 +27,6 @@ private val keywords = setOf(
     "synchronized", "volatile", "transient", "native", "strictfp",
 )
 
-// 内容哈希缓存：避免同内容重复高亮
 private val syntaxCache = object : LinkedHashMap<Int, AnnotatedString>(16, 0.75f, true) {
     override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, AnnotatedString>?): Boolean {
         return size > 8
@@ -112,18 +111,6 @@ fun highlightSyntax(text: String): AnnotatedString {
     return result
 }
 
-private fun findStringEnd(text: String, start: Int): Int {
-    var i = start
-    while (i < text.length) {
-        when (text[i]) {
-            '\\' -> i += 2
-            '"' -> return i + 1
-            else -> i++
-        }
-    }
-    return text.length
-}
-
 private fun findWordEnd(text: String, start: Int): Int {
     var i = start
     while (i < text.length && (text[i].isLetterOrDigit() || text[i] == '_')) i++
@@ -145,4 +132,16 @@ private fun findNumberEnd(text: String, start: Int): Int {
         break
     }
     return i
+}
+
+private fun findStringEnd(text: String, start: Int): Int {
+    var i = start
+    while (i < text.length) {
+        when (text[i]) {
+            '\\' -> i += 2
+            '"' -> return i + 1
+            else -> i++
+        }
+    }
+    return text.length
 }

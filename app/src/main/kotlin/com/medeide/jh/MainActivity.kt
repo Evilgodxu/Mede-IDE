@@ -11,23 +11,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.medeide.jh.screens.permission.LocalActivity
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.lifecycleScope
-import com.medeide.jh.data.repository.UserPreferencesRepository
-import com.medeide.jh.screens.home.HomeScreen
-import com.medeide.jh.screens.permission.LocalActivity
-import com.medeide.jh.screens.permission.PermissionGuideScreen
+import androidx.navigation.compose.rememberNavController
+import com.medeide.jh.core.data.repository.UserPreferencesRepository
 import com.medeide.jh.ui.adaptive.ProvideWindowSizeClass
+import com.medeide.jh.ui.navigation.AppNavHost
 import com.medeide.jh.ui.theme.MyApplicationTheme
-import com.medeide.jh.data.utils.localization.LanguageManager
-import com.medeide.jh.data.utils.localization.ProvideLocalizedContext
-import kotlinx.coroutines.launch
+import com.medeide.jh.core.utils.localization.LanguageManager
+import com.medeide.jh.core.utils.localization.ProvideLocalizedContext
 import org.koin.android.ext.android.inject
 
 // 主Activity，应用入口
@@ -36,9 +33,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var languageManager: LanguageManager
     private lateinit var windowInsetsController: WindowInsetsControllerCompat
 
-    // 是否显示权限引导界面
-    private var showPermissionGuide by mutableStateOf(false)
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -46,10 +40,8 @@ class MainActivity : ComponentActivity() {
 
         languageManager = LanguageManager(this, userPreferencesRepository)
 
-        // 检查是否需要显示权限引导
-        checkPermissionGuideStatus()
-
         setContent {
+            val navController = rememberNavController()
             val themeMode by userPreferencesRepository.themeMode.collectAsStateWithLifecycle(initialValue = "system")
 
             val darkTheme = when (themeMode) {
@@ -58,10 +50,13 @@ class MainActivity : ComponentActivity() {
                 else -> isSystemInDarkTheme()
             }
 
-            // 显式提供 Activity / ActivityResultRegistryOwner（兼容 ProvideLocalizedContext 的 Context 替换）
+            SideEffect {
+                windowInsetsController.isAppearanceLightStatusBars = !darkTheme
+            }
+
             CompositionLocalProvider(
-                LocalActivity provides this@MainActivity,
-                LocalActivityResultRegistryOwner provides this@MainActivity,
+                LocalActivity provides this,
+                LocalActivityResultRegistryOwner provides this,
             ) {
                 ProvideLocalizedContext(languageManager) {
                     ProvideWindowSizeClass {
@@ -70,30 +65,12 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.fillMaxSize(),
                                 color = MaterialTheme.colorScheme.background,
                             ) {
-                                if (showPermissionGuide) {
-                                    PermissionGuideScreen(
-                                        onComplete = {
-                                            showPermissionGuide = false
-                                            lifecycleScope.launch {
-                                                userPreferencesRepository.setPermissionGuideShown(true)
-                                            }
-                                        }
-                                    )
-                                } else {
-                                    HomeScreen()
-                                }
+                                AppNavHost(navController = navController)
                             }
                         }
                     }
                 }
             }
-        }
-    }
-
-    private fun checkPermissionGuideStatus() {
-        lifecycleScope.launch {
-            val guideShown = userPreferencesRepository.isPermissionGuideShown()
-            showPermissionGuide = !guideShown
         }
     }
 

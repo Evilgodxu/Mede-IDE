@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material3.Icon
@@ -53,9 +54,7 @@ fun ZoomableImage(
 
     fun fitScale(): Float = if (bitmapWidth > 0f && bitmapHeight > 0f) {
         min(containerWidth / bitmapWidth, containerHeight / bitmapHeight)
-    } else {
-        1f
-    }
+    } else { 1f }
 
     fun fittedWidth(): Float = bitmapWidth * fitScale()
     fun fittedHeight(): Float = bitmapHeight * fitScale()
@@ -73,6 +72,7 @@ fun ZoomableImage(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFF1E1E1E))
+            .clipToBounds()
             .onGloballyPositioned { coords ->
                 containerWidth = coords.size.width.toFloat()
                 containerHeight = coords.size.height.toFloat()
@@ -99,12 +99,10 @@ fun ZoomableImage(
                         val centerX = containerWidth / 2f
                         val centerY = containerHeight / 2f
 
-                        // 以捏合中心为锚点缩放
                         offsetX -= deltaScale * (centroid.x - centerX)
                         offsetY -= deltaScale * (centroid.y - centerY)
                         scale = newScale
 
-                        // 平移
                         offsetX += pan.x
                         offsetY += pan.y
 

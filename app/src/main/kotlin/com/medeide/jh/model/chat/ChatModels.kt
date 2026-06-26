@@ -3,33 +3,31 @@ package com.medeide.jh.model.chat
 import android.net.Uri
 import java.util.UUID
 
-// 附件文件（用户添加到对话中的文件引用，仅含路径信息，内容由模型通过 readFile 获取）
-data class AttachedFile(
-    val name: String,
-    val path: String,
-)
+enum class ChatRole { User, Model, System, Tool }
 
-/** 工具调用信息（对应 OpenAI function calling 中 assistant 消息的 tool_calls 条目） */
 data class ToolCallInfo(
-    val id: String,           // 工具调用唯一 ID，如 "call_abc123"
-    val name: String,         // 工具函数名，如 "readFile"
-    val arguments: String,    // 参数字符串，如 "{\"path\":\"src/Main.kt\"}"
+    val id: String,
+    val name: String,
+    val arguments: String,
 )
 
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val role: ChatRole,
     val content: String,
+    /** 推理过程内容（reasoning_content） */
+    val reasoningContent: String = "",
     val isStreaming: Boolean = false,
+    /** 是否处于思维链展开状态 */
+    val isThinking: Boolean = false,
+    val isError: Boolean = false,
     val timestamp: Long = System.currentTimeMillis(),
-    val toolCallId: String? = null,     // 工具调用 ID，用于 API role:tool 匹配
-    val toolName: String? = null,       // 工具函数名（如 "readFile"），用于 Content.ToolResponse.name
-    val imageUris: List<Uri> = emptyList(), // 附加图片 URI（用于聊天消息中显示缩略图）
-    val channelContent: String? = null, // LiteRT-LM channels 中的思考内容
-    val toolCalls: List<ToolCallInfo> = emptyList(), // 工具调用列表（assistant 消息），云端路径按 OpenAI 规范还原
+    val toolCallId: String? = null,
+    val toolName: String? = null,
+    val toolCalls: List<ToolCallInfo> = emptyList(),
+    val channelContent: String? = null,
+    val imageUris: List<Uri> = emptyList(),
 )
-
-enum class ChatRole { User, Model, System, Tool }
 
 data class ConversationEntry(
     val id: String = UUID.randomUUID().toString(),
@@ -38,24 +36,31 @@ data class ConversationEntry(
     val timestamp: Long = System.currentTimeMillis(),
 )
 
-// 引擎状态
-enum class EngineStatus {
-    Idle, Loading, Ready, Error
-}
-
-data class EngineState(
-    val status: EngineStatus = EngineStatus.Idle,
-    val modelPath: String = "",
-    val modelName: String = "",
-    val errorMessage: String = "",
-    val progress: Float = 0f,
-    val contextWindow: Int = 0,  // 当前加载模型的上下文窗口（按模型名称推断），0=未知
+data class CloudModelProfile(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "",
+    val apiEndpoint: String = "https://api.openai.com/v1",
+    val apiKey: String = "",
+    val modelName: String = "gpt-4o",
+    val contextWindow: Int = 128000,
+    val maxTokens: Int = 16000,
+    val maxToolRounds: Int = 200,
 )
 
-// 下载状态
-enum class DownloadStatus {
-    Idle, Downloading, Paused, Completed, Error
-}
+data class ApiUsage(
+    val promptTokens: Int = 0,
+    val completionTokens: Int = 0,
+)
+
+data class CloudToolCall(
+    val id: String,
+    val functionName: String,
+    val arguments: String,
+)
+
+enum class EngineStatus { Idle, Loading, Ready, Error }
+
+enum class DownloadStatus { Idle, Downloading, Paused, Completed, Error }
 
 data class DownloadState(
     val status: DownloadStatus = DownloadStatus.Idle,
@@ -64,121 +69,89 @@ data class DownloadState(
     val errorMessage: String = "",
 )
 
-// 模型推理参数（对应 LiteRT-LM SamplerConfig + EngineConfig）
 data class ModelParams(
     val topK: Int = 10,
     val topP: Double = 0.7,
     val temperature: Double = 0.1,
     val seed: Int = 0,
-    val contextWindowTokens: Int = 32768,       // 默认 32K
-    val enableSpeculativeDecoding: Boolean = false, // MTP 推测解码
-    val backendType: BackendType = BackendType.GPU, // 推理后端
-) {
-    init {
-        require(topK > 0) { "topK must be positive, got $topK" }
-        require(topP in 0.0..1.0) { "topP must be 0~1, got $topP" }
-        require(temperature >= 0) { "temperature must be >= 0, got $temperature" }
-        require(contextWindowTokens in 512..262144) { "contextWindowTokens must be 512~262144, got $contextWindowTokens" }
-    }
-}
+    val contextWindowTokens: Int = 4096,
+    val enableSpeculativeDecoding: Boolean = false,
+    val backendType: BackendType = BackendType.GPU,
+)
 
-// LiteRT-LM 后端类型（CPU/GPU/NPU）
 enum class BackendType(val displayName: String) {
-    CPU("CPU"),
-    GPU("GPU"),
-    NPU("NPU");
+    CPU("CPU"), GPU("GPU"), NPU("NPU");
     companion object {
         fun fromName(name: String): BackendType =
             entries.find { it.name.equals(name, ignoreCase = true) } ?: CPU
     }
 }
 
-// 本地模型格式
-enum class ModelFormat {
-    LiteRTLM,   // .litertlm 格式，使用 Google AI Edge LiteRT-LM 推理
-    Unknown;
+enum class DisplayRole { User, Model }
 
-    companion object {
-        fun fromFileName(name: String): ModelFormat = when {
-            name.endsWith(".litertlm", ignoreCase = true) -> LiteRTLM
-            else -> Unknown
-        }
-        fun fromPath(path: String): ModelFormat = fromFileName(path.substringAfterLast('/'))
-    }
-}
-
-data class ModelInfo(val path: String, val name: String, val size: Long) {
-    val sizeText: String get() = when {
-        size < 1024 -> "$size B"
-        size < 1024 * 1024 -> "${size / 1024} KB"
-        size < 1024 * 1024 * 1024 -> "${"%.1f".format(size / (1024.0 * 1024.0))} MB"
-        else -> "${"%.2f".format(size / (1024.0 * 1024.0 * 1024.0))} GB"
-    }
-    /** 模型格式，根据文件扩展名推断 */
-    val format: ModelFormat get() = ModelFormat.fromPath(path)
-}
-
-data class RecommendedModel(val name: String, val size: String, val url: String, val description: String, val fileName: String)
-
-// 云端大模型配置（单个配置）
-data class CloudModelConfig(
-    val enabled: Boolean = false,
-    val apiEndpoint: String = "https://api.openai.com/v1",
-    val apiKey: String = "",
-    val modelName: String = "gpt-4o",
-    val maxTokens: Int = 16000,
-)
-
-// 云端模型配置档案（可保存多个，自由切换）
-data class CloudModelProfile(
-    val id: String = "",
-    val name: String = "",            // 用户自定义名称，如"DeepSeek V4"
-    val apiEndpoint: String = "https://api.openai.com/v1",
-    val apiKey: String = "",
-    val modelName: String = "gpt-4o",
-    val contextWindow: Int = 184000,  // 模型上下文窗口大小（token）
-    val maxTokens: Int = 16000,       // 模型输出最大 token 数
-    val maxToolRounds: Int = 200,     // 工具调用最大轮次，超限自动打断
-)
-
-/** API 调用返回的用量信息 */
-data class ApiUsage(
-    val promptTokens: Int = 0,
-    val completionTokens: Int = 0,
-)
-
-/** 原生工具调用（OpenAI function calling 格式） */
-data class CloudToolCall(
+data class DisplayItem(
     val id: String,
-    val functionName: String,
-    val arguments: String,  // JSON string of params
+    val role: DisplayRole,
+    val content: String,
+    val isStreaming: Boolean,
+    val isThinking: Boolean = false,
+    val reasoningContent: String = "",
+    val fileOperations: List<FileOperation> = emptyList(),
+    val timestamp: Long = System.currentTimeMillis(),
+    val channelContent: String? = null,
+    val imageUris: List<Uri> = emptyList(),
 )
 
-/** 文件操作记录（用于 UI 显示"正在写入..."卡片） */
+/** 文件操作类型 */
+enum class FileOpType { WriteFile, CreateDirectory, DeleteFile, MoveFile, CopyFile }
+
+/** 文件操作状态 */
+enum class FileOpStatus { InProgress, Success, Error }
+
+/** 文件操作记录（用于UI显示"正在写入…"卡片） */
 data class FileOperation(
     val id: String = UUID.randomUUID().toString(),
     val type: FileOpType,
     val filePath: String,
     val status: FileOpStatus = FileOpStatus.InProgress,
     val errorMessage: String? = null,
-    /** 触发该操作的模型消息 ID，用于将操作卡片绑定到对应消息下方 */
     val parentMessageId: String = "",
 )
 
-enum class FileOpType { WriteFile, CreateDirectory, DeleteFile, MoveFile, CopyFile }
+/** 用户/Agent 资料（名称 + 头像） */
+data class UserProfile(
+    val userName: String = "",
+    val userAvatarUri: String = "",
+    val agentName: String = "AI",
+    val agentAvatarUri: String = "",
+)
 
-enum class FileOpStatus { InProgress, Success, Error }
+data class AttachedFile(
+    val name: String,
+    val path: String,
+)
 
-// 显示模型
-enum class DisplayRole { User, Model }
+data class ModelInfo(
+    val path: String,
+    val name: String,
+    val size: Long = 0,
+    val sizeText: String = "",
+)
 
-data class DisplayItem(
-    val id: String,
-    val role: DisplayRole,
-    val content: String,              // 显示文本（已过滤工具调用 JSON/标记）
-    val channelContent: String? = null, // LiteRT-LM channels 思考内容（官方 API）
-    val isStreaming: Boolean,
-    val timestamp: Long,
-    val imageUris: List<Uri> = emptyList(), // 图片 URI 列表（仅 User 消息）
-    val fileOperations: List<FileOperation> = emptyList(), // 该消息关联的文件操作卡片
+data class CloudModelConfig(
+    val enabled: Boolean = false,
+    val apiEndpoint: String = "",
+    val apiKey: String = "",
+    val modelName: String = "",
+    val maxTokens: Int = 16000,
+    val contextWindow: Int = 128000,
+)
+
+data class EngineState(
+    val status: EngineStatus = EngineStatus.Idle,
+    val modelPath: String = "",
+    val modelName: String = "",
+    val progress: Float = 0f,
+    val errorMessage: String = "",
+    val contextWindow: Int = 4096,
 )

@@ -19,11 +19,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -38,10 +38,7 @@ import io.noties.markwon.core.MarkwonTheme
 import io.noties.markwon.ext.tables.TablePlugin
 import java.io.File
 
-/**
- * Markdown 文件预览/编辑双模式组件。
- * 预览模式使用 Markwon 原生渲染 Markdown；代码模式使用 CodeEditor 编辑源码。
- */
+// MD 文档编辑器 — 编辑/预览双模式
 @Composable
 fun MarkdownPreview(
     filePath: String,
@@ -52,7 +49,7 @@ fun MarkdownPreview(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        // 模式切换栏（与 WebPreview 保持一致风格）
+        // 模式切换栏
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -66,17 +63,14 @@ fun MarkdownPreview(
                 modifier = Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.primary,
             )
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(Modifier.width(4.dp))
             Text(
                 text = if (isPreviewMode) "预览模式" else "代码模式",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(modifier = Modifier.width(8.dp))
-            IconButton(
-                onClick = onToggleMode,
-                modifier = Modifier.size(24.dp),
-            ) {
+            Spacer(Modifier.width(8.dp))
+            IconButton(onClick = onToggleMode, modifier = Modifier.size(24.dp)) {
                 Icon(
                     imageVector = if (isPreviewMode) Icons.Default.Code else Icons.Default.Language,
                     contentDescription = if (isPreviewMode) "切换到代码模式" else "切换到预览模式",
@@ -84,7 +78,7 @@ fun MarkdownPreview(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(Modifier.weight(1f))
             Text(
                 text = File(filePath).name,
                 style = MaterialTheme.typography.labelSmall,
@@ -106,15 +100,12 @@ fun MarkdownPreview(
                     text = textFieldValue,
                     onTextChange = onTextChange,
                     modifier = Modifier.fillMaxSize(),
-                    onAddToChat = {},
-                    onCursorChange = { _, _ -> },
                 )
             }
         }
     }
 }
 
-/** 使用 Markwon 渲染 Markdown 内容 */
 @Composable
 private fun MarkdownPreviewContent(
     markdown: String,
@@ -158,13 +149,10 @@ private fun MarkdownPreviewContent(
             tv.setTextColor(textColorArgb)
             tv.setLinkTextColor(textColorArgb)
             markwon.setMarkdown(tv, markdown)
-            // Markwon 渲染后强制所有可点击 Span 使用正文颜色
             val spannable = tv.text
             if (spannable is android.text.Spannable) {
-                val spans = spannable.getSpans(
-                    0, spannable.length,
-                    android.text.style.ClickableSpan::class.java
-                ).toList()
+                val spans = spannable.getSpans(0, spannable.length,
+                    android.text.style.ClickableSpan::class.java).toList()
                 for (span in spans) {
                     val start = spannable.getSpanStart(span)
                     val end = spannable.getSpanEnd(span)

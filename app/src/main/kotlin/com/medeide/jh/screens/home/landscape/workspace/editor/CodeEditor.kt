@@ -6,40 +6,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.TextRange
-import com.medeide.jh.screens.home.landscape.workspace.editor.LineChangeType
 
+// 代码编辑器 — 带语法高亮
 @Composable
 fun CodeEditor(
     text: TextFieldValue,
     onTextChange: (TextFieldValue) -> Unit,
     modifier: Modifier = Modifier,
     readOnly: Boolean = false,
-    lineDiffs: Map<Int, LineChangeType> = emptyMap(),
-    onCursorChange: ((line: Int, lineContent: String) -> Unit)? = null,
-    onAddToChat: ((String) -> Unit)? = null,
     searchScrollVersion: Int = 0,
 ) {
-    // 光标位置跟踪
-    val cursorLine = remember(text.selection) {
-        text.text.substring(0, text.selection.start).count { it == '\n' } + 1
-    }
-    val cursorLineContent = remember(text.selection, text.text) {
-        val lines = text.text.lines()
-        val idx = (cursorLine - 1).coerceIn(0, lines.size - 1)
-        lines.getOrElse(idx) { "" }
-    }
-    LaunchedEffect(cursorLine, cursorLineContent) {
-        onCursorChange?.invoke(cursorLine, cursorLineContent)
-    }
-
     Column(modifier = modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -51,6 +29,7 @@ fun CodeEditor(
                 text = text,
                 onTextChange = onTextChange,
                 readOnly = readOnly,
+                visualTransformation = SyntaxHighlightTransformation(),
                 searchScrollVersion = searchScrollVersion,
             )
         }

@@ -81,13 +81,13 @@ show_help() {
 cmd_env() {
     ttl "环境检测"
     local ok_count=0; local total=0
-    local tools=("java:Java" "gradle:Gradle" "aapt:AAPT" "apksigner:APK签名" "adb:ADB" "zipalign:对齐工具")
-    for tool in "${tools[@]}"; do
+    local tools="java:Java gradle:Gradle aapt:AAPT apksigner:APK签名 adb:ADB zipalign:对齐工具"
+    for tool in $tools; do
         local cmd="${tool%%:*}"; local name="${tool##*:}"
-        ((total++))
+        total=$((total + 1))
         if command -v "$cmd" >/dev/null 2>&1; then
             ok "$name: $(command -v $cmd)"
-            ((ok_count++))
+            ok_count=$((ok_count + 1))
         else
             warn "$name: 未安装"
         fi

@@ -1,0 +1,490 @@
+# Android 项目包结构设计与代码组织原则
+
+---
+
+# 一、设计理念
+
+## 1.1 核心思想
+
+> **空间结构即代码结构，目录边界即逻辑边界。**
+
+代码目录应尽可能映射真实界面布局，使开发者无需搜索即可根据界面快速定位代码。
+
+---
+
+## 1.2 基本原则
+
+1. 页面自治，按页面纵向切分。
+2. 横竖屏属于不同交互范式，物理隔离。
+3. UI 与局部逻辑保持内聚。
+4. 状态停留在最小拥有者。
+5. 空间边界优先于代码复用。
+6. 组件可无限向下拆分，但不过度拆分。
+7. 目录表示空间组织，不表示业务职责。
+
+---
+
+# 二、顶层包结构
+
+```text
+com.example.app
+├── engine/                   # 引擎层（播放器、音视频、渲染等）
+├── data/                     # 全局共享数据
+├── di/                       # 依赖注入
+├── navigation/               # 路由
+├── screen/                   # 页面模块
+├── ui/
+│   ├── adaptive/             # 屏幕适配
+│   ├── theme/                # 主题
+│   └── component/            # 全局可复用组件
+├── MainActivity.kt
+└── AppApplication.kt
+```
+
+---
+
+# 三、页面模块结构
+
+```text
+screen/video_workspace/
+├── data/
+├── portrait/
+├── landscape/
+├── VideoWorkspaceScreen.kt
+├── VideoWorkspaceUiState.kt
+└── VideoWorkspaceViewModel.kt
+```
+
+说明：
+
+* 每个页面都是独立模块。
+* 页面私有数据放入 data。
+* 横竖屏分别维护自己的完整实现。
+* Screen 为唯一页面入口。
+
+---
+
+# 四、横竖屏规范
+
+横竖屏属于不同交互范式，应物理隔离。
+
+要求：
+
+* portrait 与 landscape 禁止互相 import。
+* 相同组件允许同名，但必须独立实现。
+* Screen 仅负责根据窗口模式分发，不负责布局适配。
+
+例如：
+
+```text
+portrait/
+    PreviewSection.kt
+
+landscape/
+    PreviewSection.kt
+```
+
+二者互不依赖。
+
+---
+
+# 五、页面拆分模型
+
+采用四级拆分模型：
+
+```text
+Screen
+    ↓
+Section
+    ↓
+Part
+    ↓
+Component
+```
+
+---
+
+## 5.1 Screen
+
+职责：
+
+* 页面入口
+* 生命周期管理
+* 导航入口
+* 横竖屏模式分发
+
+禁止：
+
+* 页面业务逻辑
+* 数据转换
+* 业务状态管理
+* 跨 Section 协调
+
+---
+
+## 5.2 Section
+
+定义：
+
+页面一级视觉区域。
+
+特点：
+
+* 占据页面较大的连续空间
+* 可独立布局
+* 可拥有自己的局部状态
+* 可继续拆分为多个 Part
+
+例如：
+
+```text
+HeaderSection
+
+PreviewSection
+
+TimelineSection
+
+SidebarSection
+```
+
+---
+
+## 5.3 Part
+
+定义：
+
+Section 内具有独立布局职责的区域。
+
+特点：
+
+* 隶属于某个 Section
+* 不跨 Section
+* 可继续拆分
+* 可拥有自己的局部状态
+
+例如：
+
+```text
+Toolbar
+
+MediaGrid
+
+TrackList
+
+ActionGroup
+
+PropertyPanel
+```
+
+---
+
+## 5.4 Component
+
+定义：
+
+最小可维护 UI 单元。
+
+特点：
+
+* 可独立维护
+* 可独立测试
+* 可继续包含子组件
+
+例如：
+
+```text
+PlayButton
+
+Thumbnail
+
+TrackItem
+
+Slider
+```
+
+---
+
+# 六、组件规范
+
+组件目录示例：
+
+```text
+play_button/
+├── PlayButton.kt
+└── PlayButtonLogic.kt
+```
+
+---
+
+## UI
+
+负责：
+
+* Compose
+* Layout
+* Render
+* Animation
+
+---
+
+## Logic
+
+负责：
+
+* remember
+* 局部状态
+* 点击事件
+* 手势
+* 局部业务逻辑
+
+### Logic 按需创建
+
+当组件包含以下任意内容时创建 Logic：
+
+* 局部状态
+* 事件处理
+* 动画控制
+* 手势处理
+* 局部业务逻辑
+
+纯展示组件无需 Logic。
+
+例如：
+
+```text
+Logo/
+└── Logo.kt
+```
+
+---
+
+# 七、状态管理原则
+
+## 状态拥有者原则
+
+> 状态属于生命周期最短且能够完整管理它的对象。
+
+状态拥有关系：
+
+| 状态           | 拥有者             |
+| ------------ | --------------- |
+| 页面状态         | ViewModel       |
+| Section 状态   | Section         |
+| Part 状态      | Part            |
+| Component 状态 | Component Logic |
+
+禁止：
+
+所有状态集中维护于 ViewModel。
+
+鼓励：
+
+状态尽可能下沉到拥有它的层级。
+
+---
+
+## 状态流向
+
+采用单向数据流：
+
+```text
+ViewModel
+    ↓
+Screen
+    ↓
+Section
+    ↓
+Part
+    ↓
+Component
+    ↓
+Logic
+
+事件逐层向上传递
+```
+
+原则：
+
+* 生命周期不同的状态应拆分。
+* Section 之间禁止直接共享状态。
+* 页面协调由 ViewModel 完成。
+
+---
+
+# 八、拆分原则
+
+满足以下任意条件即可拆分：
+
+* 空间独立
+* 生命周期不同
+* 状态不同
+* 修改频率不同
+* 可以独立维护
+
+允许无限向下拆分。
+
+---
+
+## 停止拆分条件
+
+满足以下全部条件即可停止：
+
+* 单一职责
+* 阅读无需滚动即可理解
+* 不再具有继续独立维护价值
+
+禁止为了拆分而拆分。
+
+---
+
+# 九、目录创建原则
+
+满足以下任意情况即可创建目录：
+
+* 一个独立视觉区域
+* 一个独立交互模块
+* 一个可独立维护组件
+* 一个未来可能继续扩展的节点
+
+允许目录无限向下。
+
+禁止为了减少目录层级而平铺组件。
+
+---
+
+# 十、复用原则
+
+> 空间边界优先于代码复用。
+
+只有满足以下条件才允许抽取全局组件：
+
+* 至少两个页面长期稳定复用
+* 与业务无关
+* 不依赖 screen
+
+否则：
+
+复制优于抽象。
+
+禁止为了复用而复用。
+
+---
+
+# 十一、页面 Data 层
+
+页面私有数据统一放置于：
+
+```text
+screen/xxx/data/
+```
+
+允许包含：
+
+```text
+data/
+├── repository/
+├── source/
+├── mapper/
+├── cache/
+├── converter/
+└── model/
+```
+
+根据页面需要自由组织。
+
+---
+
+# 十二、全局 UI
+
+全局组件统一放置：
+
+```text
+ui/component/
+```
+
+要求：
+
+* 不依赖任何 screen
+* 不包含业务逻辑
+* 保持高度通用
+
+允许依赖：
+
+* Compose
+* Material3
+* Theme
+* Foundation
+
+---
+
+# 十三、命名规范
+
+| 类型              | 命名                         |
+| --------------- | -------------------------- |
+| 页面              | VideoWorkspaceScreen.kt    |
+| 页面状态            | VideoWorkspaceUiState.kt   |
+| 页面状态管理          | VideoWorkspaceViewModel.kt |
+| Section         | TimelineSection.kt         |
+| Part            | PropertyPanel.kt           |
+| Component       | PlayButton.kt              |
+| Component Logic | PlayButtonLogic.kt         |
+
+目录使用业务语义命名，例如：
+
+```text
+timeline
+
+preview
+
+property_panel
+
+media_library
+
+track_list
+```
+
+避免：
+
+```text
+layout1
+
+moduleA
+
+view2
+
+temp
+```
+
+---
+
+# 十四、核心约束
+
+1. Screen 仅负责入口、生命周期与模式分发。
+2. 横竖屏完全独立，禁止互相依赖。
+3. Section 仅管理自身区域，不直接操作其他 Section。
+4. Part 仅管理所属 Section 内的局部区域。
+5. Component 为最小可维护单元。
+6. Logic 按需创建，与组件保持同目录。
+7. 状态属于生命周期最短且能够完整管理它的对象。
+8. 页面状态统一由 ViewModel 协调。
+9. 页面间禁止直接共享状态。
+10. 页面私有数据放置于 screen/data。
+11. 全局组件禁止依赖任何页面模块。
+12. 空间边界优先于代码复用。
+13. 组件允许无限向下拆分，但禁止过度拆分。
+14. 目录表示空间组织，不表示业务职责。
+15. 引擎层禁止直接被 Screen 使用，应通过 Data 层进行隔离。
+
+---
+
+# 十五、设计哲学
+
+> **空间结构即代码结构，目录边界即逻辑边界。**
+
+> **状态属于生命周期最短且能够完整管理它的对象。**
+
+> **空间边界优先于代码复用。**
+
+> **UI 与局部逻辑保持内聚，Logic 按需创建。**
+
+> **组件可无限向下拆分，但不过度拆分。**

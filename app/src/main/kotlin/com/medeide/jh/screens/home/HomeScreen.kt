@@ -1,873 +1,573 @@
 package com.medeide.jh.screens.home
 
 import android.Manifest
-import android.net.Uri
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.window.core.layout.WindowSizeClass
+import com.medeide.jh.screens.home.landscape.HomeLandscapeScreen
+import com.medeide.jh.screens.home.landscape.collab.CollabPanel
+import com.medeide.jh.screens.home.landscape.sidebar.SidePanel
+import com.medeide.jh.screens.home.landscape.sidebar.Sidebar
+import com.medeide.jh.screens.home.landscape.sidebar.SidebarTab
+import com.medeide.jh.screens.home.landscape.sidebar.searchreplacepanel.rememberSearchReplaceState
+import com.medeide.jh.screens.home.landscape.topbar.MainTopBar
+import com.medeide.jh.screens.home.landscape.topbar.audioplayer.AudioPlaybackState
+import com.medeide.jh.screens.home.landscape.topbar.audioplayer.AudioTrack
+import com.medeide.jh.screens.home.landscape.topbar.audioplayer.PlayMode
+import com.medeide.jh.screens.home.landscape.workspace.MainContentArea
+import com.medeide.jh.screens.home.landscape.workspace.model.TabItem
+import com.medeide.jh.screens.home.landscape.workspace.model.TabType
+import com.medeide.jh.screens.home.landscape.workspace.model.displayNameFromPath
+import com.medeide.jh.screens.home.landscape.workspace.model.fileTypeForPath
+import com.medeide.jh.screens.home.portrait.HomePortraitScreen
+import com.medeide.jh.screens.home.portrait.topbar.PortraitTopBar
+import com.medeide.jh.screens.permission.LocalActivity
+import com.medeide.jh.ui.adaptive.rememberWindowSizeClass
+import com.medeide.jh.core.data.repository.UserPreferencesRepository
+import com.medeide.jh.core.data.source.local.LiteRTEngineManager
+import com.medeide.jh.core.data.source.local.LiteRTModelRepository
+import com.medeide.jh.model.chat.EngineStatus
+import com.medeide.jh.screens.home.cloudchat.CloudChatViewModel
+import com.medeide.jh.screens.home.localchat.LocalModelInfo
+import com.medeide.jh.screens.home.recent.RecentFileEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.medeide.jh.R
-import com.medeide.jh.model.FileItem
-import com.medeide.jh.model.TabItem
-import com.medeide.jh.model.TabType
-import com.medeide.jh.screens.home.ChatViewModel
-import com.medeide.jh.screens.home.logic.FileOperationEvents
-import com.medeide.jh.data.storage.FileManager
-import com.medeide.jh.screens.home.landscape.collab.chat.CollabPanel
-import com.medeide.jh.screens.home.landscape.workspace.MainContentArea
-import com.medeide.jh.screens.home.landscape.topbar.maintopbar.MainTopBar
-import com.medeide.jh.data.repository.RecentEntry
-import com.medeide.jh.screens.home.landscape.sidebar.sidebar.Sidebar
-import com.medeide.jh.screens.home.landscape.sidebar.sidebar.SidebarTab
-import com.medeide.jh.screens.home.landscape.sidebar.searchreplacepanel.SearchReplacePanel
-import com.medeide.jh.screens.home.model.SearchResultItem
-import com.medeide.jh.screens.home.landscape.HomeLandscapeScreen
-import com.medeide.jh.screens.home.landscape.workspace.editor.CodeEditor
-import com.medeide.jh.screens.home.landscape.sidebar.resourcepanel.ResourcePanel
-import com.medeide.jh.screens.home.logic.EditorScreenState
-import com.medeide.jh.screens.home.logic.rememberEditorScreenState
-import com.medeide.jh.screens.home.logic.utils.FileTypeUtil
-import com.medeide.jh.screens.home.logic.utils.FileOpenMode
-import com.medeide.jh.model.displayNameFromPath
-import com.medeide.jh.ui.adaptive.rememberWindowSizeClass
 import org.koin.androidx.compose.koinViewModel
+import org.koin.compose.koinInject
+import java.io.File
+import kotlin.random.Random
 
 @Composable
-fun HomeScreen(
-    viewModel: HomeViewModel = koinViewModel(),
-    chatViewModel: ChatViewModel = koinViewModel(),
-) {
+fun HomeScreen() {
     val windowSizeClass = rememberWindowSizeClass()
+    val isLandscape = windowSizeClass.isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
+    val userPrefs: UserPreferencesRepository = koinInject()
+    val userProfile by userPrefs.userProfile.collectAsState(initial = com.medeide.jh.model.chat.UserProfile())
+    val savedMode by userPrefs.ideMode.collectAsState(initial = null)
+    var isIdeMode by rememberSaveable { mutableStateOf(isLandscape) }
+    // DataStore 有保存值时覆盖初始值
+    LaunchedEffect(savedMode) {
+        savedMode?.let { isIdeMode = it }
+    }
+    val activity = LocalActivity.current
     val context = LocalContext.current
-    val homeState by viewModel.state.collectAsState()
-    val files by viewModel.files.collectAsState()
-    val chatState by chatViewModel.state.collectAsState()
-    val settingsTabTitle = stringResource(R.string.settings_tab_name)
+    val scope = rememberCoroutineScope()
+    val chatViewModel: CloudChatViewModel = koinViewModel()
+    val homeViewModel: HomeViewModel = koinViewModel()
+    val modelRepository: LiteRTModelRepository = koinInject()
+    val engineManager: LiteRTEngineManager = koinInject()
+
+    // ── 本地模型状态 ──
+    var localModels by remember { mutableStateOf<List<LocalModelInfo>>(emptyList()) }
+    var localEngineStatus by remember { mutableStateOf(EngineStatus.Idle) }
+    var localModelName by remember { mutableStateOf("") }
+
+    val onScanModels: () -> Unit = {
+        scope.launch(Dispatchers.IO) {
+            val files = modelRepository.scanDownloadedModels()
+            val models = files.map { file ->
+                val displayName = file.nameWithoutExtension
+                    .replace("-", " ")
+                    .replace("_", " ")
+                LocalModelInfo(
+                    fileName = file.name,
+                    displayName = displayName,
+                    sizeBytes = file.length(),
+                    path = file.absolutePath,
+                )
+            }
+            localModels = models
+        }
+    }
+    val onLoadModel: (String) -> Unit = { path ->
+        localEngineStatus = EngineStatus.Loading
+        scope.launch(Dispatchers.IO) {
+            val result = engineManager.loadModel(path)
+            result.onSuccess {
+                localEngineStatus = EngineStatus.Ready
+                localModelName = File(path).nameWithoutExtension
+                    .replace("-", " ")
+                    .replace("_", " ")
+                    .take(16)
+            }.onFailure {
+                localEngineStatus = EngineStatus.Error
+                localModelName = ""
+            }
+        }
+    }
+
+    // 文件选择器：浏览模型文件
+    val modelFilePickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            localEngineStatus = EngineStatus.Loading
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val input = context.contentResolver.openInputStream(it)
+                    val fileName = "imported_${System.currentTimeMillis()}.litertlm"
+                    val destDir = File(context.filesDir, "litertlm_models")
+                    destDir.mkdirs()
+                    val dest = File(destDir, fileName)
+                    input?.use { src -> dest.outputStream().use { dst -> src.copyTo(dst) } }
+                    onLoadModel(dest.absolutePath)
+                } catch (e: Exception) {
+                    localEngineStatus = EngineStatus.Error
+                }
+            }
+        }
+    }
+
+    // 生命周期感知：回到桌面时暂停/释放播放器，返回时恢复
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    homeViewModel.audioPlaybackState.exoPlayer?.pause()
+                    homeViewModel.audioPlaybackState.isPlaying = false
+                    homeViewModel.workspaceVideoState.mediaPlayer?.pause()
+                    homeViewModel.workspaceVideoState.isPlaying = false
+                    homeViewModel.workspaceAudioState.exoPlayer?.pause()
+                    homeViewModel.workspaceAudioState.isPlaying = false
+                }
+                Lifecycle.Event.ON_DESTROY -> {
+                    homeViewModel.audioPlaybackState.release()
+                    homeViewModel.workspaceVideoState.release()
+                    homeViewModel.workspaceAudioState.release()
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    DisposableEffect(isIdeMode) {
+        activity.requestedOrientation = if (isIdeMode) {
+            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        onDispose {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
 
     var selectedTab by remember { mutableStateOf<SidebarTab?>(null) }
-    var isSettingsOpen by remember { mutableStateOf(false) }
-    var cursorLine by remember { mutableIntStateOf(0) }
-    var cursorLineContent by remember { mutableStateOf("") }
-    var previewModeTabs by remember { mutableStateOf(setOf<String>()) }
+    var isHistoryOpen by rememberSaveable { mutableStateOf(false) }
+    var isDashboardOpen by rememberSaveable { mutableStateOf(false) }
+    var isFileBrowserOpen by rememberSaveable { mutableStateOf(false) }
+    var isSettingsOpen by rememberSaveable { mutableStateOf(false) }
+    var lastBackPressed by remember { mutableLongStateOf(0L) }
+    val audioPlaybackState = homeViewModel.audioPlaybackState
+    var scannedAudioTracks by remember { mutableStateOf<List<AudioTrack>>(emptyList()) }
+    var scanned by remember { mutableStateOf(false) }
 
-    val fileManager = org.koin.java.KoinJavaComponent.get<FileManager>(FileManager::class.java)
-    val editorState = rememberEditorScreenState(chatViewModel, fileManager)
-    val audioPlaybackState = remember { com.medeide.jh.screens.home.audioplayer.AudioPlaybackState() }
-    val videoPlaybackState = remember { com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlaybackState() }
-    val allRecent by viewModel.allRecent.collectAsState()
-    val terminalHeight by viewModel.terminalHeight.collectAsState()
-
-    // 每次启动时检测权限，已有权限则自动打开存储目录
-    LaunchedEffect(Unit) {
-        if (Environment.isExternalStorageManager()) {
-            viewModel.openDirectStorage()
-            viewModel.recordRecentFolder("/storage/emulated/0", "存储根目录")
-            chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
-            selectedTab = SidebarTab.Explorer
-        }
-    }
-
-    // Tab 持久化
-    editorState.onSaveTabs = {
-        val fileTabs = editorState.tabs.filter { it.type == TabType.File || it.type == TabType.Image
-            || it.type == TabType.Audio || it.type == TabType.Video || it.type == TabType.Archive
-            || it.type == TabType.Preview || it.type == TabType.Markdown }
-        val paths = fileTabs.map { it.id }
-        viewModel.saveOpenedTabs(paths.filter { !it.startsWith("content://") })
-        chatViewModel.setOpenedFilePaths(paths)
-        val activeTab = editorState.tabs.getOrNull(editorState.activeTabIndex)
-        if (activeTab != null && activeTab.type != TabType.Settings) {
-            chatViewModel.setActiveFileContext(activeTab.id, cursorLine, cursorLineContent)
-        }
-        val modifiedPaths = editorState.tabs.filter { it.type == TabType.File && editorState.isFileModified(it.id) }.map { it.id }
-        chatViewModel.setModifiedFilePaths(modifiedPaths)
-    }
-
-    LaunchedEffect(Unit) {
-        chatViewModel.openFileRequests.collect { path ->
-            val fileName = displayNameFromPath(path)
-            val ext = fileName.substringAfterLast('.', "").lowercase()
-            when {
-                ext == "md" -> editorState.openTab(TabItem(path, fileName, TabType.Markdown))
-                FileTypeUtil.isImageFile(fileName) ->
-                    editorState.openTab(TabItem(path, fileName, TabType.Image))
-                FileTypeUtil.isAudioFile(fileName) ->
-                    editorState.openTab(TabItem(path, fileName, TabType.Audio))
-                FileTypeUtil.isVideoFile(fileName) ->
-                    editorState.openTab(TabItem(path, fileName, TabType.Video))
-                FileTypeUtil.isArchiveFile(fileName) ->
-                    editorState.openTab(TabItem(path, fileName, TabType.Archive))
-                else -> editorState.openFileTab(path)
+    BackHandler {
+        when {
+            isHistoryOpen || isDashboardOpen || isFileBrowserOpen || isSettingsOpen -> {
+                isHistoryOpen = false
+                isDashboardOpen = false
+                isFileBrowserOpen = false
+                isSettingsOpen = false
             }
-        }
-    }
-
-    // 同步编辑器状态
-    LaunchedEffect(Unit) {
-        FileOperationEvents.events.collect { event ->
-            when (event.operation) {
-                "create" -> {
-                    // 工具创建文件后自动打开并切换到对应标签页
-                    val eventPath = event.path
-                    val absolutePath = if (eventPath.startsWith("/")) eventPath
-                        else "${fileManager.projectDirPath.trimEnd('/')}/${eventPath.trimStart('/')}"
-                    if (java.io.File(absolutePath).isFile) {
-                        editorState.openFileTab(absolutePath)
-                    }
-                    val modifiedPaths = editorState.tabs
-                        .filter { it.type == TabType.File && editorState.isFileModified(it.id) }
-                        .map { it.id }
-                    chatViewModel.setModifiedFilePaths(modifiedPaths)
-                }
-                "modify", "overwrite" -> {
-                    // 匹配 editorContent 中的 key：支持绝对/相对路径不一致
-                    val eventPath = event.path
-                    val matchedKey = editorState.editorContent.keys.firstOrNull { key ->
-                        key == eventPath ||
-                        key.endsWith("/$eventPath") ||
-                        eventPath.endsWith("/$key") ||
-                        // 如果一方是绝对路径另一方是相对路径，去掉项目根目录前缀后比较
-                        (eventPath.startsWith("/") && key.startsWith("/")).not() &&
-                        eventPath.removePrefix("/").let { eventRelative ->
-                            key.removePrefix("/") == eventRelative
-                        }
-                    } ?: eventPath
-                    if (matchedKey in editorState.editorContent) {
-                        val newContent = editorState.readFileFromSource(matchedKey)
-                        editorState.editorContent[matchedKey] = TextFieldValue(newContent)
-                        editorState.originalContents[matchedKey] = newContent
-                    }
-                    val modifiedPaths = editorState.tabs
-                        .filter { it.type == TabType.File && editorState.isFileModified(it.id) }
-                        .map { it.id }
-                    chatViewModel.setModifiedFilePaths(modifiedPaths)
-                }
-                "delete" -> {
-                    // 路径模糊匹配：AI 工具传相对路径，但标签页 id 存绝对路径
-                    val eventPath = event.path
-                    val tabIdx = editorState.tabs.indexOfFirst { tab ->
-                        tab.id == eventPath ||
-                        tab.id.endsWith("/$eventPath") ||
-                        eventPath.endsWith("/${tab.id.substringAfterLast('/')}") ||
-                        tab.id.substringAfterLast('/') == eventPath.substringAfterLast('/')
-                    }
-                    if (tabIdx >= 0) editorState.forceCloseTab(tabIdx)
-                    chatViewModel.setModifiedFilePaths(
-                        editorState.tabs
-                            .filter { it.type == TabType.File && editorState.isFileModified(it.id) }
-                            .map { it.id }
-                    )
-                }
+            System.currentTimeMillis() - lastBackPressed > 2000 -> {
+                lastBackPressed = System.currentTimeMillis()
+                Toast.makeText(context, "再按一次返回桌面", Toast.LENGTH_SHORT).show()
             }
+            else -> activity.finish()
         }
     }
 
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? -> uri?.let { chatViewModel.loadModelFromUri(it) } }
+    // 工作区 Tab 状态
+    var workspaceTabs by remember { mutableStateOf<List<TabItem>>(emptyList()) }
+    var workspaceActiveIndex by remember { mutableIntStateOf(-1) }
+    var openFileLineRequest by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    val searchState = rememberSearchReplaceState()
 
-    val saveAsLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("*/*")
-    ) { uri: Uri? ->
-        uri?.let { targetUri ->
-            val tab = editorState.tabs.getOrNull(editorState.activeTabIndex) ?: return@let
-            val content = editorState.editorContent[tab.id]?.text ?: return@let
-            try { context.contentResolver.openOutputStream(targetUri)?.use { it.write(content.toByteArray(Charsets.UTF_8)) } } catch (_: Exception) {}
-        }
-    }
+    // 文件管理器根路径（进入工作模式时可切换为项目目录）
+    val storageRoot = remember { Environment.getExternalStorageDirectory().absolutePath }
+    var fileBrowserRoot by remember { mutableStateOf(storageRoot) }
 
-    /** 授权文件管理按钮：有权限直接打开，无权限跳系统设置 */
-    val onOpenFolder: () -> Unit = {
-        if (Environment.isExternalStorageManager()) {
-            viewModel.openDirectStorage()
-            viewModel.recordRecentFolder("/storage/emulated/0", "存储根目录")
-            chatViewModel.setProjectRootPath("/storage/emulated/0", "存储根目录")
-            selectedTab = SidebarTab.Explorer
-        } else {
-            try {
-                val intent = android.content.Intent(
-                    android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
-                ).apply {
-                    data = android.net.Uri.parse("package:${context.packageName}")
-                }
-                context.startActivity(intent)
-            } catch (_: android.content.ActivityNotFoundException) {
-                // 部分设备不支持包名定向，降级到通用权限列表页
-                try {
-                    val fallback = android.content.Intent(
-                        android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
-                    ).apply {
-                        data = android.net.Uri.parse("package:${context.packageName}")
-                    }
-                    context.startActivity(fallback)
-                } catch (e: Exception) {
-                    android.util.Log.e("HomeScreen", "降级权限意图也失败", e)
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("HomeScreen", "打开系统权限设置失败", e)
-            }
-        }
-    }
+    // 最近文件列表
+    val recentFiles by userPrefs.recentFiles.collectAsState(initial = emptyList())
 
-    // 检查是否已经在直接访问模式下打开了存储
-    val isStorageActive = homeState.openedFolderName != null
-
-    var showNewFileDialog by remember { mutableStateOf(false) }
-    var showNewFolderDialog by remember { mutableStateOf(false) }
-    var newFileName by remember { mutableStateOf("") }
-    var newFolderName by remember { mutableStateOf("") }
-    var isTerminalVisible by remember { mutableStateOf(false) }
-    // 工具栏音乐播放
-    var scannedAudioTracks by remember { mutableStateOf<List<com.medeide.jh.screens.home.audioplayer.AudioTrack>>(emptyList()) }
-    var audioScanRequested by remember { mutableStateOf(false) }
-    var hasAudioPermission by remember {
-        mutableStateOf(androidx.core.content.ContextCompat.checkSelfPermission(
-            context, Manifest.permission.READ_MEDIA_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED)
-    }
-    val audioPermissionLauncher = rememberLauncherForActivityResult(
+    // 音乐权限请求
+    val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+        Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
+    val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        hasAudioPermission = granted
-        if (granted) audioScanRequested = true
-    }
-    val audioScanScope = rememberCoroutineScope()
-    LaunchedEffect(audioScanRequested) {
-        if (audioScanRequested && hasAudioPermission && scannedAudioTracks.isEmpty()) {
-            withContext(Dispatchers.IO) {
-                scannedAudioTracks = com.medeide.jh.screens.home.audioplayer.AudioPlaybackState.scanDeviceAudio(context)
-            }
+        if (granted && !scanned) {
+            scanned = true
+            scope.launch { scannedAudioTracks = AudioPlaybackState.scanDeviceAudio(context) }
         }
     }
-    fun playAudioTrack(track: com.medeide.jh.screens.home.audioplayer.AudioTrack) {
-        try {
-            if (audioPlaybackState.exoPlayer == null) {
-                val player = androidx.media3.exoplayer.ExoPlayer.Builder(context).build()
-                player.addListener(object : androidx.media3.common.Player.Listener {
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
-                            val pl = audioPlaybackState.playlist
-                            val ci = audioPlaybackState.currentIndex
-                            if (pl.size > 1) {
-                                val next = (ci + 1) % pl.size
-                                val nextTrack = pl[next]
-                                playAudioTrack(nextTrack)
-                            } else {
-                                audioPlaybackState.isPlaying = false
-                                audioPlaybackState.currentPosition = 0f
-                                player.seekTo(0)
-                            }
-                        }
-                    }
-                })
-                audioPlaybackState.exoPlayer = player
+
+    val chatState by chatViewModel.state.collectAsState()
+
+    // 跟踪编辑器/工作目录状态变化，更新实时上下文
+    val isProjectMode = fileBrowserRoot != storageRoot
+    LaunchedEffect(workspaceTabs, workspaceActiveIndex, isIdeMode, fileBrowserRoot) {
+        val ctx = buildString {
+            val now = java.time.LocalDateTime.now()
+            appendLine("[实时状态]")
+            appendLine("当前时间: ${now.year}-${"%02d".format(now.monthValue)}-${"%02d".format(now.dayOfMonth)} ${"%02d".format(now.hour)}:${"%02d".format(now.minute)}")
+            if (isProjectMode) {
+                appendLine("工作目录: $fileBrowserRoot")
             }
-            val uri = if (track.path.startsWith("content://")) android.net.Uri.parse(track.path) else android.net.Uri.fromFile(java.io.File(track.path))
-            audioPlaybackState.exoPlayer?.apply {
-                stop()
-                clearMediaItems()
-                setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
-                prepare()
-                play()
+            if (isIdeMode) {
+                val active = workspaceActiveIndex.takeIf { it >= 0 && it < workspaceTabs.size }?.let { workspaceTabs[it] }
+                if (active != null) {
+                    appendLine("编辑中文件: ${active.id}")
+                }
             }
-            audioPlaybackState.currentAudioPath = track.path
-            audioPlaybackState.currentSongName = track.name
-            audioPlaybackState.isPlaying = true
-            audioPlaybackState.playlist = scannedAudioTracks
-            audioPlaybackState.currentIndex = scannedAudioTracks.indexOfFirst { it.path == track.path }.coerceAtLeast(0)
-            audioScanScope.launch(Dispatchers.IO) {
-                audioPlaybackState.lyrics = com.medeide.jh.screens.home.audioplayer.LyricsParser.loadFromFile(context, track.path)
-            }
-        } catch (e: Exception) {
-            audioPlaybackState.errorMsg = e.message
         }
-    }
-    val onPlayAudioTrack: (com.medeide.jh.screens.home.audioplayer.AudioTrack) -> Unit = { playAudioTrack(it) }
-    val onStopAudio: () -> Unit = {
-        audioPlaybackState.release()
+        chatViewModel.setEditorContext(ctx.toString().trimEnd())
+        chatViewModel.setProjectRoot(if (isProjectMode) fileBrowserRoot else "")
     }
 
     Scaffold(
         topBar = {
-            MainTopBar(
-                windowSizeClass = windowSizeClass,
-                engineStatus = chatState.engineStatus,
-                modelName = chatState.modelName,
-                availableModels = chatState.availableModels,
-                cloudProfiles = chatState.cloudModelProfiles,
-                activeCloudProfileId = chatState.activeCloudProfileId,
-                cloudModelEnabled = chatState.cloudModelEnabled,
-                onScanModels = { chatViewModel.scanModels() },
-                onLoadModel = { chatViewModel.loadModel(it) },
-                onBrowseModelFile = { filePickerLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
-                onSwitchCloudProfile = { chatViewModel.switchCloudProfile(it) },
-                audioPlaybackState = audioPlaybackState,
-                scannedAudioTracks = scannedAudioTracks,
-                onScanMusic = {
-                    if (hasAudioPermission) audioScanRequested = true
-                    else audioPermissionLauncher.launch(Manifest.permission.READ_MEDIA_AUDIO)
-                },
-                onPlayAudioTrack = onPlayAudioTrack,
-                onStopAudio = onStopAudio,
-                // 编辑菜单
-                onUndo = { editorState.handleUndo() },
-                onRedo = { editorState.handleRedo() },
-                onCopyAll = { editorState.copyAllText(context) },
-                onFindReplace = {
-                    editorState.openSearchToolbar()
-                    // 如果侧栏搜索面板未打开，不自动切换（保持当前面板）
-                    // 查找替换工具栏已在编辑器右上角弹出
-                },
-                recentItems = allRecent,
-                onOpenRecentItem = { entry ->
-                    val file = java.io.File(entry.path)
-                    if (file.isDirectory()) {
-                        viewModel.openAsProjectDirectory(entry.path)
-                    } else {
-                        editorState.openFileTab(entry.path, entry.name)
-                    }
-                },
-            )
+            if (isIdeMode) {
+                MainTopBar(
+                    isIdeMode = isIdeMode,
+                    onToggleLayoutMode = {
+                        isIdeMode = false
+                        scope.launch { userPrefs.setIdeMode(false) }
+                    },
+                    audioPlaybackState = audioPlaybackState,
+                    scannedAudioTracks = scannedAudioTracks,
+                    onScanMusic = {
+                        if (scanned) return@MainTopBar
+                        if (ContextCompat.checkSelfPermission(context, audioPermission)
+                            == PackageManager.PERMISSION_GRANTED
+                        ) {
+                            scanned = true
+                            scope.launch {
+                                scannedAudioTracks = AudioPlaybackState.scanDeviceAudio(context)
+                            }
+                        } else {
+                            permissionLauncher.launch(audioPermission)
+                        }
+                    },
+                    onPlayAudioTrack = { track ->
+                        if (track.path == audioPlaybackState.currentAudioPath) return@MainTopBar
+                        audioPlaybackState.release()
+                        audioPlaybackState.playlist = scannedAudioTracks
+                        audioPlaybackState.currentIndex = scannedAudioTracks.indexOfFirst { it.path == track.path }.coerceAtLeast(0)
+                        audioPlaybackState.currentAudioPath = track.path
+                        audioPlaybackState.currentSongName = track.name
+
+                        val player = ExoPlayer.Builder(context).build()
+                        audioPlaybackState.exoPlayer = player
+                        val uri = if (track.path.startsWith("content://")) Uri.parse(track.path) else Uri.fromFile(File(track.path))
+                        player.setMediaItem(MediaItem.fromUri(uri))
+                        player.prepare()
+                        player.play()
+                        player.addListener(object : Player.Listener {
+                            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                                audioPlaybackState.isPlaying = isPlaying
+                            }
+                            override fun onPlaybackStateChanged(playbackState: Int) {
+                                when (playbackState) {
+                                    Player.STATE_READY -> {
+                                        audioPlaybackState.isPrepared = true
+                                        audioPlaybackState.duration = player.duration.coerceAtLeast(0L).toFloat()
+                                    }
+                                    Player.STATE_ENDED -> {
+                                        val pl = audioPlaybackState.playlist
+                                        val ci = audioPlaybackState.currentIndex
+                                        val next = when (audioPlaybackState.playMode) {
+                                            PlayMode.RepeatOne -> ci // 同一首
+                                            PlayMode.RepeatAll -> if (pl.size > 1) (ci + 1) % pl.size else ci
+                                            PlayMode.Shuffle -> if (pl.size > 1) {
+                                                var n: Int; do { n = Random.nextInt(pl.size) } while (n == ci && pl.size > 1); n
+                                            } else ci
+                                        }
+                                        if (next == ci || pl.size <= 1) {
+                                            // 同一首或仅一首：直接 seek
+                                            player.seekTo(0)
+                                            player.play()
+                                        } else {
+                                            val nextTrack = pl[next]
+                                            audioPlaybackState.currentIndex = next
+                                            audioPlaybackState.currentSongName = nextTrack.name
+                                            audioPlaybackState.currentAudioPath = nextTrack.path
+                                            audioPlaybackState.currentPosition = 0f
+                                            audioPlaybackState.lyrics = emptyList()
+                                            audioPlaybackState.currentLyricIndex = -1
+                                            val uri2 = Uri.fromFile(File(nextTrack.path))
+                                            player.stop()
+                                            player.clearMediaItems()
+                                            player.setMediaItem(MediaItem.fromUri(uri2))
+                                            player.prepare()
+                                            player.play()
+                                        }
+                                    }
+                                }
+                            }
+                        })
+                    },
+                    onStopAudio = { audioPlaybackState.release() },
+                    onFindReplace = { searchState.isToolbarVisible = true },
+                    onTerminal = {
+                        val tab = TabItem(id = "terminal", title = "终端", type = TabType.Terminal)
+                        val existIdx = workspaceTabs.indexOfFirst { it.id == "terminal" }
+                        if (existIdx >= 0) {
+                            workspaceActiveIndex = existIdx
+                        } else {
+                            workspaceTabs = workspaceTabs + tab
+                            workspaceActiveIndex = workspaceTabs.size - 1
+                        }
+                    },
+                    recentFiles = recentFiles,
+                    onOpenRecentFile = { entry ->
+                        fileBrowserRoot = entry.path
+                        scope.launch { userPrefs.addRecentFile(entry) }
+                    },
+                    cloudProfiles = chatState.cloudModelProfiles,
+                    activeCloudProfileId = chatState.activeCloudProfileId,
+                    cloudModelEnabled = chatState.cloudModelEnabled,
+                    engineStatus = localEngineStatus,
+                    modelName = localModelName,
+                    availableModels = localModels,
+                    onScanModels = onScanModels,
+                    onLoadModel = onLoadModel,
+                    onSwitchCloudProfile = { chatViewModel.switchCloudProfile(it) },
+                    onBrowseModelFile = { modelFilePickerLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
+                )
+            } else {
+                PortraitTopBar(
+                    isIdeMode = isIdeMode,
+                    onToggleLayoutMode = {
+                        isIdeMode = true
+                        scope.launch { userPrefs.setIdeMode(true) }
+                    },
+                    onNewConversation = {
+                        isHistoryOpen = false
+                        isDashboardOpen = false
+                        isFileBrowserOpen = false
+                        isSettingsOpen = false
+                        chatViewModel.newConversation()
+                    },
+                    onHistory = {
+                        isHistoryOpen = !isHistoryOpen
+                        isDashboardOpen = false
+                        isFileBrowserOpen = false
+                        isSettingsOpen = false
+                    },
+                    onDashboard = {
+                        isDashboardOpen = !isDashboardOpen
+                        isHistoryOpen = false
+                        isFileBrowserOpen = false
+                        isSettingsOpen = false
+                    },
+                    onFileBrowser = {
+                        isFileBrowserOpen = !isFileBrowserOpen
+                        isHistoryOpen = false
+                        isDashboardOpen = false
+                        isSettingsOpen = false
+                    },
+                    onSettings = {
+                        isSettingsOpen = !isSettingsOpen
+                        isHistoryOpen = false
+                        isDashboardOpen = false
+                        isFileBrowserOpen = false
+                    },
+                )
+            }
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
     ) { innerPadding ->
-        HomeLandscapeScreen(
-            sideIconBar = {
-                Sidebar(
-                    selectedTab = selectedTab,
-                    onTabClick = { tab ->
-                        if (tab == SidebarTab.Terminal) {
-                            isTerminalVisible = !isTerminalVisible
-                        } else {
+        if (isIdeMode) {
+            HomeLandscapeScreen(
+                sideIconBar = {
+                    Sidebar(
+                        selectedTab = selectedTab,
+                        onTabClick = { tab ->
                             selectedTab = if (selectedTab == tab) null else tab
                         }
-                    },
-                )
-            },
-            sidePanel = {
-                LeftPanelContent(
-                    context = context,
-                    selectedTab = selectedTab,
-                    homeState = homeState,
-                    files = files,
-                    viewModel = viewModel,
-                    chatViewModel = chatViewModel,
-                    editorState = editorState,
-                    fileManager = fileManager,
-                    onTabChange = { selectedTab = it },
-                    onFileClick = { fileItem ->
-                        // 文本文件使用 filePath（相对/绝对均可，EditorScreenState 会处理)
-                        // 非文本文件需要绝对路径或 content:// URI
-                        val filePath = when {
-                            fileItem.filePath.isNotEmpty() -> fileItem.filePath
-                            fileItem.relativePath.isNotEmpty() -> fileItem.relativePath
-                            else -> fileItem.uri.toString()
-                        }
-                        viewModel.recordRecentFile(filePath, fileItem.name)
-                        // Web 文件在工作区以编辑+预览模式打开
-                        val webExt = fileItem.name.substringAfterLast('.', "").lowercase()
-                        if (webExt in setOf("html", "htm", "xhtml")) {
-                            editorState.openPreviewTab(filePath, fileItem.name)
-                            return@LeftPanelContent
-                        }
-                        // Markdown 文件以预览+编辑双模式打开
-                        if (webExt == "md") {
-                            editorState.openTab(TabItem(filePath, fileItem.name, TabType.Markdown))
-                            return@LeftPanelContent
-                        }
-                        when (FileTypeUtil.openMode(fileItem.name, fileItem.size)) {
-                            FileOpenMode.IMAGE -> {
-                                val id = if (fileItem.filePath.isNotEmpty()) fileItem.filePath else fileItem.uri.toString()
-                                editorState.openTab(TabItem(id, fileItem.name, TabType.Image))
+                    )
+                },
+                sidePanel = {
+                    SidePanel(
+                        selectedTab = selectedTab,
+                        fileBrowserRootPath = if (selectedTab in listOf(SidebarTab.Explorer, SidebarTab.Search)) fileBrowserRoot else "",
+                        onOpenFile = { path, line ->
+                            val type = fileTypeForPath(path)
+                            if (type == null) {
+                                Toast.makeText(context, "不支持打开此文件类型", Toast.LENGTH_SHORT).show()
+                                return@SidePanel
                             }
-                            FileOpenMode.AUDIO -> {
-                                val id = if (fileItem.filePath.isNotEmpty()) fileItem.filePath else fileItem.uri.toString()
-                                editorState.openTab(TabItem(id, fileItem.name, TabType.Audio))
-                            }
-                            FileOpenMode.VIDEO -> {
-                                val id = if (fileItem.filePath.isNotEmpty()) fileItem.filePath else fileItem.uri.toString()
-                                editorState.openTab(TabItem(id, fileItem.name, TabType.Video))
-                            }
-                            FileOpenMode.ARCHIVE -> {
-                                val id = if (fileItem.filePath.isNotEmpty()) fileItem.filePath else fileItem.uri.toString()
-                                editorState.openTab(TabItem(id, fileItem.name, TabType.Archive))
-                            }
-                            FileOpenMode.TEXT -> {
-                                editorState.editorContent.remove(filePath)
-                                editorState.openFileTab(filePath, fileItem.name)
-                            }
-                            FileOpenMode.UNSUPPORTED -> {
-                                val msg = if (fileItem.size > FileTypeUtil.MAX_TEXT_SIZE) {
-                                    "文件过大 (${fileItem.size / 1024 / 1024}MB)，无法以文本模式打开"
-                                } else {
-                                    "不支持打开此格式"
-                                }
-                                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    onAddToConversation = { fileItem ->
-                        if (!fileItem.isDirectory) {
-                            // 使用绝对路径或 content:// URI，确保 AI 可读取
-                            val attachPath = when {
-                                fileItem.filePath.isNotEmpty() -> fileItem.filePath
-                                else -> fileItem.uri.toString()
-                            }
-                            chatViewModel.attachFile(attachPath, fileItem.name)
-                        }
-                    },
-                    onOpenFileTab = { editorState.openFileTab(it) },
-                    onCloseSearchPanel = { selectedTab = null },
-                    onDismissSnippets = { selectedTab = null },
-                    onCloseTerminal = { selectedTab = null },
-                )
-            },
-            isSidePanelVisible = selectedTab != null,
-            isSidePanelExpanded = selectedTab != SidebarTab.Search,
-            workspaceContent = {
-                MainContentArea(
-                    chatViewModel = chatViewModel,
-                    audioPlaybackState = audioPlaybackState,
-                    videoPlaybackState = videoPlaybackState,
-                    tabs = editorState.tabs,
-                    activeTabIndex = editorState.activeTabIndex,
-                    onSelectTab = { idx ->
-                        val tab = editorState.tabs.getOrNull(idx)
-                        if (tab != null) editorState.openTab(tab)
-                    },
-                    onCloseTab = { idx ->
-                        val tab = editorState.tabs.getOrNull(idx) ?: return@MainContentArea
-                        if (tab.type == TabType.Video) videoPlaybackState.release()
-                        if (tab.id == editorState.settingsTabId) {
-                            editorState.closeSettingsTab()
-                            isSettingsOpen = false
-                        } else {
-                            editorState.closeTab(idx)
-                        }
-                    },
-                    onSaveAndCloseTab = { idx ->
-                        val tab = editorState.tabs.getOrNull(idx) ?: return@MainContentArea
-                        if (tab.type == TabType.File) editorState.saveFile(tab.id)
-                        editorState.closeTab(idx)
-                        if (tab.type == TabType.Video) videoPlaybackState.release()
-                    },
-                    onForceCloseTab = { idx ->
-                        val tab = editorState.tabs.getOrNull(idx) ?: return@MainContentArea
-                        if (tab.type == TabType.Video) videoPlaybackState.release()
-                        editorState.forceCloseTab(idx)
-                    },
-                    isFileModified = { path -> editorState.isFileModified(path) },
-                    onCloseAllTabs = {
-                        videoPlaybackState.release()
-                        editorState.closeAllTabs(); isSettingsOpen = false; viewModel.saveOpenedTabs(emptyList())
-                    },
-                    onSaveCurrent = {
-                        val tab = editorState.tabs.getOrNull(editorState.activeTabIndex)
-                        if (tab?.type == TabType.File) editorState.saveFile(tab.id)
-                    },
-                    onSaveAllTabs = { editorState.tabs.filter { it.type == TabType.File }.forEach { editorState.saveFile(it.id) } },
-                    previewModeTabs = previewModeTabs,
-                    projectDirPath = homeState.projectDirPath,
-                    onTogglePreviewMode = { path ->
-                        previewModeTabs = if (path in previewModeTabs) previewModeTabs - path else previewModeTabs + path
-                    },
-                    getEditorContent = { path ->
-                        editorState.editorContent.getOrPut(path) { TextFieldValue(editorState.readFileFromSource(path)) }
-                    },
-                    onPreviewContentChange = { path, tfv ->
-                        editorState.handleTextChange(path, tfv)
-                        val modified = editorState.tabs.filter { t -> t.type == TabType.File && editorState.isFileModified(t.id) }.map { it.id }
-                        chatViewModel.setModifiedFilePaths(modified)
-                    },
-                    tabContent = { path ->
-                        val tfv = editorState.editorContent.getOrPut(path) { TextFieldValue(editorState.readFileFromSource(path)) }
-
-                        CodeEditor(
-                            text = tfv,
-                            onTextChange = {
-                                editorState.onBeforeTextChange(path)
-                                editorState.handleTextChange(path, it)
-                                val modified = editorState.tabs.filter { t -> t.type == TabType.File && editorState.isFileModified(t.id) }.map { it.id }
-                                chatViewModel.setModifiedFilePaths(modified)
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                            onAddToChat = { selectedText ->
-                                val current = chatViewModel.state.value.inputText
-                                chatViewModel.setInputText(if (current.isBlank()) selectedText else "$current\n\n$selectedText")
-                            },
-                            onCursorChange = { line, lineContent ->
-                                cursorLine = line
-                                cursorLineContent = lineContent
-                            },
-                            searchScrollVersion = editorState.searchScrollVersion,
-                        )
-                    },
-                    // 搜索替换相关
-                    currentSearchMatches = editorState.currentSearchMatches,
-                    currentSearchMatchIndex = editorState.currentSearchMatchIndex,
-                    onSearchNavUp = {
-                        var matches = editorState.currentSearchMatches
-                        if (editorState.currentSearchQuery.isNotBlank()) {
-                            val activePath = editorState.getActiveFilePath()
-                            if (activePath != null) {
-                                val content = editorState.editorContent[activePath]?.text ?: ""
-                                val query = editorState.currentSearchQuery
-                                val newMatches = content.lines().mapIndexedNotNull { idx, line ->
-                                    if (line.contains(query, ignoreCase = true)) {
-                                        SearchResultItem(
-                                            filePath = activePath,
-                                            lineNumber = idx + 1,
-                                            matchText = line.trim(),
-                                            contextLines = emptyList(),
-                                        )
-                                    } else null
-                                }
-                                editorState.currentSearchMatches = newMatches
-                                editorState.searchToolbarQuerySnapshot = query
-                                matches = newMatches
-                            }
-                        }
-                        if (matches.isEmpty()) return@MainContentArea
-                        val currentIdx = editorState.currentSearchMatchIndex.coerceIn(0, matches.size - 1)
-                        val newIdx = if (currentIdx <= 0) matches.size - 1 else currentIdx - 1
-                        editorState.currentSearchMatchIndex = newIdx
-                        val match = matches[newIdx]
-                        val absPath = if (match.filePath.startsWith("/")) match.filePath
-                            else "${homeState.projectDirPath.trimEnd('/')}/${match.filePath}"
-                        editorState.openFileAtLine(absPath, match.lineNumber, searchQuery = editorState.currentSearchQuery)
-                    },
-                    onSearchNavDown = {
-                        var matches = editorState.currentSearchMatches
-                        if (editorState.currentSearchQuery.isNotBlank()) {
-                            val activePath = editorState.getActiveFilePath()
-                            if (activePath != null) {
-                                val content = editorState.editorContent[activePath]?.text ?: ""
-                                val query = editorState.currentSearchQuery
-                                val newMatches = content.lines().mapIndexedNotNull { idx, line ->
-                                    if (line.contains(query, ignoreCase = true)) {
-                                        SearchResultItem(
-                                            filePath = activePath,
-                                            lineNumber = idx + 1,
-                                            matchText = line.trim(),
-                                            contextLines = emptyList(),
-                                        )
-                                    } else null
-                                }
-                                editorState.currentSearchMatches = newMatches
-                                editorState.searchToolbarQuerySnapshot = query
-                                matches = newMatches
-                            }
-                        }
-                        if (matches.isEmpty()) return@MainContentArea
-                        val currentIdx = editorState.currentSearchMatchIndex.coerceIn(0, matches.size - 1)
-                        val newIdx = if (currentIdx >= matches.size - 1) 0 else currentIdx + 1
-                        editorState.currentSearchMatchIndex = newIdx
-                        val match = matches[newIdx]
-                        val absPath = if (match.filePath.startsWith("/")) match.filePath
-                            else "${homeState.projectDirPath.trimEnd('/')}/${match.filePath}"
-                        editorState.openFileAtLine(absPath, match.lineNumber, searchQuery = editorState.currentSearchQuery)
-                    },
-                    onReplaceCurrent = { filePath ->
-                        val matches = editorState.currentSearchMatches
-                        val idx = editorState.currentSearchMatchIndex
-                        if (idx !in matches.indices) return@MainContentArea
-                        val match = matches[idx]
-                        val absPath = if (match.filePath.startsWith("/")) match.filePath
-                            else "${homeState.projectDirPath.trimEnd('/')}/${match.filePath}"
-                        val content = editorState.editorContent[absPath]?.text ?: return@MainContentArea
-                        val lines = content.lines().toMutableList()
-                        if (match.lineNumber - 1 in lines.indices) {
-                            val lineIdx = match.lineNumber - 1
-                            val oldLine = lines[lineIdx]
-                            val searchQuery = editorState.currentSearchQuery
-                            val newLine = if (searchQuery.isNotEmpty()) {
-                                oldLine.replaceFirst(searchQuery, editorState.currentReplaceText, ignoreCase = true)
-                            } else oldLine
-                            lines[lineIdx] = newLine
-                            val newContent = lines.joinToString("\n")
-                            editorState.editorContent[absPath] = TextFieldValue(newContent)
-                            // 替换后重新计算当前文件的匹配，使计数和列表保持最新
-                            val activePath = editorState.getActiveFilePath()
-                            if (activePath != null && searchQuery.isNotEmpty()) {
-                                val newMatches = newContent.lines().mapIndexedNotNull { lineIdx2, line ->
-                                    if (line.contains(searchQuery, ignoreCase = true)) {
-                                        SearchResultItem(
-                                            filePath = activePath,
-                                            lineNumber = lineIdx2 + 1,
-                                            matchText = line.trim(),
-                                            contextLines = emptyList(),
-                                        )
-                                    } else null
-                                }
-                                editorState.currentSearchMatches = newMatches
-                                editorState.searchToolbarQuerySnapshot = searchQuery
-                                editorState.currentSearchMatchIndex = idx.coerceAtMost((newMatches.size - 1).coerceAtLeast(0))
+                            val title = displayNameFromPath(path)
+                            val tab = TabItem(id = path, title = title, type = type)
+                            val existIdx = workspaceTabs.indexOfFirst { it.id == path }
+                            workspaceTabs = if (existIdx >= 0) {
+                                workspaceActiveIndex = existIdx
+                                workspaceTabs
                             } else {
-                                editorState.currentSearchMatchIndex = (idx + 1).coerceAtMost(matches.size - 1)
+                                workspaceTabs + tab
                             }
-                        }
-                    },
-                    // 查找替换工具栏参数
-                    isSearchToolbarVisible = editorState.isSearchToolbarVisible,
-                    toolbarSearchQuery = editorState.currentSearchQuery,
-                    toolbarReplaceText = editorState.currentReplaceText,
-                    onToolbarSearchQueryChange = {
-                        editorState.currentSearchQuery = it
-                        // 输入新查询时立即重建当前文件的匹配列表
-                        val activePath = editorState.getActiveFilePath()
-                        if (activePath != null && it.isNotBlank()) {
-                            val content = editorState.editorContent[activePath]?.text ?: ""
-                            val newMatches = content.lines().mapIndexedNotNull { idx, line ->
-                                if (line.contains(it, ignoreCase = true)) {
-                                    SearchResultItem(
-                                        filePath = activePath,
-                                        lineNumber = idx + 1,
-                                        matchText = line.trim(),
-                                        contextLines = emptyList(),
-                                    )
-                                } else null
+                            workspaceActiveIndex = if (existIdx >= 0) existIdx else workspaceTabs.size - 1
+                            if (line > 1) {
+                                openFileLineRequest = path to line
                             }
-                            editorState.currentSearchMatches = newMatches
-                            editorState.searchToolbarQuerySnapshot = it
-                            editorState.currentSearchMatchIndex = 0
-                        } else if (it.isBlank()) {
-                            editorState.currentSearchMatches = emptyList()
-                            editorState.searchToolbarQuerySnapshot = ""
-                            editorState.currentSearchMatchIndex = -1
-                        }
-                    },
-                    onToolbarReplaceTextChange = { editorState.currentReplaceText = it },
-                    onCloseSearchToolbar = { editorState.isSearchToolbarVisible = false },
-                    onClearSearch = {
-                        editorState.currentSearchQuery = ""
-                        editorState.currentReplaceText = ""
-                        editorState.currentSearchMatches = emptyList()
-                        editorState.searchToolbarQuerySnapshot = ""
-                        editorState.persistentSearchResults = emptyList()
-                    },
-                    // 终端相关
-                    isTerminalVisible = isTerminalVisible,
-                    onToggleTerminal = { isTerminalVisible = !isTerminalVisible },
-                    terminalContent = {
-                        com.medeide.jh.screens.home.landscape.terminal.BuiltinTerminalPanel(
-                            currentPath = homeState.projectDirPath ?: "/storage/emulated/0",
-                            onNavigateToFile = { path -> editorState.openFileTab(path) },
-                            onClosePanel = { isTerminalVisible = false },
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    },
-                    terminalHeight = terminalHeight,
-                )
-            },
-            collabPanel = {
-                CollabPanel(
-                    onSettingsClick = {
-                        isSettingsOpen = true
-                        editorState.openSettingsTab(settingsTabTitle)
-                    },
-                    viewModel = chatViewModel,
-                )
-            },
-            modifier = Modifier
-                .fillMaxSize()
-                .consumeWindowInsets(innerPadding)
-                .padding(innerPadding),
-        )
-    }
-
-    val dialogMaxHeight = with(LocalConfiguration.current) { (screenHeightDp.dp * 0.75f).coerceAtLeast(200.dp) }
-
-    if (showNewFileDialog) {
-        AlertDialog(
-            onDismissRequest = { showNewFileDialog = false },
-            title = { Text(stringResource(R.string.dialog_new_file_title)) },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .heightIn(max = dialogMaxHeight)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    OutlinedTextField(value = newFileName, onValueChange = { newFileName = it }, placeholder = { Text(stringResource(R.string.dialog_new_file_name_hint)) }, singleLine = true)
-                }
-            },
-            confirmButton = { TextButton(onClick = { val name = newFileName.trim(); if (name.isNotEmpty()) { viewModel.createFile("", name, false); selectedTab = SidebarTab.Explorer; showNewFileDialog = false } }) { Text(stringResource(R.string.dialog_confirm)) } },
-            dismissButton = { TextButton(onClick = { showNewFileDialog = false }) { Text(stringResource(R.string.chat_cancel)) } },
-        )
-    }
-    if (showNewFolderDialog) {
-        AlertDialog(
-            onDismissRequest = { showNewFolderDialog = false },
-            title = { Text(stringResource(R.string.dialog_new_folder_title)) },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .heightIn(max = dialogMaxHeight)
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    OutlinedTextField(value = newFolderName, onValueChange = { newFolderName = it }, placeholder = { Text(stringResource(R.string.dialog_new_folder_name_hint)) }, singleLine = true)
-                }
-            },
-            confirmButton = { TextButton(onClick = { val name = newFolderName.trim(); if (name.isNotEmpty()) { viewModel.createFile("", name, true); selectedTab = SidebarTab.Explorer; showNewFolderDialog = false } }) { Text(stringResource(R.string.dialog_save)) } },
-            dismissButton = { TextButton(onClick = { showNewFolderDialog = false }) { Text(stringResource(R.string.chat_cancel)) } },
-        )
-    }
-}
-
-@Composable
-private fun LeftPanelContent(
-    context: android.content.Context,
-    selectedTab: SidebarTab?,
-    homeState: HomeUiState,
-    files: List<FileItem>,
-    viewModel: HomeViewModel,
-    chatViewModel: ChatViewModel,
-    editorState: EditorScreenState,
-    fileManager: FileManager,
-    onTabChange: (SidebarTab?) -> Unit = {},
-    onFileClick: (FileItem) -> Unit = {},
-    onAddToConversation: (FileItem) -> Unit = {},
-    onOpenFileTab: (String) -> Unit = {},
-    onCloseSearchPanel: () -> Unit = {},
-    onDismissSnippets: () -> Unit = {},
-    onCloseTerminal: () -> Unit = {},
-) {
-    when (selectedTab) {
-        null -> {}
-        SidebarTab.Explorer -> {
-            ResourcePanel(
-                openedFolderName = homeState.openedFolderName,
-                files = files,
-                storageRootName = homeState.storageRootName,
-                onListChildren = { relativePath, callback ->
-                    viewModel.listChildren(relativePath, callback)
+                        },
+                        onFilesDeleted = { deletedPaths ->
+                            val newTabs = workspaceTabs.filter { it.id !in deletedPaths }
+                            if (newTabs.size < workspaceTabs.size) {
+                                workspaceTabs = newTabs
+                                workspaceActiveIndex = workspaceActiveIndex.coerceAtMost(newTabs.size - 1)
+                            }
+                        },
+                        onAddToConversation = { path -> chatViewModel.attachFile(path) },
+                        onOpenAsProject = { path ->
+                            fileBrowserRoot = path
+                            scope.launch {
+                                userPrefs.addRecentFile(RecentFileEntry(path = path, name = File(path).name))
+                            }
+                        },
+                        onExitProjectMode = { fileBrowserRoot = storageRoot },
+                        isProjectModeActive = fileBrowserRoot != storageRoot,
+                        searchState = searchState,
+                    )
                 },
-                onFileClick = onFileClick,
-                onAddToConversation = onAddToConversation,
-                onRename = { relativePath, newName ->
-                    viewModel.renameFile(relativePath, newName)
+                isSidePanelVisible = selectedTab != null,
+                sidePanelWidth = when (selectedTab) {
+                    SidebarTab.Search -> 180.dp
+                    else -> 360.dp
                 },
-                onDelete = { relativePath ->
-                    viewModel.deleteFile(relativePath)
+                workspaceContent = {
+                    MainContentArea(
+                        tabs = workspaceTabs,
+                        activeTabIndex = workspaceActiveIndex,
+                        onSelectTab = { workspaceActiveIndex = it },
+                        onCloseTab = { idx ->
+                            val newTabs = workspaceTabs.toMutableList().apply { removeAt(idx) }
+                            workspaceTabs = newTabs
+                            if (workspaceActiveIndex >= newTabs.size) {
+                                workspaceActiveIndex = (newTabs.size - 1).coerceAtLeast(-1)
+                            }
+                        },
+                        onAddTab = { tab ->
+                            val existIdx = workspaceTabs.indexOfFirst { it.id == tab.id }
+                            if (existIdx >= 0) {
+                                workspaceActiveIndex = existIdx
+                            } else {
+                                workspaceTabs = workspaceTabs + tab
+                                workspaceActiveIndex = workspaceTabs.size - 1
+                            }
+                        },
+                        onForceCloseTab = { idx ->
+                            val newTabs = workspaceTabs.toMutableList().apply { removeAt(idx) }
+                            workspaceTabs = newTabs
+                            if (workspaceActiveIndex >= newTabs.size) {
+                                workspaceActiveIndex = (newTabs.size - 1).coerceAtLeast(-1)
+                            }
+                        },
+                        onSaveAndCloseTab = { idx ->
+                            val newTabs = workspaceTabs.toMutableList().apply { removeAt(idx) }
+                            workspaceTabs = newTabs
+                            if (workspaceActiveIndex >= newTabs.size) {
+                                workspaceActiveIndex = (newTabs.size - 1).coerceAtLeast(-1)
+                            }
+                        },
+                        searchState = searchState,
+                        openFileLineRequest = openFileLineRequest,
+                        onOpenFileLineRequestHandled = { openFileLineRequest = null },
+                        videoPlaybackState = homeViewModel.workspaceVideoState,
+                        audioPlaybackState = homeViewModel.workspaceAudioState,
+                    )
                 },
-                onCreate = { relativePath, name, isDir ->
-                    viewModel.createFile(relativePath, name, isDir)
+                collabPanel = {
+                    CollabPanel(
+                        viewModel = chatViewModel,
+                        userName = userProfile.userName,
+                        agentName = userProfile.agentName,
+                        onSettings = {
+                            val tab = TabItem(id = "settings", title = "IDE 设置", type = TabType.Settings)
+                            val existIdx = workspaceTabs.indexOfFirst { it.id == "settings" }
+                            if (existIdx >= 0) {
+                                workspaceActiveIndex = existIdx
+                            } else {
+                                workspaceTabs = workspaceTabs + tab
+                                workspaceActiveIndex = workspaceTabs.size - 1
+                            }
+                        },
+                    )
                 },
-                onCopy = { srcPath, dstDirPath ->
-                    viewModel.copyFile(srcPath, dstDirPath)
-                },
-                onMove = { srcPath, dstDirPath ->
-                    viewModel.moveFile(srcPath, dstDirPath)
-                },
-                onCompress = { paths, archiveName, format, level, password, volumeSize, deleteSource ->
-                    viewModel.compressFiles(paths, archiveName, format, level, password, volumeSize, deleteSource)
-                },
-                onDiff = { oldPath, newPath ->
-                    editorState.openDiffView(oldPath, newPath)
-                },
-                onMerge = { oldPath, newPath ->
-                    editorState.mergeFiles(oldPath, newPath)
-                },
-                onOpenAsProject = { filePath ->
-                    viewModel.openAsProjectDirectory(filePath)
-                },
-                onExitProjectMode = {
-                    viewModel.navigateToStorageRoot()
-                },
-                projectDirPath = homeState.projectDirPath,
-                onLeftPanePathChanged = { chatViewModel.setBrowserCurrentDir(it) },
-                storageRootPath = homeState.storageRootPath,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .consumeWindowInsets(innerPadding)
+                    .padding(innerPadding)
             )
-        }
-        SidebarTab.Search -> {
-            SearchReplacePanel(
-                fileManager = fileManager,
-                editorState = editorState,
-                onClosePanel = onCloseSearchPanel,
-            )
-        }
-        SidebarTab.Terminal -> {
-            com.medeide.jh.screens.home.landscape.terminal.BuiltinTerminalPanel(
-                currentPath = homeState.projectDirPath ?: "/storage/emulated/0",
-                onNavigateToFile = { path -> editorState.openFileTab(path) },
-                onClosePanel = onCloseTerminal,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        SidebarTab.Snippets -> {
-            com.medeide.jh.screens.home.landscape.editor.snippets.SnippetPicker(
-                onSnippetSelected = { snippet ->
-                    val activePath = editorState.getActiveFilePath()
-                    if (activePath != null) {
-                        val currentContent = editorState.editorContent[activePath]?.text ?: ""
-                        val newContent = currentContent + "\n" + snippet.body
-                        editorState.editorContent[activePath] = TextFieldValue(newContent)
+        } else {
+            HomePortraitScreen(
+                chatViewModel = chatViewModel,
+                isHistoryOpen = isHistoryOpen,
+                onHistoryDismiss = { isHistoryOpen = false },
+                isDashboardOpen = isDashboardOpen,
+                onDashboardDismiss = { isDashboardOpen = false },
+                isFileBrowserOpen = isFileBrowserOpen,
+                onFileBrowserDismiss = { isFileBrowserOpen = false },
+                isSettingsOpen = isSettingsOpen,
+                onSettingsDismiss = { isSettingsOpen = false },
+                onSettingsOpen = { isSettingsOpen = true },
+                fileBrowserRoot = fileBrowserRoot,
+                onAddToConversation = { path -> chatViewModel.attachFile(path) },
+                onOpenAsProject = { path ->
+                    fileBrowserRoot = path
+                    scope.launch {
+                        userPrefs.addRecentFile(RecentFileEntry(path = path, name = File(path).name))
                     }
                 },
-                onDismiss = onDismissSnippets,
-            )
-        }
-        SidebarTab.Bookmarks -> {
-            val bookmarkManager = com.medeide.jh.screens.home.landscape.editor.bookmarks.BookmarkManager(context)
-            com.medeide.jh.screens.home.landscape.editor.bookmarks.BookmarkPanel(
-                bookmarkManager = bookmarkManager,
-                editorState = editorState,
-                onNavigateToBookmark = { filePath, line ->
-                    editorState.openFileAtLine(filePath, line)
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        SidebarTab.RecentFiles -> {
-            val recentFilesManager = com.medeide.jh.screens.home.landscape.editor.recent.RecentFilesManager(context)
-            com.medeide.jh.screens.home.landscape.editor.recent.RecentFilesPanel(
-                recentFilesManager = recentFilesManager,
-                onOpenFile = { recentFile ->
-                    val file = java.io.File(recentFile.path)
-                    if (file.isDirectory()) {
-                        viewModel.openAsProjectDirectory(recentFile.path)
-                    } else {
-                        editorState.openFileTab(recentFile.path, recentFile.name)
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        SidebarTab.Announcement -> {
-            com.medeide.jh.screens.home.landscape.sidebar.sidebar.AnnouncementPanel(
-                onBack = { onTabChange(null) },
-                modifier = Modifier.fillMaxSize(),
+                onExitProjectMode = { fileBrowserRoot = storageRoot },
+                isProjectModeActive = fileBrowserRoot != storageRoot,
+                userName = userProfile.userName,
+                agentName = userProfile.agentName,
+                userAvatarUri = userProfile.userAvatarUri,
+                agentAvatarUri = userProfile.agentAvatarUri,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .consumeWindowInsets(innerPadding)
+                    .padding(innerPadding)
             )
         }
     }

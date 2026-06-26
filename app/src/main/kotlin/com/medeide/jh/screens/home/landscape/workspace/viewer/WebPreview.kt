@@ -2,10 +2,10 @@ package com.medeide.jh.screens.home.landscape.workspace.viewer
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceError
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,7 +48,6 @@ fun WebPreview(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        // 切换栏
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -90,7 +89,6 @@ fun WebPreview(
             )
         }
 
-        // 内容区
         Box(modifier = Modifier.weight(1f).fillMaxSize()) {
             if (isPreviewMode) {
                 WebPreviewContent(filePath = filePath)
@@ -99,8 +97,6 @@ fun WebPreview(
                     text = textFieldValue,
                     onTextChange = onTextChange,
                     modifier = Modifier.fillMaxSize(),
-                    onAddToChat = {},
-                    onCursorChange = { _, _ -> },
                 )
             }
         }

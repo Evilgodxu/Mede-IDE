@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -36,18 +37,20 @@ fun NormalEditMode(
     text: TextFieldValue,
     onTextChange: (TextFieldValue) -> Unit,
     readOnly: Boolean = false,
+    visualTransformation: VisualTransformation? = null,
     searchScrollVersion: Int = 0,
 ) {
     val scrollState = rememberScrollState()
     val hScrollState = rememberScrollState()
-    val fontSizeState = remember { mutableFloatStateOf(12f) }
+    val fontSizeState = remember { mutableFloatStateOf(13f) }
     val fontSize = fontSizeState.floatValue
 
     // 通过搜索导航点击时自动将光标行滚动到中间位置
     val density = LocalDensity.current
     LaunchedEffect(searchScrollVersion) {
         if (searchScrollVersion == 0) return@LaunchedEffect
-        val cursorLine = text.text.substring(0, text.selection.start).count { it == '\n' }
+        val cursorLine = text.text.substring(0, text.selection.start.coerceIn(0, text.text.length))
+            .count { it == '\n' }
         val lineHeightPx = with(density) { (fontSize * 1.5f).sp.toPx() }
         val viewportHeightPx = scrollState.viewportSize
         val targetScrollPx = if (viewportHeightPx > 0) {
@@ -59,12 +62,8 @@ fun NormalEditMode(
         scrollState.animateScrollTo(targetScrollPx)
     }
 
-    // 计算当前文本行数
     val lineCount = remember(text.text) { text.text.lines().size }
-    // 将行号合并为单个多行文本，确保与编辑器文本的换行布局完全一致
-    val lineNumbersText = remember(lineCount) {
-        (1..lineCount).joinToString("\n")
-    }
+    val lineNumbersText = remember(lineCount) { (1..lineCount).joinToString("\n") }
 
     Box(
         modifier = Modifier
@@ -73,39 +72,30 @@ fun NormalEditMode(
                 awaitEachGesture {
                     var lastSpan = 0f
                     var multiTouchActive = false
-
                     awaitFirstDown(requireUnconsumed = false)
-
                     do {
                         val event = awaitPointerEvent(PointerEventPass.Main)
                         val pressed = event.changes.filter { it.pressed }
-                        val count = pressed.size
-
-                        if (count >= 2) {
+                        if (pressed.size >= 2) {
                             multiTouchActive = true
                             val p1 = pressed[0].position
                             val p2 = pressed[1].position
                             val span = (p1 - p2).getDistance()
-
                             if (lastSpan > 0f) {
-                                val ratio = span / lastSpan
-                                fontSizeState.floatValue = (fontSizeState.floatValue * ratio)
+                                fontSizeState.floatValue = (fontSizeState.floatValue * span / lastSpan)
                                     .coerceIn(8f, 32f)
                             }
                             lastSpan = span
                             pressed.forEach { it.consume() }
-                        } else if (multiTouchActive && count < 2) {
-                            break
-                        } else {
-                            lastSpan = 0f
-                        }
+                        } else if (multiTouchActive && pressed.size < 2) break
+                        else lastSpan = 0f
                     } while (true)
                 }
             }
             .verticalScroll(scrollState)
     ) {
         Row(modifier = Modifier.fillMaxSize()) {
-            // 行号列 — 使用单个多行 Text，确保与 BasicTextField 换行布局完全一致
+            // 行号列
             Text(
                 text = lineNumbersText,
                 style = TextStyle(
@@ -125,12 +115,10 @@ fun NormalEditMode(
                     .width(1.dp)
                     .fillMaxHeight()
                     .padding(vertical = 8.dp)
-                    .background(
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f),
-                    ),
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f)),
             )
 
-            // 编辑区域 - 可水平滚动
+            // 编辑区域
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -150,7 +138,7 @@ fun NormalEditMode(
                         lineHeight = (fontSize * 1.5f).sp,
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    visualTransformation = SyntaxHighlightTransformation(),
+                    visualTransformation = visualTransformation ?: SyntaxHighlightTransformation(),
                     decorationBox = { innerTextField ->
                         if (text.text.isEmpty()) {
                             Text(
