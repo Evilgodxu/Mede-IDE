@@ -8,11 +8,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.media3.exoplayer.ExoPlayer
-
-data class AudioTrack(
-    val path: String,
-    val name: String,
-)
+import com.medeide.jh.core.model.AudioTrack
 
 // 歌词行
 data class LyricLine(val timeMs: Long, val text: String)

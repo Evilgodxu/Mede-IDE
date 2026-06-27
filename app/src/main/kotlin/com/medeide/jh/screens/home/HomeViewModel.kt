@@ -5,7 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.medeide.jh.screens.home.domain.usecase.GetThemeModeUseCase
 import com.medeide.jh.screens.home.landscape.topbar.audioplayer.AudioPlaybackState
 import com.medeide.jh.screens.home.landscape.workspace.audioplayer.AudioPlaybackState as WorkspaceAudioPlaybackState
-import com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlaybackState
+import com.medeide.jh.core.model.VideoPlaybackState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

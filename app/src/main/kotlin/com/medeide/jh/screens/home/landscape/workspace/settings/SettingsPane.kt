@@ -53,9 +53,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.annotation.StringRes
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.medeide.jh.core.data.repository.UserPreferencesRepository
+import com.medeide.jh.R
 import com.medeide.jh.model.chat.UserProfile
 import com.medeide.jh.screens.home.cloudchat.CloudChatViewModel
 import com.medeide.jh.screens.home.cloudchat.settings.CloudModelSettingsContent
@@ -67,8 +70,8 @@ import kotlinx.coroutines.runBlocking
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 
-private enum class SettingsTab(val label: String) {
-    General("通用设置"), Role("角色定义"), CloudModel("云端模型"), Model("本地模型"),
+private enum class SettingsTab(@StringRes val labelRes: Int) {
+    General(R.string.settings_general), Role(R.string.settings_role), CloudModel(R.string.settings_cloud_model), Model(R.string.settings_local_model),
 }
 
 @Composable
@@ -91,7 +94,7 @@ fun SettingsPane(modifier: Modifier = Modifier) {
                 .padding(vertical = 8.dp),
         ) {
             SettingsTab.entries.forEach { t ->
-                SettingsCategoryItem(t.label, tab == t) { tab = t }
+                SettingsCategoryItem(stringResource(t.labelRes), tab == t) { tab = t }
             }
         }
 
@@ -103,7 +106,7 @@ fun SettingsPane(modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(tab.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(tab.labelRes), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
                 when (tab) {
@@ -150,13 +153,13 @@ private fun SettingsThemeCard(current: String, onSelect: (String) -> Unit, modif
         border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
         Column(Modifier.padding(16.dp)) {
-            Text("主题设置", style = MaterialTheme.typography.titleSmall,
+            Text(stringResource(R.string.settings_theme_title), style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(12.dp))
             SettingsSegmentedRow(options = listOf(
-                Triple("system", "跟随系统", Icons.Default.BrightnessMedium),
-                Triple("light", "浅色", Icons.Default.LightMode),
-                Triple("dark", "深色", Icons.Default.DarkMode),
+                Triple("system", R.string.theme_system, Icons.Default.BrightnessMedium),
+                Triple("light", R.string.theme_light, Icons.Default.LightMode),
+                Triple("dark", R.string.theme_dark, Icons.Default.DarkMode),
             ), current = current, onSelect = onSelect)
         }
     }
@@ -169,13 +172,13 @@ private fun SettingsLanguageCard(current: String, onSelect: (String) -> Unit, mo
         border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
         Column(Modifier.padding(16.dp)) {
-            Text("语言设置", style = MaterialTheme.typography.titleSmall,
+            Text(stringResource(R.string.settings_language_title), style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(12.dp))
             SettingsSegmentedRow(options = listOf(
-                Triple("system", "跟随系统", Icons.Default.Translate),
-                Triple("zh", "简体中文", Icons.Default.TextFields),
-                Triple("en", "English", Icons.Default.Language),
+                Triple("system", R.string.language_system, Icons.Default.Translate),
+                Triple("zh", R.string.language_chinese, Icons.Default.TextFields),
+                Triple("en", R.string.language_english, Icons.Default.Language),
             ), current = current, onSelect = onSelect)
         }
     }
@@ -183,12 +186,13 @@ private fun SettingsLanguageCard(current: String, onSelect: (String) -> Unit, mo
 
 @Composable
 private fun SettingsSegmentedRow(
-    options: List<Triple<String, String, ImageVector>>,
+    options: List<Triple<String, Int, ImageVector>>,
     current: String,
     onSelect: (String) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        options.forEach { (value, label, icon) ->
+        options.forEach { (value, labelRes, icon) ->
+            val label = stringResource(labelRes)
             val sel = current == value
             Column(
                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
@@ -247,7 +251,7 @@ private fun SettingsProfileCard(profile: UserProfile, onUpdate: (UserProfile) ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Person, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(8.dp))
-                Text("个人资料", style = MaterialTheme.typography.titleSmall,
+                Text(stringResource(R.string.settings_profile), style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
                 if (!editing) {
@@ -256,7 +260,7 @@ private fun SettingsProfileCard(profile: UserProfile, onUpdate: (UserProfile) ->
                         userName = profile.userName; agentName = profile.agentName
                         userAvatarUri = profile.userAvatarUri; agentAvatarUri = profile.agentAvatarUri
                     }) {
-                        Text("编辑")
+                        Text(stringResource(R.string.edit))
                     }
                 }
             }
@@ -270,12 +274,12 @@ private fun SettingsProfileCard(profile: UserProfile, onUpdate: (UserProfile) ->
                         size = 40.dp, modifier = Modifier.padding(end = 8.dp))
                     Column(Modifier.weight(1f)) {
                         OutlinedTextField(value = userName, onValueChange = { userName = it },
-                            label = { Text("您的名称") }, placeholder = { Text("输入您的名称…") },
+                            label = { Text(stringResource(R.string.your_name)) }, placeholder = { Text(stringResource(R.string.your_name_hint)) },
                             singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp))
                     }
                     OutlinedButton(onClick = { userAvatarLauncher.launch("image/*") },
                         modifier = Modifier.padding(start = 8.dp)) {
-                        Text(if (userAvatarUri.isEmpty()) "选择" else "更换", style = MaterialTheme.typography.labelSmall)
+                        Text(if (userAvatarUri.isEmpty()) stringResource(R.string.select_text) else stringResource(R.string.change_text), style = MaterialTheme.typography.labelSmall)
                     }
                 }
                 // Agent 头像 + 名称
@@ -286,21 +290,21 @@ private fun SettingsProfileCard(profile: UserProfile, onUpdate: (UserProfile) ->
                         size = 40.dp, modifier = Modifier.padding(end = 8.dp))
                     Column(Modifier.weight(1f)) {
                         OutlinedTextField(value = agentName, onValueChange = { agentName = it },
-                            label = { Text("AI 助手名称") }, placeholder = { Text("默认: AI") },
+                            label = { Text(stringResource(R.string.ai_assistant_name)) }, placeholder = { Text(stringResource(R.string.default_ai_name)) },
                             singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp))
                     }
                     OutlinedButton(onClick = { agentAvatarLauncher.launch("image/*") },
                         modifier = Modifier.padding(start = 8.dp)) {
-                        Text(if (agentAvatarUri.isEmpty()) "选择" else "更换", style = MaterialTheme.typography.labelSmall)
+                        Text(if (agentAvatarUri.isEmpty()) stringResource(R.string.select_text) else stringResource(R.string.change_text), style = MaterialTheme.typography.labelSmall)
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { editing = false }) { Text("取消") }
+                    OutlinedButton(onClick = { editing = false }) { Text(stringResource(R.string.cancel)) }
                     Button(onClick = {
                         editing = false
                         onUpdate(UserProfile(userName = userName, agentName = agentName.ifEmpty { "AI" },
                             userAvatarUri = userAvatarUri, agentAvatarUri = agentAvatarUri))
-                    }) { Text("保存") }
+                    }) { Text(stringResource(R.string.save)) }
                 }
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -309,7 +313,7 @@ private fun SettingsProfileCard(profile: UserProfile, onUpdate: (UserProfile) ->
                         avatarUri = profile.userAvatarUri,
                         size = 36.dp, modifier = Modifier.padding(end = 8.dp))
                     Column {
-                        Text("用户: ${profile.userName.ifEmpty { "未设置" }}",
+                        Text("${stringResource(R.string.user_label)} ${profile.userName.ifEmpty { stringResource(R.string.not_set) }}",
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -320,7 +324,7 @@ private fun SettingsProfileCard(profile: UserProfile, onUpdate: (UserProfile) ->
                         avatarUri = profile.agentAvatarUri,
                         size = 36.dp, modifier = Modifier.padding(end = 8.dp))
                     Column {
-                        Text("AI 助手: ${profile.agentName}",
+                        Text("${stringResource(R.string.ai_assistant_label)} ${profile.agentName}",
                             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }

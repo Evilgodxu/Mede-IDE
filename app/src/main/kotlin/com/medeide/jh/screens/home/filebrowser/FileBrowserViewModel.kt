@@ -14,7 +14,7 @@ import com.medeide.jh.screens.home.filebrowser.logic.FileEntry
 import com.medeide.jh.screens.home.filebrowser.logic.computeDisplayPath
 import com.medeide.jh.screens.home.filebrowser.logic.listArchiveEntries
 import com.medeide.jh.screens.home.filebrowser.logic.loadFiles
-import com.medeide.jh.screens.home.landscape.workspace.model.isArchiveFile
+import com.medeide.jh.core.utils.isArchiveFile
 import java.io.File
 
 class FileBrowserStateHolder(

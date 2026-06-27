@@ -1,7 +1,8 @@
-package com.medeide.jh.data.utils
+package com.medeide.jh.core.data.utils
 
 import android.os.Build
 import android.util.Log
+import com.medeide.jh.core.data.logging.FileLogger
 import java.io.File
 
 /**

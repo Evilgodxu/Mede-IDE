@@ -68,13 +68,13 @@ import com.medeide.jh.screens.home.landscape.workspace.audioplayer.AudioPlayback
 import com.medeide.jh.screens.home.landscape.workspace.audioplayer.AudioPlayer
 import com.medeide.jh.screens.home.landscape.workspace.editor.CodeEditor
 import com.medeide.jh.screens.home.landscape.workspace.editor.TextEditor
-import com.medeide.jh.screens.home.landscape.workspace.model.TabItem
-import com.medeide.jh.screens.home.landscape.workspace.model.TabType
+import com.medeide.jh.core.model.TabItem
+import com.medeide.jh.core.model.TabType
 import com.medeide.jh.screens.home.landscape.workspace.preview.image.ImagePreview
 import com.medeide.jh.screens.home.landscape.workspace.settings.SettingsPane
 import com.medeide.jh.screens.home.landscape.workspace.terminal.TerminalPage
 import com.medeide.jh.screens.home.landscape.workspace.viewer.MarkdownPreview
-import com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlaybackState
+import com.medeide.jh.core.model.VideoPlaybackState
 import com.medeide.jh.screens.home.landscape.workspace.viewer.VideoPlayer
 import com.medeide.jh.screens.home.landscape.workspace.viewer.WebPreview
 import com.medeide.jh.screens.home.landscape.workspace.welcome.WelcomePage

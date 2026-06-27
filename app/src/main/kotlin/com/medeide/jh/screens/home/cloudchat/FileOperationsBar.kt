@@ -20,6 +20,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.medeide.jh.R
 import com.medeide.jh.model.chat.FileOpStatus
 import com.medeide.jh.model.chat.FileOpType
 import com.medeide.jh.model.chat.FileOperation
@@ -48,11 +50,11 @@ private fun FileOperationCard(operation: FileOperation) {
         FileOpStatus.Error -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
     }
     val label = when (operation.type) {
-        FileOpType.WriteFile -> "写入"
-        FileOpType.CreateDirectory -> "创建目录"
-        FileOpType.DeleteFile -> "删除"
-        FileOpType.MoveFile -> "移动"
-        FileOpType.CopyFile -> "复制"
+        FileOpType.WriteFile -> stringResource(R.string.file_op_write)
+        FileOpType.CreateDirectory -> stringResource(R.string.file_op_create_dir)
+        FileOpType.DeleteFile -> stringResource(R.string.file_op_delete)
+        FileOpType.MoveFile -> stringResource(R.string.file_op_move)
+        FileOpType.CopyFile -> stringResource(R.string.file_op_copy)
     }
     val displayPath = operation.filePath.substringAfterLast('/').let {
         if (it.length > 40) it.take(37) + "..." else it

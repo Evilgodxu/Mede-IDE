@@ -47,10 +47,14 @@
     <string name="global_search_search_hint">Search</string>
     <string name="global_search_replace_hint">Replace</string>
 
-    <!-- Settings -->
+    <!-- Settings Categories -->
+    <string name="settings_category_general">General</string>
+    <string name="settings_category_mcp">MCP</string>
+    <string name="settings_category_local_model">Local Model</string>
+    <string name="settings_category_cloud_model">Cloud Model</string>
 
-    <string name="settings_theme_title">Theme</string>
-    <string name="settings_language_title">Language</string>
+    <string name="settings_category_rules">Role</string>
+    <string name="settings_tab_name">IDE Settings</string>
 
     <!-- Theme Options -->
     <string name="theme_system">System</string>
@@ -61,15 +65,6 @@
     <string name="language_system">System</string>
     <string name="language_chinese">简体中文</string>
     <string name="language_english">English</string>
-
-    <!-- Settings Categories -->
-    <string name="settings_category_general">General</string>
-    <string name="settings_category_mcp">MCP</string>
-    <string name="settings_category_local_model">Local Model</string>
-    <string name="settings_category_cloud_model">Cloud Model</string>
-
-    <string name="settings_category_rules">Role</string>
-    <string name="settings_tab_name">IDE Settings</string>
 
     <!-- Tab Actions -->
     <string name="tab_close_all">Close Without Saving</string>
@@ -167,5 +162,71 @@
     <string name="mcp_command">Command/Address</string>
     <string name="mcp_args">Arguments</string>
 
+    <!-- Settings Panel -->
+    <string name="settings_general">General</string>
+    <string name="settings_role">Role</string>
+    <string name="settings_cloud_model">Cloud Model</string>
+    <string name="settings_local_model">Local Model</string>
+    <string name="settings_theme_title">Theme Settings</string>
+    <string name="settings_language_title">Language Settings</string>
+    <string name="settings_need_init_chat">Need to initialize chat view</string>
+    <string name="user_label">User:</string>
+    <string name="ai_label">AI:</string>
+    <string name="not_set">Not Set</string>
+    <string name="edit">Edit</string>
+    <string name="your_name">Your Name</string>
+    <string name="ai_assistant_name">AI Assistant Name</string>
+    <string name="select_avatar">Select Avatar</string>
+    <string name="change_avatar">Change Avatar</string>
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="collecting_logs">Collecting logs…</string>
+    <string name="send_logs">Send Logs</string>
 
+    <!-- Role Definition -->
+    <string name="rules_select_role">Select Role</string>
+    <string name="rules_edit_role">Edit Role</string>
+    <!-- User Profile -->
+    <string name="upload_new_avatar">Upload New Avatar</string>
+    <string name="avatar">Avatar</string>
+    <string name="settings_profile">Profile</string>
+    <string name="your_name_hint">Enter your name…</string>
+    <string name="default_ai_name">Default: AI</string>
+    <string name="select_text">Select</string>
+    <string name="change_text">Change</string>
+    <string name="ai_assistant_label">AI Assistant:</string>
+    <string name="settings_title">Settings</string>
+    <string name="segmented_theme_label">Theme</string>
+    <string name="segmented_language_label">Language</string>
+
+    <!-- Cloud Model Settings -->
+    <string name="cloud_model_title">Cloud Model</string>
+    <string name="cloud_model_desc">OpenAI compatible API. Supports DeepSeek, Kimi, OpenAI, etc. Auto-enables after configuration.</string>
+    <string name="add_cloud_config">Add Cloud Config</string>
+    <string name="current">Current</string>
+    <string name="action_switch">Switch</string>
+    <string name="verify_connection">Verify Connection</string>
+    <string name="edit_config">Edit Config</string>
+    <string name="config_name">Config Name</string>
+    <string name="config_name_hint">e.g. DeepSeek</string>
+    <string name="api_endpoint">API Endpoint</string>
+    <string name="api_endpoint_hint">https://api.deepseek.com/v1</string>
+    <string name="model_name_hint">deepseek-chat</string>
+    <string name="model_name">Model Name</string>
+    <string name="select_model">Select Model</string>
+    <string name="api_key">API Key</string>
+    <string name="api_key_hint">sk-...</string>
+    <string name="context_window">Context Window (token)</string>
+    <string name="max_output_tokens">Max Output Tokens</string>
+    <string name="max_tool_rounds">Max Tool Rounds</string>
+    <string name="test_connection">Test Connection</string>
+    <string name="fetch_models">Fetch Models</string>
+    <string name="back_to_vendor_select">← Back to Vendor Select</string>
+
+    <!-- File Operations -->
+    <string name="file_op_write">Write</string>
+    <string name="file_op_create_dir">Create Directory</string>
+    <string name="file_op_delete">Delete</string>
+    <string name="file_op_move">Move</string>
+    <string name="file_op_copy">Copy</string>
 </resources>

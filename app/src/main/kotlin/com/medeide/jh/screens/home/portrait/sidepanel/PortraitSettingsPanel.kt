@@ -49,8 +49,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.annotation.StringRes
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.medeide.jh.R
 import com.medeide.jh.core.data.logging.LogCollector
 import com.medeide.jh.core.data.repository.UserPreferencesRepository
 import com.medeide.jh.model.DEFAULT_ROLE_ID
@@ -66,11 +69,11 @@ import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 
-private sealed class SettingsGroup(val label: String, val icon: ImageVector) {
-    data object General : SettingsGroup("通用设置", Icons.Default.BrightnessMedium)
-    data object Role : SettingsGroup("角色定义", Icons.Default.Person)
-    data object CloudModel : SettingsGroup("云端模型", Icons.Default.Memory)
-    data object LocalModel : SettingsGroup("本地模型", Icons.Default.Memory)
+private sealed class SettingsGroup(@StringRes val labelRes: Int, val icon: ImageVector) {
+    data object General : SettingsGroup(R.string.settings_general, Icons.Default.BrightnessMedium)
+    data object Role : SettingsGroup(R.string.settings_role, Icons.Default.Person)
+    data object CloudModel : SettingsGroup(R.string.settings_cloud_model, Icons.Default.Memory)
+    data object LocalModel : SettingsGroup(R.string.settings_local_model, Icons.Default.Memory)
 }
 
 @Composable
@@ -110,11 +113,11 @@ fun PortraitSettingsPanel(
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (currentGroup != null) {
                 IconButton(onClick = { currentGroup = null }) {
-                    Icon(Icons.Default.ArrowBack, "返回")
+                    Icon(Icons.Default.ArrowBack, stringResource(R.string.back))
                 }
             }
             Text(
-                text = currentGroup?.label ?: "设置",
+                text = currentGroup?.let { stringResource(it.labelRes) } ?: stringResource(R.string.settings_title),
                 style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -128,7 +131,7 @@ fun PortraitSettingsPanel(
                 SettingsGroup.CloudModel,
                 SettingsGroup.LocalModel,
             ).forEach { group ->
-                EntryCard(label = group.label, icon = group.icon, onClick = { currentGroup = group })
+                EntryCard(labelRes = group.labelRes, icon = group.icon, onClick = { currentGroup = group })
             }
         } else {
             when (currentGroup) {
@@ -137,9 +140,9 @@ fun PortraitSettingsPanel(
                         border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
                         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            SegmentedRow("主题", listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"),
+                            SegmentedRow(R.string.segmented_theme_label, listOf("system" to R.string.theme_system, "light" to R.string.theme_light, "dark" to R.string.theme_dark),
                                 current = themeMode) { themeMode = it; scope.launch { userPrefs.setThemeMode(it) } }
-                            SegmentedRow("语言", listOf("system" to "跟随系统", "zh" to "中文", "en" to "English"),
+                            SegmentedRow(R.string.segmented_language_label, listOf("system" to R.string.language_system, "zh" to R.string.language_chinese, "en" to R.string.language_english),
                                 current = language) { language = it; scope.launch { userPrefs.setLanguage(it) } }
 
                             var editing by remember { mutableStateOf(false) }
@@ -175,7 +178,7 @@ fun PortraitSettingsPanel(
                                                 initial = if (userProfile.userName.isNotEmpty()) userProfile.userName.first().toString() else "?",
                                                 avatarUri = userProfile.userAvatarUri,
                                                 size = 28.dp, modifier = Modifier.padding(end = 6.dp))
-                                            Text("用户: ${userProfile.userName.ifEmpty { "未设置" }}",
+                                            Text("${stringResource(R.string.user_label)} ${userProfile.userName.ifEmpty { stringResource(R.string.not_set) }}",
                                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -183,7 +186,7 @@ fun PortraitSettingsPanel(
                                                 initial = if (userProfile.agentName.isNotEmpty()) userProfile.agentName.first().toString() else "A",
                                                 avatarUri = userProfile.agentAvatarUri,
                                                 size = 28.dp, modifier = Modifier.padding(end = 6.dp))
-                                            Text("AI: ${userProfile.agentName}",
+                                            Text("${stringResource(R.string.ai_label)} ${userProfile.agentName}",
                                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
@@ -192,7 +195,7 @@ fun PortraitSettingsPanel(
                                         eUserName = userProfile.userName; eAgentName = userProfile.agentName
                                         eUserAvatarUri = userProfile.userAvatarUri; eAgentAvatarUri = userProfile.agentAvatarUri
                                     }) {
-                                        Text("编辑", style = MaterialTheme.typography.labelSmall)
+                                        Text(stringResource(R.string.edit), style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             } else {
@@ -204,14 +207,14 @@ fun PortraitSettingsPanel(
                                                 avatarUri = eUserAvatarUri,
                                                 size = 36.dp, modifier = Modifier.padding(end = 8.dp))
                                             OutlinedTextField(value = eUserName, onValueChange = { eUserName = it },
-                                                label = { Text("您的名称") }, singleLine = true,
+                                                label = { Text(stringResource(R.string.your_name)) }, singleLine = true,
                                                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp))
                                         }
                                         Spacer(Modifier.height(6.dp))
                                         Row {
                                             Spacer(Modifier.width(44.dp))
                                             OutlinedButton(onClick = { userAvatarLauncher.launch("image/*") }) {
-                                                Text(if (eUserAvatarUri.isEmpty()) "选择头像" else "更换头像", style = MaterialTheme.typography.labelSmall)
+                                                Text(if (eUserAvatarUri.isEmpty()) stringResource(R.string.select_avatar) else stringResource(R.string.change_avatar), style = MaterialTheme.typography.labelSmall)
                                             }
                                         }
                                     }
@@ -222,19 +225,19 @@ fun PortraitSettingsPanel(
                                                 avatarUri = eAgentAvatarUri,
                                                 size = 36.dp, modifier = Modifier.padding(end = 8.dp))
                                             OutlinedTextField(value = eAgentName, onValueChange = { eAgentName = it },
-                                                label = { Text("AI 助手名称") }, singleLine = true,
+                                                label = { Text(stringResource(R.string.ai_assistant_name)) }, singleLine = true,
                                                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp))
                                         }
                                         Spacer(Modifier.height(6.dp))
                                         Row {
                                             Spacer(Modifier.width(44.dp))
                                             OutlinedButton(onClick = { agentAvatarLauncher.launch("image/*") }) {
-                                                Text(if (eAgentAvatarUri.isEmpty()) "选择头像" else "更换头像", style = MaterialTheme.typography.labelSmall)
+                                                Text(if (eAgentAvatarUri.isEmpty()) stringResource(R.string.select_avatar) else stringResource(R.string.change_avatar), style = MaterialTheme.typography.labelSmall)
                                             }
                                         }
                                     }
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        OutlinedButton(onClick = { editing = false }) { Text("取消") }
+                                        OutlinedButton(onClick = { editing = false }) { Text(stringResource(R.string.cancel)) }
                                         Button(onClick = {
                                             editing = false
                                             val newProfile = com.medeide.jh.model.chat.UserProfile(
@@ -243,7 +246,7 @@ fun PortraitSettingsPanel(
                                             scope.launch {
                                                 userPrefs.setUserProfile(newProfile)
                                             }
-                                        }) { Text("保存") }
+                                        }) { Text(stringResource(R.string.save)) }
                                     }
                                 }
                             }
@@ -267,7 +270,7 @@ fun PortraitSettingsPanel(
                                     Icon(Icons.Default.Share, null, Modifier.size(16.dp))
                                 }
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (isSharing) "正在收集日志…" else "发送日志")
+                                Text(if (isSharing) stringResource(R.string.collecting_logs) else stringResource(R.string.send_logs))
                             }
                         }
                     }
@@ -281,7 +284,7 @@ fun PortraitSettingsPanel(
                     if (chatViewModel != null) {
                         CloudModelSettingsContent(viewModel = chatViewModel, modifier = Modifier.fillMaxWidth())
                     } else {
-                        Text("需要初始化聊天视图", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.settings_need_init_chat), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 SettingsGroup.LocalModel -> {
@@ -294,7 +297,7 @@ fun PortraitSettingsPanel(
 }
 
 @Composable
-private fun EntryCard(label: String, icon: ImageVector, onClick: () -> Unit) {
+private fun EntryCard(@StringRes labelRes: Int, icon: ImageVector, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(8.dp),
@@ -305,25 +308,25 @@ private fun EntryCard(label: String, icon: ImageVector, onClick: () -> Unit) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(12.dp))
-            Text(label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            Text(stringResource(labelRes), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }
 
 @Composable
-private fun SegmentedRow(label: String, options: List<Pair<String, String>>, current: String, onSelect: (String) -> Unit) {
+private fun SegmentedRow(@StringRes labelRes: Int, options: List<Pair<String, Int>>, current: String, onSelect: (String) -> Unit) {
     Column {
-        Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
+        Text(stringResource(labelRes), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            options.forEach { (key, labelText) ->
+            options.forEach { (key, labelTextRes) ->
                 val sel = current == key
                 Column(
                     modifier = Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
                         .clickable { onSelect(key) }.padding(vertical = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text(labelText, style = MaterialTheme.typography.labelSmall,
+                    Text(stringResource(labelTextRes), style = MaterialTheme.typography.labelSmall,
                         fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal,
                         color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                 }

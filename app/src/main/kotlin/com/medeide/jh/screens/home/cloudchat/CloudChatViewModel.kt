@@ -7,10 +7,13 @@ import androidx.lifecycle.viewModelScope
 import com.medeide.jh.core.data.logging.FileLogger
 import com.medeide.jh.core.data.repository.ConversationRepository
 import com.medeide.jh.core.data.repository.UserPreferencesRepository
+import com.medeide.jh.core.data.repository.UsageAnalyticsRepository
 import com.medeide.jh.core.data.source.remote.CloudLLMClient
 import com.medeide.jh.core.data.source.remote.ModelCancellationToken
 import com.medeide.jh.model.chat.AiBehaviorSettings
+import com.medeide.jh.model.chat.ApiUsage
 import com.medeide.jh.model.chat.ChatMessage
+import com.medeide.jh.core.data.analytics.LlmCallRecord
 import com.medeide.jh.model.chat.ChatMode
 import com.medeide.jh.model.chat.ChatRole
 import com.medeide.jh.model.chat.CloudModelProfile
@@ -41,6 +44,7 @@ class CloudChatViewModel(
     private val preferencesRepo: UserPreferencesRepository,
     private val conversationRepo: ConversationRepository,
     private val cloudLLMClient: CloudLLMClient,
+    private val usageAnalyticsRepository: UsageAnalyticsRepository,
 ) : ViewModel() {
 
     private val aiToolSet = AIToolSet(
@@ -235,6 +239,7 @@ class CloudChatViewModel(
             val toolsJson = AIToolSet.buildOpenAIToolsJson()
             var msgs = _state.value.messages + userMsg
             updateConvMsgs(convId, msgs)
+            val startTime = System.currentTimeMillis()
             val systemPrompt = buildString {
                 val un = _state.value.userName.ifEmpty { "用户" }
                 val an = _state.value.agentName
@@ -248,6 +253,7 @@ class CloudChatViewModel(
             val maxRounds = 20
             var hasToolCalls = true
             val throttle = StreamThrottle()
+            var totalUsage = ApiUsage()
 
             while (hasToolCalls && round < maxRounds) {
                 round++
@@ -281,7 +287,7 @@ class CloudChatViewModel(
                 val reasoningSb = StringBuilder()
                 val toolCalls = mutableListOf<CloudToolCall>()
 
-                try {
+                val usage = try {
                     withContext(Dispatchers.IO) {
                         cloudLLMClient.sendMessage(
                             profile = profile, systemPrompt = systemPrompt,
@@ -315,6 +321,11 @@ class CloudChatViewModel(
                     }
                     return@launch
                 }
+
+                totalUsage = ApiUsage(
+                    promptTokens = totalUsage.promptTokens + usage.third.promptTokens,
+                    completionTokens = totalUsage.completionTokens + usage.third.completionTokens,
+                )
 
                 // 刷新最终内容
                 val fullText = sb.toString()
@@ -365,7 +376,26 @@ class CloudChatViewModel(
 
             _state.update { it.copy(isLoading = false, isSending = false, engineStatus = EngineStatus.Idle) }
             updateConvMsgs(convId, msgs)
-            FileLogger.i("ChatVM", "send done rounds=$round msgs=${msgs.size}")
+            FileLogger.i("ChatVM", "send done rounds=$round msgs=${msgs.size} usage=$totalUsage")
+
+            // 真实记录 token 消耗
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    usageAnalyticsRepository.recordCall(
+                        LlmCallRecord(
+                            modelName = profile.modelName,
+                            provider = "cloud",
+                            promptTokens = totalUsage.promptTokens,
+                            completionTokens = totalUsage.completionTokens,
+                            durationMs = System.currentTimeMillis() - startTime,
+                            success = true,
+                            errorMessage = null,
+                        )
+                    )
+                } catch (e: Exception) {
+                    FileLogger.e("ChatVM", "record usage failed", e)
+                }
+            }
         }
     }
 

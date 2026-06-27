@@ -2,6 +2,7 @@ package com.medeide.jh.di
 
 import com.medeide.jh.core.data.repository.ConversationRepository
 import com.medeide.jh.core.data.repository.UserPreferencesRepository
+import com.medeide.jh.core.data.repository.UsageAnalyticsRepository
 import com.medeide.jh.core.data.source.local.LiteRTEngineManager
 import com.medeide.jh.core.data.source.local.LiteRTModelRepository
 import com.medeide.jh.core.data.source.remote.CloudLLMClient
@@ -23,6 +24,7 @@ val appModule = module {
     single { PermissionMonitor(androidContext()) }
     single { ConversationRepository(androidContext()) }
     single { CloudLLMClient() }
+    single { UsageAnalyticsRepository(androidContext()) }
 
     // LiteRT-LM 本地模型服务
     single { LiteRTEngineManager(androidContext()) }
@@ -30,6 +32,6 @@ val appModule = module {
 
     viewModel { HomeViewModel(get()) }
     viewModel { PermissionGuideViewModel(get(), get()) }
-    viewModel { CloudChatViewModel(get(), get(), get()) }
-    viewModel { LocalChatViewModel(get(), get(), get()) }
+    viewModel { CloudChatViewModel(get(), get(), get(), get()) }
+    viewModel { LocalChatViewModel(get(), get(), get(), get()) }
 }

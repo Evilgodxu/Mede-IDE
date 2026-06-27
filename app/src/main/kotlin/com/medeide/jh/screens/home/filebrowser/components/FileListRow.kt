@@ -38,11 +38,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.medeide.jh.screens.home.filebrowser.logic.FileEntry
-import com.medeide.jh.screens.home.landscape.workspace.model.isArchiveFile
-import com.medeide.jh.screens.home.landscape.workspace.model.isAudioFile
-import com.medeide.jh.screens.home.landscape.workspace.model.isImageFile
-import com.medeide.jh.screens.home.landscape.workspace.model.isTextFile
-import com.medeide.jh.screens.home.landscape.workspace.model.isVideoFile
+import com.medeide.jh.core.utils.isArchiveFile
+import com.medeide.jh.core.utils.isAudioFile
+import com.medeide.jh.core.utils.isImageFile
+import com.medeide.jh.core.utils.isTextFile
+import com.medeide.jh.core.utils.isVideoFile
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

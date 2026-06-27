@@ -4,8 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.medeide.jh.core.data.logging.FileLogger
 import com.medeide.jh.core.data.repository.UserPreferencesRepository
+import com.medeide.jh.core.data.repository.UsageAnalyticsRepository
 import com.medeide.jh.core.data.source.local.LiteRTEngineManager
 import com.medeide.jh.core.data.source.local.LiteRTModelRepository
+import com.medeide.jh.core.data.analytics.LlmCallRecord
 import com.medeide.jh.model.chat.ChatMessage
 import com.medeide.jh.model.chat.ChatRole
 import com.medeide.jh.model.chat.EngineStatus
@@ -26,6 +28,7 @@ class LocalChatViewModel(
     private val engineManager: LiteRTEngineManager,
     private val modelRepository: LiteRTModelRepository,
     private val preferencesRepo: UserPreferencesRepository,
+    private val usageAnalyticsRepository: UsageAnalyticsRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(LocalChatUiState())
@@ -196,6 +199,7 @@ class LocalChatViewModel(
             )
         }
 
+        val startTime = System.currentTimeMillis()
         sendJob = viewModelScope.launch {
             val sid = UUID.randomUUID().toString()
             val modelMsg = ChatMessage(id = sid, role = ChatRole.Model, content = "", isStreaming = true)
@@ -224,6 +228,27 @@ class LocalChatViewModel(
                             }
                             state.copy(isLoading = false, isSending = false)
                         }
+
+                        // 本地模型 token 估算记录（LiteRT 不暴露精确 token 计数）
+                        val promptTokens = (text.length / 4).coerceAtLeast(1)
+                        val completionTokens = (sb.toString().length / 4).coerceAtLeast(1)
+                        viewModelScope.launch(Dispatchers.IO) {
+                            try {
+                                usageAnalyticsRepository.recordCall(
+                                    LlmCallRecord(
+                                        modelName = _state.value.loadedModelName.ifEmpty { "local-model" },
+                                        provider = "local",
+                                        promptTokens = promptTokens,
+                                        completionTokens = completionTokens,
+                                        durationMs = System.currentTimeMillis() - startTime,
+                                        success = true,
+                                        errorMessage = null,
+                                    )
+                                )
+                            } catch (e: Exception) {
+                                FileLogger.e("LocalChatVM", "record usage failed", e)
+                            }
+                        }
                     }
 
                     override fun onError(throwable: Throwable) {
@@ -241,6 +266,24 @@ class LocalChatViewModel(
                                 engineStatus = EngineStatus.Error,
                                 engineErrorMessage = throwable.message ?: "未知错误",
                             )
+                        }
+
+                        viewModelScope.launch(Dispatchers.IO) {
+                            try {
+                                usageAnalyticsRepository.recordCall(
+                                    LlmCallRecord(
+                                        modelName = _state.value.loadedModelName.ifEmpty { "local-model" },
+                                        provider = "local",
+                                        promptTokens = (text.length / 4).coerceAtLeast(1),
+                                        completionTokens = 0,
+                                        durationMs = System.currentTimeMillis() - startTime,
+                                        success = false,
+                                        errorMessage = throwable.message,
+                                    )
+                                )
+                            } catch (e: Exception) {
+                                FileLogger.e("LocalChatVM", "record usage failed", e)
+                            }
                         }
                     }
                 },

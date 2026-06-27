@@ -1,4 +1,7 @@
-package com.medeide.jh.screens.home.landscape.workspace.model
+package com.medeide.jh.core.utils
+
+import com.medeide.jh.core.model.TabType
+import com.medeide.jh.core.model.displayNameFromPath
 
 private val imageExts = setOf("png", "jpg", "jpeg", "gif", "bmp", "webp", "svg")
 private val audioExts = setOf("mp3", "wav", "flac", "ogg", "aac", "m4a", "wma")

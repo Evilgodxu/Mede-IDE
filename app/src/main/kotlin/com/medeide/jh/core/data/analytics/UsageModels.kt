@@ -1,4 +1,4 @@
-package com.medeide.jh.data.analytics
+package com.medeide.jh.core.data.analytics
 
 /** 单次 LLM 调用记录 */
 data class LlmCallRecord(

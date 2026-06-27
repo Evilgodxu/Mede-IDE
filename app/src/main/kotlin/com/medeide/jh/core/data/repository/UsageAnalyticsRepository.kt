@@ -1,4 +1,4 @@
-package com.medeide.jh.data.repository
+package com.medeide.jh.core.data.repository
 
 import android.content.Context
 import androidx.datastore.core.DataStore
@@ -6,11 +6,11 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.medeide.jh.data.analytics.LlmCallRecord
-import com.medeide.jh.data.analytics.ModelUsageStats
-import com.medeide.jh.data.analytics.ToolCallRecord
-import com.medeide.jh.data.analytics.ToolUsageStats
-import com.medeide.jh.data.analytics.UsageStats
+import com.medeide.jh.core.data.analytics.LlmCallRecord
+import com.medeide.jh.core.data.analytics.ModelUsageStats
+import com.medeide.jh.core.data.analytics.ToolCallRecord
+import com.medeide.jh.core.data.analytics.ToolUsageStats
+import com.medeide.jh.core.data.analytics.UsageStats
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import org.json.JSONObject

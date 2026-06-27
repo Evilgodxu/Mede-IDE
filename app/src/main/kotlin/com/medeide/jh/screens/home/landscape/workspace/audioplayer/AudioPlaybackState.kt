@@ -8,13 +8,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.media3.exoplayer.ExoPlayer
+import com.medeide.jh.core.model.AudioTrack
 
 // 音频播放器 — 工作区全屏播放状态
-
-data class AudioTrack(
-    val path: String,
-    val name: String,
-)
 
 class AudioPlaybackState {
     var exoPlayer: ExoPlayer? by mutableStateOf(null)

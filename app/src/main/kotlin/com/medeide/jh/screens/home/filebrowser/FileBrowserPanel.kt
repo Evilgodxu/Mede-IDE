@@ -60,7 +60,7 @@ import com.medeide.jh.screens.home.filebrowser.logic.extractToAsync
 import com.medeide.jh.screens.home.filebrowser.logic.renameItem
 import com.medeide.jh.screens.home.filebrowser.logic.toFile
 import com.medeide.jh.screens.home.filebrowser.logic.toRealFiles
-import com.medeide.jh.screens.home.landscape.workspace.model.isArchiveFile
+import com.medeide.jh.core.utils.isArchiveFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext

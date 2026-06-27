@@ -61,13 +61,11 @@
     <string name="global_search_replace_hint">替换</string>
 
     <!-- 主题选项 -->
-    <string name="settings_theme_title">主题设置</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_light">始终浅色</string>
     <string name="theme_dark">始终深色</string>
 
     <!-- 语言选项 -->
-    <string name="settings_language_title">语言设置</string>
     <string name="language_system">跟随系统</string>
     <string name="language_chinese">简体中文</string>
     <string name="language_english">English</string>
@@ -182,9 +180,71 @@
     <string name="mcp_command">命令/地址</string>
     <string name="mcp_args">参数</string>
 
+    <!-- 设置面板 -->
+    <string name="settings_general">通用设置</string>
+    <string name="settings_role">角色定义</string>
+    <string name="settings_cloud_model">云端模型</string>
+    <string name="settings_local_model">本地模型</string>
+    <string name="settings_theme_title">主题设置</string>
+    <string name="settings_language_title">语言设置</string>
+    <string name="settings_need_init_chat">需要初始化聊天视图</string>
+    <string name="user_label">用户:</string>
+    <string name="ai_label">AI:</string>
+    <string name="not_set">未设置</string>
+    <string name="edit">编辑</string>
+    <string name="your_name">您的名称</string>
+    <string name="ai_assistant_name">AI 助手名称</string>
+    <string name="select_avatar">选择头像</string>
+    <string name="change_avatar">更换头像</string>
+    <string name="cancel">取消</string>
+    <string name="save">保存</string>
+    <string name="collecting_logs">正在收集日志…</string>
+    <string name="send_logs">发送日志</string>
 
+    <!-- 角色定义 -->
+    <string name="rules_select_role">选择角色</string>
+    <string name="rules_edit_role">编辑角色</string>
+    <!-- 用户资料 -->
+    <string name="upload_new_avatar">上传新头像</string>
+    <string name="avatar">头像</string>
+    <string name="settings_profile">个人资料</string>
+    <string name="your_name_hint">输入您的名称…</string>
+    <string name="default_ai_name">默认: AI</string>
+    <string name="select_text">选择</string>
+    <string name="change_text">更换</string>
+    <string name="ai_assistant_label">AI 助手:</string>
+    <string name="settings_title">设置</string>
+    <string name="segmented_theme_label">主题</string>
+    <string name="segmented_language_label">语言</string>
 
+    <!-- Cloud Model Settings -->
+    <string name="cloud_model_title">云端大模型</string>
+    <string name="cloud_model_desc">接入 OpenAI 兼容 API，支持 DeepSeek、Kimi、OpenAI 等。配置后自动启用。</string>
+    <string name="add_cloud_config">添加云端配置</string>
+    <string name="current">当前</string>
+    <string name="action_switch">切换</string>
+    <string name="verify_connection">验证当前连接</string>
+    <string name="edit_config">编辑配置</string>
+    <string name="config_name">配置名称</string>
+    <string name="config_name_hint">例如: DeepSeek</string>
+    <string name="api_endpoint">API 端点</string>
+    <string name="api_endpoint_hint">https://api.deepseek.com/v1</string>
+    <string name="model_name_hint">deepseek-chat</string>
+    <string name="model_name">模型名称</string>
+    <string name="select_model">选择模型</string>
+    <string name="api_key">API Key</string>
+    <string name="api_key_hint">sk-...</string>
+    <string name="context_window">上下文窗口 (token)</string>
+    <string name="max_output_tokens">输出最大 token</string>
+    <string name="max_tool_rounds">工具调用轮次上限</string>
+    <string name="test_connection">测试连接</string>
+    <string name="fetch_models">获取模型</string>
+    <string name="back_to_vendor_select">← 返回选择厂商</string>
 
-
-
+    <!-- File Operations -->
+    <string name="file_op_write">写入</string>
+    <string name="file_op_create_dir">创建目录</string>
+    <string name="file_op_delete">删除</string>
+    <string name="file_op_move">移动</string>
+    <string name="file_op_copy">复制</string>
 </resources>

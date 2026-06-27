@@ -1,4 +1,4 @@
-package com.medeide.jh.screens.home.landscape.workspace.model
+package com.medeide.jh.core.model
 
 import android.net.Uri
 

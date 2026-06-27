@@ -44,7 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.medeide.jh.data.source.local.LiteRTManager
+import com.medeide.jh.core.data.source.local.RecommendedModels
 import com.medeide.jh.model.chat.BackendType
 import com.medeide.jh.model.chat.EngineStatus
 import com.medeide.jh.model.chat.ModelParams
@@ -188,7 +188,7 @@ fun SettingsLocalModelContent(
 
         // ── 推荐下载模型 ──
         Text("推荐下载模型", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-        LiteRTManager.RECOMMENDED_MODELS.forEach { model ->
+        RecommendedModels.RECOMMENDED_MODELS.forEach { model ->
             DownloadModelCard(
                 name = model.name,
                 size = model.size,

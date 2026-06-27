@@ -43,7 +43,7 @@ import com.medeide.jh.screens.home.recent.RecentFileEntry
 import com.medeide.jh.screens.home.components.LayoutModeToggle
 import com.medeide.jh.screens.home.landscape.topbar.audioplayer.AudioControl
 import com.medeide.jh.screens.home.landscape.topbar.audioplayer.AudioPlaybackState
-import com.medeide.jh.screens.home.landscape.topbar.audioplayer.AudioTrack
+import com.medeide.jh.core.model.AudioTrack
 import com.medeide.jh.screens.home.landscape.topbar.modelselector.ModelSelector
 
 // 顶栏区

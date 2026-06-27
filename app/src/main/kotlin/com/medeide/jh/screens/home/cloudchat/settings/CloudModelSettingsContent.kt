@@ -50,11 +50,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.medeide.jh.core.data.source.remote.CloudLLMClient
+import com.medeide.jh.R
 import com.medeide.jh.model.chat.CloudModelProfile
 import com.medeide.jh.screens.home.cloudchat.CloudChatViewModel
 import kotlinx.coroutines.Dispatchers
@@ -102,9 +104,9 @@ fun CloudModelSettingsContent(
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("云端大模型", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.cloud_model_title), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 }
-                Text("接入 OpenAI 兼容 API，支持 DeepSeek、Kimi、OpenAI 等。配置后自动启用。",
+                Text(stringResource(R.string.cloud_model_desc),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -116,7 +118,7 @@ fun CloudModelSettingsContent(
             editStep = 0; testResult = null; fetchedModels = emptyList(); showEditDialog = true
         }, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Default.Add, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
-            Text("添加云端配置")
+            Text(stringResource(R.string.add_cloud_config))
         }
 
         // 配置文件列表
@@ -134,14 +136,14 @@ fun CloudModelSettingsContent(
                         Text(profile.name.ifEmpty { profile.modelName }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                         if (isActive) {
                             Icon(Icons.Default.CheckCircle, null, Modifier.size(16.dp), tint = Color(0xFF4CAF50))
-                            Spacer(Modifier.width(4.dp)); Text("当前", style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50))
+                            Spacer(Modifier.width(4.dp)); Text(stringResource(R.string.current), style = MaterialTheme.typography.labelSmall, color = Color(0xFF4CAF50))
                         }
                     }
                     Text("${profile.apiEndpoint}  |  ${profile.modelName}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (!isActive) {
                             OutlinedButton(onClick = { viewModel.switchCloudProfile(profile.id) }, modifier = Modifier.height(28.dp)) {
-                                Text("切换", style = MaterialTheme.typography.labelSmall)
+                                Text(stringResource(R.string.action_switch), style = MaterialTheme.typography.labelSmall)
                             }
                         }
                         OutlinedButton(onClick = {
@@ -150,10 +152,10 @@ fun CloudModelSettingsContent(
                             editContextWindow = profile.contextWindow; editMaxTokens = profile.maxTokens; editMaxToolRounds = profile.maxToolRounds
                             editStep = 1; testResult = null; fetchedModels = emptyList(); showEditDialog = true
                         }, modifier = Modifier.height(28.dp)) {
-                            Text("编辑", style = MaterialTheme.typography.labelSmall)
+                            Text(stringResource(R.string.edit), style = MaterialTheme.typography.labelSmall)
                         }
                         IconButton(onClick = { viewModel.removeCloudProfile(profile.id) }, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Delete, "删除", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Default.Delete, stringResource(R.string.file_op_delete), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -164,7 +166,7 @@ fun CloudModelSettingsContent(
         if (state.cloudModelProfiles.isNotEmpty()) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { viewModel.verifyCloudConnection() }) {
-                    Text("验证当前连接", style = MaterialTheme.typography.labelSmall)
+                    Text(stringResource(R.string.verify_connection), style = MaterialTheme.typography.labelSmall)
                 }
                 val verifyMsg = when {
                     state.engineStatus == com.medeide.jh.model.chat.EngineStatus.Loading && state.engineErrorMessage == "验证中…" -> "验证中…"
@@ -187,7 +189,7 @@ fun CloudModelSettingsContent(
         val dialogMaxHeight = with(LocalConfiguration.current) { (screenHeightDp.dp * 0.75f).coerceAtLeast(200.dp) }
         AlertDialog(
             onDismissRequest = { showEditDialog = false },
-            title = { Text(if (editId.isNotEmpty()) "编辑配置" else "添加云端配置") },
+            title = { Text(if (editId.isNotEmpty()) stringResource(R.string.edit_config) else stringResource(R.string.add_cloud_config)) },
             text = {
                 Column(
                     modifier = Modifier.heightIn(max = dialogMaxHeight).verticalScroll(rememberScrollState()),
@@ -210,15 +212,15 @@ fun CloudModelSettingsContent(
                             }
                         }
                     } else {
-                        OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text("配置名称") }, placeholder = { Text("例如: DeepSeek") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                        OutlinedTextField(value = editEndpoint, onValueChange = { editEndpoint = it; fetchedModels = emptyList() }, label = { Text("API 端点") }, placeholder = { Text("https://api.deepseek.com/v1") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text(stringResource(R.string.config_name)) }, placeholder = { Text(stringResource(R.string.config_name_hint)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        OutlinedTextField(value = editEndpoint, onValueChange = { editEndpoint = it; fetchedModels = emptyList() }, label = { Text(stringResource(R.string.api_endpoint)) }, placeholder = { Text(stringResource(R.string.api_endpoint_hint)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(value = editModel, onValueChange = { editModel = it }, label = { Text("模型名称") }, placeholder = { Text("deepseek-chat") }, modifier = Modifier.weight(1f), singleLine = true)
+                            OutlinedTextField(value = editModel, onValueChange = { editModel = it }, label = { Text(stringResource(R.string.model_name)) }, placeholder = { Text(stringResource(R.string.model_name_hint)) }, modifier = Modifier.weight(1f), singleLine = true)
                             val allOptions = (vendorPresets.find { editEndpoint.contains(it.apiEndpoint.removeSuffix("/v1").removeSuffix("/v1/"), ignoreCase = true) }?.defaultModels ?: emptyList()) + fetchedModels
                             Box {
                                 var showDropdown by remember { mutableStateOf(false) }
                                 IconButton(onClick = { if (allOptions.isNotEmpty()) showDropdown = true }) {
-                                    Icon(Icons.Default.ArrowDropDown, "选择", tint = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.Default.ArrowDropDown, stringResource(R.string.select_model), tint = MaterialTheme.colorScheme.primary)
                                 }
                                 if (showDropdown && allOptions.isNotEmpty()) {
                                     DropdownMenu(expanded = true, onDismissRequest = { showDropdown = false }, modifier = Modifier.heightIn(max = 300.dp)) {
@@ -229,12 +231,12 @@ fun CloudModelSettingsContent(
                                 }
                             }
                         }
-                        OutlinedTextField(value = editKey, onValueChange = { editKey = it }, label = { Text("API Key") }, placeholder = { Text("sk-...") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+                        OutlinedTextField(value = editKey, onValueChange = { editKey = it }, label = { Text(stringResource(R.string.api_key)) }, placeholder = { Text(stringResource(R.string.api_key_hint)) }, modifier = Modifier.fillMaxWidth(), singleLine = true,
                             visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
                             trailingIcon = { IconButton(onClick = { showKey = !showKey }) { Icon(if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility, null) } })
-                        OutlinedTextField(value = if (editContextWindow <= 0) "" else editContextWindow.toString(), onValueChange = { v -> editContextWindow = v.filter { it.isDigit() }.take(7).toIntOrNull() ?: 128000 }, label = { Text("上下文窗口 (token)") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                        OutlinedTextField(value = if (editMaxTokens <= 0) "" else editMaxTokens.toString(), onValueChange = { v -> editMaxTokens = v.filter { it.isDigit() }.take(7).toIntOrNull() ?: 16000 }, label = { Text("输出最大 token") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                        OutlinedTextField(value = editMaxToolRounds.toString(), onValueChange = { v -> editMaxToolRounds = v.filter { it.isDigit() }.take(4).toIntOrNull() ?: 200 }, label = { Text("工具调用轮次上限") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        OutlinedTextField(value = if (editContextWindow <= 0) "" else editContextWindow.toString(), onValueChange = { v -> editContextWindow = v.filter { it.isDigit() }.take(7).toIntOrNull() ?: 128000 }, label = { Text(stringResource(R.string.context_window)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        OutlinedTextField(value = if (editMaxTokens <= 0) "" else editMaxTokens.toString(), onValueChange = { v -> editMaxTokens = v.filter { it.isDigit() }.take(7).toIntOrNull() ?: 16000 }, label = { Text(stringResource(R.string.max_output_tokens)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        OutlinedTextField(value = editMaxToolRounds.toString(), onValueChange = { v -> editMaxToolRounds = v.filter { it.isDigit() }.take(4).toIntOrNull() ?: 200 }, label = { Text(stringResource(R.string.max_tool_rounds)) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
 
                         val context = LocalContext.current
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -249,7 +251,7 @@ fun CloudModelSettingsContent(
                             }, enabled = editEndpoint.isNotBlank() && !isTesting, modifier = Modifier.weight(1f)) {
                                 if (isTesting) { CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp); Spacer(Modifier.width(4.dp)) }
                                 else { Icon(Icons.Default.NetworkCheck, null, Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)) }
-                                Text("测试连接", style = MaterialTheme.typography.labelSmall)
+                                Text(stringResource(R.string.test_connection), style = MaterialTheme.typography.labelSmall)
                             }
                             OutlinedButton(onClick = {
                                 isFetchingModels = true; fetchedModels = emptyList()
@@ -262,13 +264,13 @@ fun CloudModelSettingsContent(
                             }, enabled = editEndpoint.isNotBlank() && !isFetchingModels, modifier = Modifier.weight(1f)) {
                                 if (isFetchingModels) { CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp); Spacer(Modifier.width(4.dp)) }
                                 else { Icon(Icons.Default.Refresh, null, Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)) }
-                                Text("获取模型", style = MaterialTheme.typography.labelSmall)
+                                Text(stringResource(R.string.fetch_models), style = MaterialTheme.typography.labelSmall)
                             }
                         }
                         testResult?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = if (it == "ok") Color(0xFF4CAF50) else MaterialTheme.colorScheme.error) }
 
                         if (editId.isEmpty()) {
-                            TextButton(onClick = { editStep = 0 }) { Text("← 返回选择厂商") }
+                            TextButton(onClick = { editStep = 0 }) { Text(stringResource(R.string.back_to_vendor_select)) }
                         }
                     }
                 }
@@ -284,10 +286,10 @@ fun CloudModelSettingsContent(
                             }
                             showEditDialog = false
                         }
-                    }, enabled = editEndpoint.isNotBlank() && editModel.isNotBlank()) { Text("保存") }
+                    }, enabled = editEndpoint.isNotBlank() && editModel.isNotBlank()) { Text(stringResource(R.string.save)) }
                 }
             },
-            dismissButton = { OutlinedButton(onClick = { showEditDialog = false }) { Text("取消") } },
+            dismissButton = { OutlinedButton(onClick = { showEditDialog = false }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 }

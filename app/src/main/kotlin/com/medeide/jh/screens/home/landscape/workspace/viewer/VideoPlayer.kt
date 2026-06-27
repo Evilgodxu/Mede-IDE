@@ -53,29 +53,9 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.medeide.jh.core.model.VideoPlaybackState
 import kotlinx.coroutines.delay
 import java.io.File
-
-// 视频播放状态
-class VideoPlaybackState {
-    var mediaPlayer: MediaPlayer? by mutableStateOf(null)
-    var isPlaying by mutableStateOf(false)
-    var duration by mutableFloatStateOf(0f)
-    var currentPosition by mutableFloatStateOf(0f)
-    var errorMsg by mutableStateOf<String?>(null)
-    var isPrepared by mutableStateOf(false)
-    var currentVideoPath by mutableStateOf("")
-
-    fun release() {
-        mediaPlayer?.apply {
-            if (isPlaying) stop()
-            release()
-        }
-        mediaPlayer = null
-        isPlaying = false
-        isPrepared = false
-    }
-}
 
 // 视频播放器
 @Composable
