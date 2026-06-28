@@ -86,6 +86,8 @@ fun FileBrowserPanel(
     isProjectModeActive: Boolean = false,
     singleMode: Boolean = false,
     showToolbar: Boolean = true,
+    onNavigateTo: (String) -> Unit = {},
+    onShowRecent: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -128,6 +130,7 @@ fun FileBrowserPanel(
                 holder.navigateUp()
             },
             onActivate = onActivate,
+            onShowRecent = onShowRecent,
         )
 
         HorizontalDivider(
@@ -218,11 +221,13 @@ fun FileBrowserPanel(
                                     if (isArchiveEntry) {
                                         holder.navigateArchiveTo(file.name)
                                     } else {
+                                        onNavigateTo(file.absolutePath)
                                         holder.navigateTo(file.absolutePath)
                                     }
                                 } else if (isArchiveEntry) {
                                     Toast.makeText(context, "不支持直接打开压缩包内文件", Toast.LENGTH_SHORT).show()
                                 } else if (isArchiveFile(file.name)) {
+                                    onNavigateTo(file.absolutePath)
                                     holder.navigateTo(file.absolutePath)
                                 } else {
                                     onOpenFile(file.absolutePath)
@@ -466,6 +471,7 @@ private fun PathBar(
     isActive: Boolean,
     onNavigateUp: () -> Unit,
     onActivate: () -> Unit,
+    onShowRecent: () -> Unit = {},
 ) {
     val bgColor = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
     else Color.Transparent
@@ -497,5 +503,8 @@ private fun PathBar(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
+        IconButton(onClick = onShowRecent, modifier = Modifier.size(24.dp)) {
+            Icon(imageVector = Icons.Default.History, contentDescription = "最近", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

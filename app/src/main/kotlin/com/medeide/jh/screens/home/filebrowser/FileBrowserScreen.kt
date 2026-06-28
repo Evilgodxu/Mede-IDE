@@ -42,6 +42,8 @@ fun FileBrowserScreen(
     onOpenAsProject: (String) -> Unit = {},
     onExitProjectMode: () -> Unit = {},
     isProjectModeActive: Boolean = false,
+    onNavigateTo: (String) -> Unit = {},
+    onShowRecent: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     if (rootPath.isBlank()) {
@@ -64,6 +66,8 @@ fun FileBrowserScreen(
             onOpenAsProject = onOpenAsProject,
             onExitProjectMode = onExitProjectMode,
             isProjectModeActive = isProjectModeActive,
+            onNavigateTo = onNavigateTo,
+            onShowRecent = onShowRecent,
             modifier = modifier,
         )
     } else {
@@ -75,6 +79,8 @@ fun FileBrowserScreen(
             onOpenAsProject = onOpenAsProject,
             onExitProjectMode = onExitProjectMode,
             isProjectModeActive = isProjectModeActive,
+            onNavigateTo = onNavigateTo,
+            onShowRecent = onShowRecent,
             modifier = modifier,
         )
     }
@@ -89,6 +95,8 @@ private fun SingleFileBrowser(
     onOpenAsProject: (String) -> Unit = {},
     onExitProjectMode: () -> Unit = {},
     isProjectModeActive: Boolean = false,
+    onNavigateTo: (String) -> Unit = {},
+    onShowRecent: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val holder = rememberFileBrowserStateHolder(rootPath)
@@ -108,6 +116,8 @@ private fun SingleFileBrowser(
         onExitProjectMode = onExitProjectMode,
         isProjectModeActive = isProjectModeActive,
         singleMode = true,
+        onNavigateTo = onNavigateTo,
+        onShowRecent = onShowRecent,
         modifier = modifier,
     )
 }
@@ -121,6 +131,8 @@ private fun DualFileBrowser(
     onOpenAsProject: (String) -> Unit = {},
     onExitProjectMode: () -> Unit = {},
     isProjectModeActive: Boolean = false,
+    onNavigateTo: (String) -> Unit = {},
+    onShowRecent: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -162,6 +174,8 @@ private fun DualFileBrowser(
                     scope.launch { extractFilesToDirAsync(files, rightHolder.currentPath, context) }
                 },
                 showToolbar = false,
+                onNavigateTo = onNavigateTo,
+                onShowRecent = onShowRecent,
                 modifier = Modifier.weight(1f),
             )
 
@@ -196,6 +210,43 @@ private fun DualFileBrowser(
                     scope.launch { extractFilesToDirAsync(files, rightHolder.currentPath, context) }
                 },
                 showToolbar = false,
+                onNavigateTo = onNavigateTo,
+                modifier = Modifier.weight(1f),
+            )
+
+            VerticalDivider(
+                modifier = Modifier.fillMaxHeight(),
+                thickness = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+            )
+
+            FileBrowserPanel(
+                rootPath = rightRoot,
+                holder = rightHolder,
+                panelSide = PanelSide.Right,
+                isActive = activeSide == PanelSide.Right,
+                onActivate = { activeSide = PanelSide.Right },
+                onSync = {
+                    rightRoot = leftRoot
+                    activeSide = PanelSide.Right
+                },
+                onOpenFile = onOpenFile,
+                onCopyToOtherSide = { files -> moveFiles(files, rightRoot, leftRoot, context) },
+                onMoveToOtherSide = { files -> copyFiles(files, rightRoot, leftRoot, context) },
+                onFilesDeleted = onFilesDeleted,
+                onAddToConversation = onAddToConversation,
+                onOpenAsProject = onOpenAsProject,
+                onExitProjectMode = onExitProjectMode,
+                isProjectModeActive = isProjectModeActive,
+                onExtractToLeft = { files ->
+                    scope.launch { extractFilesToDirAsync(files, leftHolder.currentPath, context) }
+                },
+                onExtractToRight = { files ->
+                    scope.launch { extractFilesToDirAsync(files, rightHolder.currentPath, context) }
+                },
+                showToolbar = false,
+                onNavigateTo = onNavigateTo,
+                onShowRecent = onShowRecent,
                 modifier = Modifier.weight(1f),
             )
         }
